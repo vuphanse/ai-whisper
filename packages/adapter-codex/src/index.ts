@@ -3,3 +3,4 @@ export const adapterCodexPackage = {
 } as const;
 
 export { createCodexProvider } from "./create-codex-provider.js";
+export type { CodexCommandConfig } from "./codex-command.js";

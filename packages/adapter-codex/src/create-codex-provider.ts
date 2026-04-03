@@ -40,6 +40,7 @@ export function createCodexProvider(config: CodexCommandConfig): CompanionProvid
 
         let stdout = "";
         let stderr = "";
+        let settled = false;
 
         child.stdout.on("data", (chunk) => {
           stdout += String(chunk);
@@ -50,6 +51,8 @@ export function createCodexProvider(config: CodexCommandConfig): CompanionProvid
         });
 
         child.on("error", (err) => {
+          if (settled) return;
+          settled = true;
           resolve({
             kind: "failure",
             content: `Failed to spawn ${config.executable}: ${err.message}`,
@@ -57,6 +60,8 @@ export function createCodexProvider(config: CodexCommandConfig): CompanionProvid
           });
         });
         child.on("close", (code) => {
+          if (settled) return;
+          settled = true;
           if (code !== 0) {
             resolve({
               kind: "failure",

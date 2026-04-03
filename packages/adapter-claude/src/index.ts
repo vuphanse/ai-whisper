@@ -3,3 +3,4 @@ export const adapterClaudePackage = {
 } as const;
 
 export { createClaudeProvider } from "./create-claude-provider.js";
+export type { ClaudeCommandConfig } from "./claude-command.js";
