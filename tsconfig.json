@@ -4,7 +4,8 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
-      "@ai-whisper/shared": ["./packages/shared/src/index.ts"]
+      "@ai-whisper/shared": ["./packages/shared/src/index.ts"],
+      "@ai-whisper/broker": ["./packages/broker/src/index.ts"]
     }
   },
   "include": ["test/**/*.ts", "vitest.config.ts"]

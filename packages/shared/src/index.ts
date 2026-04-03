@@ -56,6 +56,25 @@ export {
   type EndpointHealthState,
 } from "./endpoint-health.js";
 export {
+  companionHeartbeatSchema,
+  companionRegistrationAckSchema,
+  companionRegistrationSchema,
+  type CompanionHeartbeat,
+  type CompanionRegistration,
+  type CompanionRegistrationAck,
+} from "./companion-registration.js";
+export {
+  providerCapabilitiesSchema,
+  type ProviderCapabilities,
+} from "./provider-capabilities.js";
+export {
+  mockProviderReplySchema,
+  type CompanionProvider,
+  type MockProviderReply,
+  type ProviderWorkRequest,
+} from "./provider-contract.js";
+export {
+  providerIdentitySchema,
   createProviderIdentity,
   type ProviderIdentity,
 } from "./provider-identity.js";
