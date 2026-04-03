@@ -6,7 +6,7 @@ Phase 5 delivers the first real usable `ai-whisper` workflow.
 
 This phase is the point where the project stops being a broker, companion, and mock-provider prototype and becomes a real local collaboration tool that can launch a paired Codex and Claude session and route actual work between them.
 
-The scope is intentionally tight. Phase 5 delivers a CLI-first MVP only. In-session relay syntax, manual attach flows, and resilience polish are deferred to Phase 6.
+The scope is intentionally tight. Phase 5 delivers a CLI-first MVP only. In-session relay syntax is deferred to Phase 6. Manual attach flows, resilience polish, and broader operator tooling are deferred to Phase 7.
 
 ## MVP Definition
 
@@ -45,7 +45,7 @@ Phase 5 does not include:
 - automatic context capture from normal live session conversation
 - git-diff shorthand or implicit artifact discovery
 
-Those are reserved for Phase 6.
+Those are reserved for later phases. Phase 6 focuses on in-session relay workflow. Phase 7 takes on attach, recovery, and broader operator tooling.
 
 ## Command Surface
 
@@ -202,11 +202,15 @@ Tests may use controlled provider/session doubles where direct live Codex or Cla
 
 Phase 5 is complete when the product is usable through the CLI alone.
 
-Phase 6 then becomes the refinement phase for:
+Phase 6 then becomes the in-session relay workflow phase for:
 
-- in-session relay syntax
+- explicit `@@codex ...` and `@@claude ...` relay inside attached live sessions
+- minimal acknowledgement and reply-summary polish needed to make relay usable
+- preserving the existing CLI `tell` path as the escape hatch for new threads that require explicit artifact seeding
+
+Phase 7 then becomes the operational robustness phase for:
+
 - attach flows
 - resilience improvements
 - richer operator commands
-- UX polish
-- workflow refinement toward the original “dream workflow”
+- broader workflow refinement toward the original “dream workflow”

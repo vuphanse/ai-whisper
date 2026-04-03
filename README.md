@@ -40,4 +40,6 @@ whisper collab stop
 - Phase 2: shared contracts and broker skeleton
 - Phase 3: collaboration and thread engine
 - Phase 4: companion runtime and generic provider layer
-- Phase 5: real user workflow
+- Phase 5: CLI-first MVP
+- Phase 6: in-session relay workflow
+- Phase 7: attach, recovery, and operator tooling
