@@ -6,6 +6,8 @@ import {
   mockProviderReplySchema,
   providerCapabilitiesSchema,
 } from "../packages/shared/src/index.ts";
+import { createCodexProvider } from "../packages/adapter-codex/src/index.ts";
+import { createClaudeProvider } from "../packages/adapter-claude/src/index.ts";
 
 describe("provider and companion contracts", () => {
   it("validates provider identity, capabilities, and companion registration payloads", () => {
@@ -63,5 +65,21 @@ describe("provider and companion contracts", () => {
         transitionIntent: "awaiting_user",
       }).kind,
     ).toBe("review");
+  });
+
+  it("builds real provider adapters with distinct identities", () => {
+    expect(
+      createCodexProvider({
+        executable: "codex",
+        execArgs: ["exec"],
+      }).getIdentity().providerId,
+    ).toBe("openai-codex-cli");
+
+    expect(
+      createClaudeProvider({
+        executable: "claude",
+        execArgs: ["-p"],
+      }).getIdentity().providerId,
+    ).toBe("anthropic-claude-cli");
   });
 });
