@@ -21,7 +21,7 @@ import {
   updateCompanionHeartbeat,
 } from "../storage/repositories/companion-session-repository.js";
 import { insertCollab, getCollab } from "../storage/repositories/collab-repository.js";
-import { insertReply } from "../storage/repositories/reply-repository.js";
+import { insertReply, listRepliesForThread } from "../storage/repositories/reply-repository.js";
 import { insertSession, listSessionsForCollab as listSessions, updateSessionHealth } from "../storage/repositories/session-repository.js";
 import {
   getThread,
@@ -428,6 +428,16 @@ export function createControlService(db: Database.Database) {
         registeredAt: input.now,
       });
 
+      const existing = getCompanionSession(db, input.collabId, input.sessionId);
+      if (existing) {
+        return createCompanionAck({
+          collabId: input.collabId,
+          sessionId: input.sessionId,
+          sessionSecret: existing.sessionSecret,
+          acceptedAt: input.now,
+        });
+      }
+
       const sessionSecret = nanoid(24);
 
       insertCompanionSession(db, {
@@ -499,8 +509,14 @@ export function createControlService(db: Database.Database) {
     getThread(threadId: string) {
       return getThread(db, threadId);
     },
+    getWorkItem(workItemId: string) {
+      return getWorkItem(db, workItemId);
+    },
     listThreads(collabId: string) {
       return listThreadsForCollab(db, collabId);
+    },
+    listReplies(threadId: string) {
+      return listRepliesForThread(db, threadId);
     },
     listEventsForCollab(collabId: string) {
       return listEventsForCollab(db, collabId);

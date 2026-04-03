@@ -9,6 +9,8 @@ const sessionEntrySchema = z.object({
   sessionId: z.string(),
   providerId: z.string(),
   launchMode: launchModeSchema,
+  pid: z.number().int().positive().optional(),
+  windowLabel: z.string().optional(),
 });
 
 export const cliCollabStateSchema = z.object({
@@ -19,7 +21,11 @@ export const cliCollabStateSchema = z.object({
     sqlitePath: z.string(),
     host: z.literal("127.0.0.1"),
     port: z.number(),
+    pid: z.number(),
   }),
+  launch: z.object({
+    tmuxSession: z.string().optional(),
+  }).optional(),
   sessions: z.object({
     codex: sessionEntrySchema,
     claude: sessionEntrySchema,

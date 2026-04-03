@@ -7,7 +7,12 @@ import { createCliThreadId, createCliWorkItemId } from "../../runtime/id-factory
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { processOneTurn } from "../../runtime/on-demand-processing.js";
-import { createProviderForTarget } from "../../runtime/providers.js";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export async function runCollabTell(input: {
   workspaceRoot: string;
@@ -19,6 +24,12 @@ export async function runCollabTell(input: {
   providerOverride?: CompanionProvider;
   now: string;
 }) {
+  if (input.target !== "codex" && input.target !== "claude") {
+    throw new Error(
+      `Invalid target "${String(input.target)}". Must be "codex" or "claude".`,
+    );
+  }
+
   const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
   if (!state) {
     throw new Error("No active collab. Run `whisper collab start` first.");
@@ -49,7 +60,7 @@ export async function runCollabTell(input: {
     now: input.now,
   });
 
-  broker.control.enqueueWorkItem({
+  const workItem = broker.control.enqueueWorkItem({
     workItemId: createCliWorkItemId(input.now),
     threadId: thread.threadId,
     collabId: state.collabId,
@@ -71,14 +82,47 @@ export async function runCollabTell(input: {
     now: input.now,
   });
 
-  const reply = await processOneTurn({
-    broker,
-    collabId: state.collabId,
-    sessionId: targetSessionId,
-    provider: input.providerOverride ?? createProviderForTarget(input.target),
-    now: input.now,
-  });
+  const reply = input.providerOverride
+    ? await processOneTurn({
+        broker,
+        collabId: state.collabId,
+        sessionId: targetSessionId,
+        provider: input.providerOverride,
+        now: input.now,
+      })
+    : await waitForCompanionReply({
+        broker,
+        threadId: thread.threadId,
+        workItemId: workItem.workItemId,
+      });
 
   await broker.stop();
   return reply;
+}
+
+async function waitForCompanionReply(input: {
+  broker: ReturnType<typeof createBrokerRuntime>;
+  threadId: string;
+  workItemId: string;
+}) {
+  const timeoutAt = Date.now() + 15_000;
+
+  while (Date.now() < timeoutAt) {
+    const reply = input.broker.control
+      .listReplies(input.threadId)
+      .find((candidate) => candidate.workItemId === input.workItemId);
+
+    if (reply) {
+      return reply;
+    }
+
+    const workItem = input.broker.control.getWorkItem(input.workItemId);
+    if (workItem?.deliveryState === "failed") {
+      throw new Error(`Work item ${input.workItemId} failed without a reply payload.`);
+    }
+
+    await sleep(50);
+  }
+
+  throw new Error(`Timed out waiting for reply to work item ${input.workItemId}.`);
 }
