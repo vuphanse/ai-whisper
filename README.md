@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 1 establishes the workspace, tooling, and package boundaries only.
+This repository is being built in incremental phases. Phase 2 adds shared broker contracts, SQLite bootstrap, and a minimal broker runtime with health/status endpoints.
 
 ## Workspace Commands
 
@@ -18,9 +18,9 @@ pnpm format
 
 ## Package Layout
 
-- `packages/shared` - shared types and contract helpers
+- `packages/shared` - shared IDs, literals, and versioned schemas
 - `packages/cli` - future `whisper` command surface
-- `packages/broker` - future local collaboration broker
+- `packages/broker` - local broker runtime and storage bootstrap
 - `packages/companion-core` - future companion runtime
 - `packages/adapter-codex` - future Codex provider
 - `packages/adapter-claude` - future Claude provider
