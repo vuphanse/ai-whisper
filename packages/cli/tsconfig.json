@@ -1,17 +1,17 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "composite": true,
-    "rootDir": "src",
-    "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
-  },
-  "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../shared" },
-    { "path": "../broker" },
-    { "path": "../companion-core" },
-    { "path": "../adapter-codex" },
-    { "path": "../adapter-claude" }
-  ]
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"composite": true,
+		"rootDir": "src",
+		"outDir": "dist",
+		"tsBuildInfoFile": "dist/.tsbuildinfo"
+	},
+	"include": ["src/**/*.ts"],
+	"references": [
+		{ "path": "../shared" },
+		{ "path": "../broker" },
+		{ "path": "../companion-core" },
+		{ "path": "../adapter-codex" },
+		{ "path": "../adapter-claude" }
+	]
 }

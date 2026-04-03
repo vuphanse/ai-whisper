@@ -46,7 +46,9 @@ export function createCli(): Command {
 				now: new Date().toISOString(),
 				launchMode,
 			});
-			console.log(`Collab started: ${result.collabId} (launch: ${result.launchMode})`);
+			console.log(
+				`Collab started: ${result.collabId} (launch: ${result.launchMode})`,
+			);
 		});
 
 	collab
@@ -61,7 +63,9 @@ export function createCli(): Command {
 				console.log(`Collab active: ${status.collabId}`);
 				console.log(`  Codex session: ${status.codexSessionId}`);
 				console.log(`  Claude session: ${status.claudeSessionId}`);
-				console.log(`  Broker health: ${status.brokerHealth.ok ? "ok" : "degraded"}`);
+				console.log(
+					`  Broker health: ${status.brokerHealth.ok ? "ok" : "degraded"}`,
+				);
 				if (status.activeThread) {
 					console.log(`  Active thread: ${status.activeThread.title}`);
 				}
@@ -74,7 +78,12 @@ export function createCli(): Command {
 		.requiredOption("--target <agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--action <action>", "Explicit requested action")
-		.option("--artifact <path>", "Artifact file path. Repeat for multiple files.", collectArtifact, [])
+		.option(
+			"--artifact <path>",
+			"Artifact file path. Repeat for multiple files.",
+			collectArtifact,
+			[],
+		)
 		.option("--title <title>", "Thread title")
 		.argument("<instruction>", "The instruction to send")
 		.action(async (instruction: string, opts: TellOpts) => {
@@ -86,7 +95,9 @@ export function createCli(): Command {
 				now: new Date().toISOString(),
 			};
 			if (opts.action) {
-				tellInput.explicitAction = opts.action as NonNullable<typeof tellInput.explicitAction>;
+				tellInput.explicitAction = opts.action as NonNullable<
+					typeof tellInput.explicitAction
+				>;
 			}
 			if (opts.title) {
 				tellInput.threadTitle = opts.title;

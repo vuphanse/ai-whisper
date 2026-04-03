@@ -7,14 +7,19 @@ import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { getBrokerSqlitePath, getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
+import {
+	getBrokerSqlitePath,
+	getStateFilePath,
+} from "../packages/cli/src/runtime/paths.ts";
 import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli edge cases", () => {
 	// Edge case 1: double start
 	it("start throws if a collab is already active", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-edge-double-start-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-edge-double-start-"),
+		);
 
 		await runCollabStart({
 			workspaceRoot,
@@ -37,7 +42,9 @@ describe("cli edge cases", () => {
 
 	// Edge case 2: tell with invalid target
 	it("tell throws for an invalid target agent", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-edge-bad-target-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-edge-bad-target-"),
+		);
 		const planPath = join(workspaceRoot, "plan.md");
 		writeFileSync(planPath, "# Plan\n");
 
@@ -63,7 +70,9 @@ describe("cli edge cases", () => {
 
 	// Edge case 3: stop when no collab is active
 	it("stop returns stopped:false when no collab is active", () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-edge-stop-empty-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-edge-stop-empty-"),
+		);
 
 		const result = runCollabStop({ workspaceRoot });
 
@@ -72,7 +81,9 @@ describe("cli edge cases", () => {
 
 	// Edge case 4: status when broker sqlite is corrupted
 	it("status returns active:false when broker sqlite is corrupted", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-edge-corrupt-db-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-edge-corrupt-db-"),
+		);
 
 		writeCliCollabState(getStateFilePath(workspaceRoot), {
 			version: 1,

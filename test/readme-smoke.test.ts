@@ -6,19 +6,19 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 describe("README", () => {
-  it("documents the phase-1 developer workflow", () => {
-    const readme = readFileSync(resolve(root, "README.md"), "utf8");
+	it("documents the phase-1 developer workflow", () => {
+		const readme = readFileSync(resolve(root, "README.md"), "utf8");
 
-    expect(readme).toContain("pnpm install");
-    expect(readme).toContain("pnpm test");
-    expect(readme).toContain("pnpm typecheck");
-    expect(readme).toContain("pnpm lint");
-    expect(readme).toContain("packages/shared");
-    expect(readme).toContain("packages/broker");
-    expect(readme).toContain("whisper collab start");
-    expect(readme).toContain("whisper collab status");
-    expect(readme).toContain("whisper collab tell");
-    expect(readme).toContain("whisper collab stop");
-    expect(readme).toContain("Phase 5");
-  });
+		expect(readme).toContain("pnpm install");
+		expect(readme).toContain("pnpm test");
+		expect(readme).toContain("pnpm typecheck");
+		expect(readme).toContain("pnpm lint");
+		expect(readme).toContain("packages/shared");
+		expect(readme).toContain("packages/broker");
+		expect(readme).toContain("whisper collab start");
+		expect(readme).toContain("whisper collab status");
+		expect(readme).toContain("whisper collab tell");
+		expect(readme).toContain("whisper collab stop");
+		expect(readme).toContain("Phase 5");
+	});
 });

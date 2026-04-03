@@ -123,5 +123,5 @@ ON CONFLICT(id) DO UPDATE SET
 `;
 
 export function applyMigrations(db: Database.Database): void {
-  db.exec(initMigrationSql);
+	db.exec(initMigrationSql);
 }

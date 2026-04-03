@@ -11,7 +11,12 @@ describe("cli binary commands", () => {
 		const cli = createCli();
 
 		await cli.parseAsync([
-			"node", "whisper", "collab", "start", "--workspace", workspaceRoot,
+			"node",
+			"whisper",
+			"collab",
+			"start",
+			"--workspace",
+			workspaceRoot,
 		]);
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
@@ -22,7 +27,12 @@ describe("cli binary commands", () => {
 
 		const startCli = createCli();
 		await startCli.parseAsync([
-			"node", "whisper", "collab", "start", "--workspace", workspaceRoot,
+			"node",
+			"whisper",
+			"collab",
+			"start",
+			"--workspace",
+			workspaceRoot,
 		]);
 
 		const statusCli = createCli();
@@ -31,7 +41,12 @@ describe("cli binary commands", () => {
 		console.log = (...args: unknown[]) => captured.push(args.join(" "));
 		try {
 			await statusCli.parseAsync([
-				"node", "whisper", "collab", "status", "--workspace", workspaceRoot,
+				"node",
+				"whisper",
+				"collab",
+				"status",
+				"--workspace",
+				workspaceRoot,
 			]);
 		} finally {
 			console.log = originalLog;
@@ -44,13 +59,23 @@ describe("cli binary commands", () => {
 		const startCli = createCli();
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-bin-stop-"));
 		await startCli.parseAsync([
-			"node", "whisper", "collab", "start", "--workspace", workspaceRoot,
+			"node",
+			"whisper",
+			"collab",
+			"start",
+			"--workspace",
+			workspaceRoot,
 		]);
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
 
 		const stopCli = createCli();
 		await stopCli.parseAsync([
-			"node", "whisper", "collab", "stop", "--workspace", workspaceRoot,
+			"node",
+			"whisper",
+			"collab",
+			"stop",
+			"--workspace",
+			workspaceRoot,
 		]);
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(false);

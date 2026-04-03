@@ -1,5 +1,5 @@
 export const companionCorePackage = {
-  name: "@ai-whisper/companion-core",
+	name: "@ai-whisper/companion-core",
 } as const;
 
 export { createCompanionRuntime } from "./create-companion-runtime.js";

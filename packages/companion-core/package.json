@@ -1,21 +1,21 @@
 {
-  "name": "@ai-whisper/companion-core",
-  "private": true,
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "dependencies": {
-    "@ai-whisper/broker": "workspace:*",
-    "@ai-whisper/shared": "workspace:*"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -b --emitDeclarationOnly"
-  }
+	"name": "@ai-whisper/companion-core",
+	"private": true,
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"dependencies": {
+		"@ai-whisper/broker": "workspace:*",
+		"@ai-whisper/shared": "workspace:*"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -b --emitDeclarationOnly"
+	}
 }

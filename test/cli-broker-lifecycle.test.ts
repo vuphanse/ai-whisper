@@ -26,7 +26,9 @@ describe("broker lifecycle", () => {
 	});
 
 	it("stop kills the broker process and cleans up state", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-broker-stop-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-broker-stop-"),
+		);
 
 		await runCollabStart({
 			workspaceRoot,

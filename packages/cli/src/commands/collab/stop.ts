@@ -1,6 +1,9 @@
 import { execSync } from "node:child_process";
 import { getStateFilePath } from "../../runtime/paths.js";
-import { clearCliCollabState, readCliCollabState } from "../../runtime/state-file.js";
+import {
+	clearCliCollabState,
+	readCliCollabState,
+} from "../../runtime/state-file.js";
 
 function closeTerminalWindow(label: string): void {
 	if (process.platform === "darwin") {
@@ -12,7 +15,7 @@ function closeTerminalWindow(label: string): void {
 		return;
 	}
 
-	const escapedLabel = `'${label.replace(/'/g, `'\\''`)}'`;
+	const escapedLabel = `'${label.replace(/'/g, "'\\''")}'`;
 	execSync(`pkill -f ${escapedLabel}`, { stdio: "ignore" });
 }
 
@@ -26,9 +29,12 @@ export function runCollabStop(input: { workspaceRoot: string }) {
 
 	if (state.launch?.tmuxSession) {
 		try {
-			execSync(`tmux kill-session -t '${state.launch.tmuxSession.replace(/'/g, `'\\''`)}'`, {
-				stdio: "ignore",
-			});
+			execSync(
+				`tmux kill-session -t '${state.launch.tmuxSession.replace(/'/g, "'\\''")}'`,
+				{
+					stdio: "ignore",
+				},
+			);
 		} catch {
 			// Session may already be gone.
 		}

@@ -20,7 +20,9 @@ function sleep(ms: number): Promise<void> {
 async function main(): Promise<void> {
 	const agentArg = process.argv[2];
 	if (agentArg !== "codex" && agentArg !== "claude") {
-		throw new Error("companion-agent requires a target argument: codex or claude");
+		throw new Error(
+			"companion-agent requires a target argument: codex or claude",
+		);
 	}
 
 	const sqlitePath = requireEnv("AI_WHISPER_BROKER_SQLITE");

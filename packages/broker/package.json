@@ -1,27 +1,27 @@
 {
-  "name": "@ai-whisper/broker",
-  "private": true,
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "dependencies": {
-    "@ai-whisper/shared": "workspace:*",
-    "better-sqlite3": "^11.8.1",
-    "fastify": "^5.2.1",
-    "nanoid": "^5.1.5",
-    "zod": "^3.24.2"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -b --emitDeclarationOnly"
-  }
+	"name": "@ai-whisper/broker",
+	"private": true,
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"dependencies": {
+		"@ai-whisper/shared": "workspace:*",
+		"better-sqlite3": "^11.8.1",
+		"fastify": "^5.2.1",
+		"nanoid": "^5.1.5",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.12"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"typecheck": "tsc -b --emitDeclarationOnly"
+	}
 }

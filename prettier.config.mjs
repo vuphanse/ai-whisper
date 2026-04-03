@@ -1,5 +1,7 @@
 export default {
-  semi: true,
-  singleQuote: false,
-  trailingComma: "all"
+	useTabs: true,
+	tabWidth: 2,
+	semi: true,
+	singleQuote: false,
+	trailingComma: "all",
 };

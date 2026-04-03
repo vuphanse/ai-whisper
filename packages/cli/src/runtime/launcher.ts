@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const companionAgentPath = resolve(__dirname, "../bin/companion-agent.js");
 
 function shellQuote(value: string): string {
-	return `'${value.replace(/'/g, `'\\''`)}'`;
+	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export type LaunchResult = {
@@ -145,8 +145,12 @@ export function launchSessions(input: {
 		const tmuxSession = `whisper-${input.collabId}`;
 		base.tmuxSession = tmuxSession;
 
-		run(`tmux new-session -d -s ${shellQuote(tmuxSession)} -n codex sh -lc ${shellQuote(codexCmd)}`);
-		run(`tmux split-window -t ${shellQuote(tmuxSession)} -h sh -lc ${shellQuote(claudeCmd)}`);
+		run(
+			`tmux new-session -d -s ${shellQuote(tmuxSession)} -n codex sh -lc ${shellQuote(codexCmd)}`,
+		);
+		run(
+			`tmux split-window -t ${shellQuote(tmuxSession)} -h sh -lc ${shellQuote(claudeCmd)}`,
+		);
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;
 		base.runtime.claudeWindowLabel = claudeWindowLabel;

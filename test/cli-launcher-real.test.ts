@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { detectTmux, launchSessions } from "../packages/cli/src/runtime/launcher.ts";
+import {
+	detectTmux,
+	launchSessions,
+} from "../packages/cli/src/runtime/launcher.ts";
 import type { SpawnFn } from "../packages/cli/src/runtime/launcher.ts";
 
 const baseLaunchInput = {
@@ -24,20 +27,29 @@ describe("launcher real behavior", () => {
 			const result = launchSessions({
 				launchMode: "terminals",
 				...baseLaunchInput,
-				brokerSqlitePath: "/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+				brokerSqlitePath:
+					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
 				spawn: () => {},
 			});
 
 			expect(result.commands.codex).toContain("companion-agent.js");
-			expect(result.commands.codex).toContain("AI_WHISPER_BROKER_HOST='127.0.0.1'");
+			expect(result.commands.codex).toContain(
+				"AI_WHISPER_BROKER_HOST='127.0.0.1'",
+			);
 			expect(result.commands.codex).toContain("AI_WHISPER_BROKER_PORT='4311'");
 			expect(result.commands.codex).toContain(
 				"AI_WHISPER_BROKER_SQLITE='/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite'",
 			);
-			expect(result.commands.codex).toContain("AI_WHISPER_COLLAB_ID='collab_20260403000000000'");
-			expect(result.commands.codex).toContain("AI_WHISPER_SESSION_ID='session_codex_20260403000000000'");
+			expect(result.commands.codex).toContain(
+				"AI_WHISPER_COLLAB_ID='collab_20260403000000000'",
+			);
+			expect(result.commands.codex).toContain(
+				"AI_WHISPER_SESSION_ID='session_codex_20260403000000000'",
+			);
 
-			expect(result.commands.claude).toContain("AI_WHISPER_SESSION_ID='session_claude_20260403000000000'");
+			expect(result.commands.claude).toContain(
+				"AI_WHISPER_SESSION_ID='session_claude_20260403000000000'",
+			);
 		});
 	});
 
@@ -51,7 +63,8 @@ describe("launcher real behavior", () => {
 			const result = launchSessions({
 				launchMode: "terminals",
 				...baseLaunchInput,
-				brokerSqlitePath: "/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+				brokerSqlitePath:
+					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
 				spawn: fakeSpawn,
 			});
 
@@ -82,7 +95,8 @@ describe("launcher real behavior", () => {
 			const result = launchSessions({
 				launchMode: "tmux",
 				...baseLaunchInput,
-				brokerSqlitePath: "/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+				brokerSqlitePath:
+					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
 				spawn: fakeSpawn,
 			});
 

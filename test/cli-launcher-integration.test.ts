@@ -9,7 +9,9 @@ import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli launcher integration", () => {
 	it("start returns launched session info with chosen launch mode", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-launcher-int-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-launcher-int-"),
+		);
 
 		const result = await runCollabStart({
 			workspaceRoot,
@@ -29,7 +31,9 @@ describe("cli launcher integration", () => {
 	});
 
 	it("state file records the launch mode for each session", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-launcher-state-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-launcher-state-"),
+		);
 
 		await runCollabStart({
 			workspaceRoot,

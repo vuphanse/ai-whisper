@@ -4,15 +4,29 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import { createSessionId } from "@ai-whisper/shared";
-import { createCliCollabId, createCliSessionId } from "../../runtime/id-factory.js";
-import { launchSessions, type LaunchMode, type SpawnFn } from "../../runtime/launcher.js";
+import {
+	createCliCollabId,
+	createCliSessionId,
+} from "../../runtime/id-factory.js";
+import {
+	launchSessions,
+	type LaunchMode,
+	type SpawnFn,
+} from "../../runtime/launcher.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
-import { readCliCollabState, writeCliCollabState } from "../../runtime/state-file.js";
+import {
+	readCliCollabState,
+	writeCliCollabState,
+} from "../../runtime/state-file.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const brokerDaemonPath = resolve(__dirname, "../../bin/broker-daemon.js");
 
-function spawnBrokerDaemon(sqlitePath: string, host: string, port: number): number {
+function spawnBrokerDaemon(
+	sqlitePath: string,
+	host: string,
+	port: number,
+): number {
 	const child = spawn("node", [brokerDaemonPath], {
 		detached: true,
 		stdio: "ignore",
@@ -63,8 +77,12 @@ export async function runCollabStart(input: {
 		now: input.now,
 	});
 
-	const codexSessionId = createSessionId(createCliSessionId("codex", input.now));
-	const claudeSessionId = createSessionId(createCliSessionId("claude", input.now));
+	const codexSessionId = createSessionId(
+		createCliSessionId("codex", input.now),
+	);
+	const claudeSessionId = createSessionId(
+		createCliSessionId("claude", input.now),
+	);
 
 	broker.control.registerSession({
 		sessionId: codexSessionId,
@@ -111,21 +129,27 @@ export async function runCollabStart(input: {
 			port: brokerPort,
 			pid: brokerPid,
 		},
-		...(launch.tmuxSession ? { launch: { tmuxSession: launch.tmuxSession } } : {}),
+		...(launch.tmuxSession
+			? { launch: { tmuxSession: launch.tmuxSession } }
+			: {}),
 		sessions: {
 			codex: {
 				sessionId: codexSessionId,
 				providerId: "openai-codex-cli",
 				launchMode: input.launchMode,
 				...(launch.runtime.codexPid ? { pid: launch.runtime.codexPid } : {}),
-				...(launch.runtime.codexWindowLabel ? { windowLabel: launch.runtime.codexWindowLabel } : {}),
+				...(launch.runtime.codexWindowLabel
+					? { windowLabel: launch.runtime.codexWindowLabel }
+					: {}),
 			},
 			claude: {
 				sessionId: claudeSessionId,
 				providerId: "anthropic-claude-cli",
 				launchMode: input.launchMode,
 				...(launch.runtime.claudePid ? { pid: launch.runtime.claudePid } : {}),
-				...(launch.runtime.claudeWindowLabel ? { windowLabel: launch.runtime.claudeWindowLabel } : {}),
+				...(launch.runtime.claudeWindowLabel
+					? { windowLabel: launch.runtime.claudeWindowLabel }
+					: {}),
 			},
 		},
 		startedAt: input.now,

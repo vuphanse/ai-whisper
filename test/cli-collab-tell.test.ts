@@ -8,32 +8,34 @@ import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli collab tell", () => {
-  it("routes a work request and returns a provider-backed reply", async () => {
-    const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-phase5-tell-"));
-    const planPath = join(workspaceRoot, "plan.md");
-    writeFileSync(planPath, "# Plan\n");
+	it("routes a work request and returns a provider-backed reply", async () => {
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-phase5-tell-"),
+		);
+		const planPath = join(workspaceRoot, "plan.md");
+		writeFileSync(planPath, "# Plan\n");
 
-    await runCollabStart({
-      workspaceRoot,
-      now: "2026-04-03T00:00:00.000Z",
-      launchMode: "terminals",
-      spawnBroker: fakeBrokerSpawn(),
-      spawn: () => {},
-    });
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-03T00:00:00.000Z",
+			launchMode: "terminals",
+			spawnBroker: fakeBrokerSpawn(),
+			spawn: () => {},
+		});
 
-    await expect(
-      runCollabTell({
-        workspaceRoot,
-        target: "codex",
-        instruction: "review this plan",
-        explicitAction: "review_plan",
-        artifactPaths: [planPath],
-        threadTitle: "Review plan",
-        providerOverride: createMockProvider(),
-        now: "2026-04-03T00:00:01.000Z",
-      }),
-    ).resolves.toMatchObject({
-      kind: "review",
-    });
-  });
+		await expect(
+			runCollabTell({
+				workspaceRoot,
+				target: "codex",
+				instruction: "review this plan",
+				explicitAction: "review_plan",
+				artifactPaths: [planPath],
+				threadTitle: "Review plan",
+				providerOverride: createMockProvider(),
+				now: "2026-04-03T00:00:01.000Z",
+			}),
+		).resolves.toMatchObject({
+			kind: "review",
+		});
+	});
 });

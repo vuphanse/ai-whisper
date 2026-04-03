@@ -1,4 +1,4 @@
 export type ClaudeCommandConfig = {
-  executable: string;
-  execArgs: string[];
+	executable: string;
+	execArgs: string[];
 };
