@@ -22,7 +22,7 @@ import {
 } from "../storage/repositories/companion-session-repository.js";
 import { insertCollab, getCollab } from "../storage/repositories/collab-repository.js";
 import { insertReply } from "../storage/repositories/reply-repository.js";
-import { insertSession } from "../storage/repositories/session-repository.js";
+import { insertSession, listSessionsForCollab as listSessions, updateSessionHealth } from "../storage/repositories/session-repository.js";
 import {
   getThread,
   insertThread,
@@ -414,6 +414,11 @@ export function createControlService(db: Database.Database) {
         throw new Error(`Unknown collab: ${input.collabId}`);
       }
 
+      const sessions = listSessions(db, input.collabId);
+      if (!sessions.some((s) => s.sessionId === input.sessionId)) {
+        throw new Error(`Unknown session: ${input.sessionId} in collab ${input.collabId}`);
+      }
+
       companionRegistrationSchema.parse({
         version: 1,
         collabId: input.collabId,
@@ -488,6 +493,8 @@ export function createControlService(db: Database.Database) {
         healthState: input.healthState,
         sentAt: input.now,
       });
+
+      updateSessionHealth(db, input.sessionId, input.healthState, input.now);
     },
     getThread(threadId: string) {
       return getThread(db, threadId);

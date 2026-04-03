@@ -25,6 +25,15 @@ export function insertSession(db: Database.Database, session: Session): void {
   );
 }
 
+export function updateSessionHealth(
+  db: Database.Database,
+  sessionId: string,
+  healthState: "healthy" | "degraded" | "offline",
+  lastSeenAt: string,
+): void {
+  db.prepare(`UPDATE session SET health_state = ?, last_seen_at = ? WHERE session_id = ?`).run(healthState, lastSeenAt, sessionId);
+}
+
 export function listSessionsForCollab(db: Database.Database, collabId: string): Session[] {
   const rows = db
     .prepare(

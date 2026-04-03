@@ -55,13 +55,32 @@ export function createCompanionRuntime(input: {
         deliveredAt: now,
       });
 
-      const reply = await input.provider.handleWork({
-        workItemId: workItem.workItemId,
-        collabId: workItem.collabId,
-        threadId: workItem.threadId,
-        requestedAction: workItem.requestedAction,
-        instruction: workItem.instruction,
-      });
+      let reply;
+      try {
+        reply = await input.provider.handleWork({
+          workItemId: workItem.workItemId,
+          collabId: workItem.collabId,
+          threadId: workItem.threadId,
+          requestedAction: workItem.requestedAction,
+          instruction: workItem.instruction,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        const failReplyId = `reply_fail_${workItem.workItemId}_${now.replace(/[^0-9]/g, "")}`;
+
+        return input.broker.control.postReply({
+          replyId: failReplyId,
+          threadId: workItem.threadId,
+          collabId: workItem.collabId,
+          workItemId: workItem.workItemId,
+          sourceSessionId: input.sessionId,
+          kind: "failure",
+          content: `Provider error: ${message}`,
+          transitionIntent: "failed",
+          artifactManifestIds: [],
+          now,
+        });
+      }
 
       const replyId = `reply_${workItem.workItemId}_${now.replace(/[^0-9]/g, "")}`;
 
