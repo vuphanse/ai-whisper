@@ -9,4 +9,10 @@ export { createBrokerRuntime, type BrokerRuntime } from "./runtime/create-broker
 export { applyMigrations } from "./storage/apply-migrations.js";
 export { openDatabase } from "./storage/open-database.js";
 export { getBrokerState } from "./storage/repositories/broker-state-repository.js";
+export {
+  createCompanionAck,
+  getCompanionSession,
+  insertCompanionSession,
+  updateCompanionHeartbeat,
+} from "./storage/repositories/companion-session-repository.js";
 export { appendEvent, listEventsForCollab } from "./storage/repositories/event-log-repository.js";

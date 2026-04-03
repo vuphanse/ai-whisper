@@ -2,14 +2,24 @@ import {
   artifactManifestSchema,
   brokerSchemaVersion,
   collabSchema,
+  companionRegistrationSchema,
+  providerCapabilitiesSchema,
+  providerIdentitySchema,
   replySchema,
   sessionSchema,
   threadSchema,
   workItemSchema,
 } from "@ai-whisper/shared";
 import type Database from "better-sqlite3";
+import { nanoid } from "nanoid";
 import { appendEvent, listEventsForCollab } from "../storage/repositories/event-log-repository.js";
 import { insertArtifactManifest } from "../storage/repositories/artifact-manifest-repository.js";
+import {
+  createCompanionAck,
+  getCompanionSession,
+  insertCompanionSession,
+  updateCompanionHeartbeat,
+} from "../storage/repositories/companion-session-repository.js";
 import { insertCollab, getCollab } from "../storage/repositories/collab-repository.js";
 import { insertReply } from "../storage/repositories/reply-repository.js";
 import { insertSession } from "../storage/repositories/session-repository.js";
@@ -24,6 +34,7 @@ import {
 import {
   getWorkItem,
   insertWorkItem,
+  listWorkItemsForThread,
   markWorkItemCompleted,
   markWorkItemDelivered,
   markWorkItemFailed,
@@ -378,6 +389,105 @@ export function createControlService(db: Database.Database) {
       });
 
       return manifest;
+    },
+    registerCompanion(input: {
+      collabId: string;
+      sessionId: string;
+      provider: {
+        providerId: string;
+        toolFamily: string;
+        providerVersion: string;
+      };
+      capabilities: {
+        supportsDirectPackets: boolean;
+        supportsNormalization: boolean;
+        supportsRelayInterception: boolean;
+        supportsLocalBuffering: boolean;
+        supportsLaunchHooks: boolean;
+        extensions: Record<string, unknown>;
+      };
+      now: string;
+    }) {
+      const collab = getCollab(db, input.collabId);
+
+      if (!collab) {
+        throw new Error(`Unknown collab: ${input.collabId}`);
+      }
+
+      companionRegistrationSchema.parse({
+        version: 1,
+        collabId: input.collabId,
+        sessionId: input.sessionId,
+        provider: providerIdentitySchema.parse(input.provider),
+        capabilities: providerCapabilitiesSchema.parse(input.capabilities),
+        registeredAt: input.now,
+      });
+
+      const sessionSecret = nanoid(24);
+
+      insertCompanionSession(db, {
+        collabId: input.collabId,
+        sessionId: input.sessionId,
+        providerJson: JSON.stringify(input.provider),
+        capabilitiesJson: JSON.stringify(input.capabilities),
+        sessionSecret,
+        registeredAt: input.now,
+      });
+
+      return createCompanionAck({
+        collabId: input.collabId,
+        sessionId: input.sessionId,
+        sessionSecret,
+        acceptedAt: input.now,
+      });
+    },
+    pollQueuedWorkItem(input: {
+      collabId: string;
+      sessionId: string;
+      sessionSecret: string;
+    }) {
+      const registration = getCompanionSession(db, input.collabId, input.sessionId);
+
+      if (!registration || registration.sessionSecret !== input.sessionSecret) {
+        throw new Error("Invalid companion session secret");
+      }
+
+      const threadRows = listThreadsForCollab(db, input.collabId);
+
+      for (const thread of threadRows) {
+        const workItems = listWorkItemsForThread(db, thread.threadId);
+        const next = workItems.find(
+          (workItem) =>
+            workItem.targetSessionId === input.sessionId &&
+            workItem.deliveryState === "queued",
+        );
+
+        if (next) {
+          return next;
+        }
+      }
+
+      return null;
+    },
+    recordCompanionHeartbeat(input: {
+      collabId: string;
+      sessionId: string;
+      sessionSecret: string;
+      healthState: "healthy" | "degraded" | "offline";
+      now: string;
+    }) {
+      const registration = getCompanionSession(db, input.collabId, input.sessionId);
+
+      if (!registration || registration.sessionSecret !== input.sessionSecret) {
+        throw new Error("Invalid companion session secret");
+      }
+
+      updateCompanionHeartbeat(db, {
+        collabId: input.collabId,
+        sessionId: input.sessionId,
+        healthState: input.healthState,
+        sentAt: input.now,
+      });
     },
     getThread(threadId: string) {
       return getThread(db, threadId);

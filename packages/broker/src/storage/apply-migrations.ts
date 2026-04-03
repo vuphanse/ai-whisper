@@ -92,6 +92,18 @@ CREATE TABLE IF NOT EXISTS artifact_attachment (
   attached_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS companion_session (
+  collab_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  provider_json TEXT NOT NULL,
+  capabilities_json TEXT NOT NULL,
+  session_secret TEXT NOT NULL,
+  health_state TEXT NOT NULL DEFAULT 'healthy',
+  registered_at TEXT NOT NULL,
+  last_heartbeat_at TEXT NOT NULL,
+  PRIMARY KEY (collab_id, session_id)
+);
+
 CREATE TABLE IF NOT EXISTS event_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_id TEXT NOT NULL UNIQUE,
