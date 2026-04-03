@@ -38,14 +38,16 @@
 4. Create a worktree.
 5. Implement in small scoped commits.
 6. Verify with repo commands.
-7. Review the current phase before planning the next one.
-8. Ask before merging into `master`.
+7. Ask before merging into `master`.
+8. Wait for code review before pushing to remote.
+9. Review the current phase before planning the next one.
 
 ## Branch And Merge Policy
 
 - `master` is the protected base branch.
 - Use worktrees for phase or feature work, not PRs.
 - Always ask before merging back to `master`.
+- After merging to `master`, wait for code review before pushing to remote. Do not push without explicit approval.
 - Keep commits small and scoped to one task or checkpoint.
 
 ## Verification Rules
