@@ -33,7 +33,7 @@ export function createClaudeProvider(config: ClaudeCommandConfig): CompanionProv
     handleWork(request: ProviderWorkRequest) {
       const prompt = buildClaudePrompt(request);
 
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const child = spawn(config.executable, [...config.execArgs, prompt], {
           stdio: ["ignore", "pipe", "pipe"],
         });
@@ -49,7 +49,13 @@ export function createClaudeProvider(config: ClaudeCommandConfig): CompanionProv
           stderr += String(chunk);
         });
 
-        child.on("error", reject);
+        child.on("error", (err) => {
+          resolve({
+            kind: "failure",
+            content: `Failed to spawn ${config.executable}: ${err.message}`,
+            transitionIntent: "failed",
+          });
+        });
         child.on("close", (code) => {
           if (code !== 0) {
             resolve({
