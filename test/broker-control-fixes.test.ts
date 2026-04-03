@@ -170,7 +170,7 @@ describe("control service bug fixes", () => {
     expect(updated?.completedAt).toBe("2026-04-03T00:00:06.000Z");
   });
 
-  it("finding 3: postReply with failed transition marks work item as completed", () => {
+  it("finding 3: postReply with failed transition marks work item as failed", () => {
     const { thread, collab, workItem } = setupFullFlow(runtime);
 
     runtime.control.postReply({
@@ -182,6 +182,48 @@ describe("control service bug fixes", () => {
       kind: "failure",
       content: "Cannot proceed.",
       transitionIntent: "failed",
+      artifactManifestIds: [],
+      now: "2026-04-03T00:00:06.000Z",
+    });
+
+    const updated = getWorkItem(runtime.db, workItem.workItemId);
+    expect(updated?.deliveryState).toBe("failed");
+    expect(updated?.completedAt).toBe("2026-04-03T00:00:06.000Z");
+  });
+
+  it("finding 3b: postReply with awaiting_user transition still marks work item as completed", () => {
+    const { thread, collab, workItem } = setupFullFlow(runtime);
+
+    runtime.control.postReply({
+      replyId: "reply_review1",
+      threadId: thread.threadId,
+      collabId: collab.collabId,
+      workItemId: workItem.workItemId,
+      sourceSessionId: "session_codex_1",
+      kind: "review",
+      content: "Needs user input.",
+      transitionIntent: "awaiting_user",
+      artifactManifestIds: [],
+      now: "2026-04-03T00:00:06.000Z",
+    });
+
+    const updated = getWorkItem(runtime.db, workItem.workItemId);
+    expect(updated?.deliveryState).toBe("completed");
+    expect(updated?.completedAt).toBe("2026-04-03T00:00:06.000Z");
+  });
+
+  it("finding 3c: postReply with null transitionIntent still marks work item as completed", () => {
+    const { thread, collab, workItem } = setupFullFlow(runtime);
+
+    runtime.control.postReply({
+      replyId: "reply_partial1",
+      threadId: thread.threadId,
+      collabId: collab.collabId,
+      workItemId: workItem.workItemId,
+      sourceSessionId: "session_codex_1",
+      kind: "answer",
+      content: "Partial update.",
+      transitionIntent: null,
       artifactManifestIds: [],
       now: "2026-04-03T00:00:06.000Z",
     });

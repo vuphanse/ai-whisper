@@ -139,3 +139,7 @@ export function markWorkItemDelivered(db: Database.Database, workItemId: string,
 export function markWorkItemCompleted(db: Database.Database, workItemId: string, completedAt: string): void {
   db.prepare(`UPDATE work_item SET delivery_state = 'completed', completed_at = ? WHERE work_item_id = ?`).run(completedAt, workItemId);
 }
+
+export function markWorkItemFailed(db: Database.Database, workItemId: string, completedAt: string): void {
+  db.prepare(`UPDATE work_item SET delivery_state = 'failed', completed_at = ? WHERE work_item_id = ?`).run(completedAt, workItemId);
+}

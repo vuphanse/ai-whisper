@@ -26,6 +26,7 @@ import {
   insertWorkItem,
   markWorkItemCompleted,
   markWorkItemDelivered,
+  markWorkItemFailed,
 } from "../storage/repositories/work-item-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
@@ -299,7 +300,9 @@ export function createControlService(db: Database.Database) {
 
       insertReply(db, reply);
 
-      if (reply.transitionIntent === "completed" || reply.transitionIntent === "failed") {
+      if (reply.kind === "failure") {
+        markWorkItemFailed(db, input.workItemId, input.now);
+      } else {
         markWorkItemCompleted(db, input.workItemId, input.now);
       }
 
