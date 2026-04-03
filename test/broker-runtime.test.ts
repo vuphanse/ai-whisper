@@ -7,7 +7,7 @@ import { createBrokerRuntime } from "../packages/broker/src/runtime/create-broke
 describe("broker runtime", () => {
   it("reports health and status from the minimal broker app", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ai-whisper-runtime-"));
-    const runtime = await createBrokerRuntime({
+    const runtime = createBrokerRuntime({
       sqlitePath: join(dir, "broker.sqlite"),
       host: "127.0.0.1",
       port: 4311,

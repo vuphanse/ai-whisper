@@ -24,7 +24,7 @@ export type BrokerRuntime = {
   };
 };
 
-export async function createBrokerRuntime(input: BrokerConfig): Promise<BrokerRuntime> {
+export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
   const config = brokerConfigSchema.parse(input);
   const db = openDatabase(config.sqlitePath);
 

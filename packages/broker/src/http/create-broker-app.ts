@@ -16,9 +16,9 @@ export function createBrokerApp(input: {
     logger: false,
   });
 
-  app.get("/health", async () => ({ ok: true }));
+  app.get("/health", () => ({ ok: true }));
 
-  app.get("/status", async () => brokerStatusSchema.parse(input.getStatus()));
+  app.get("/status", () => brokerStatusSchema.parse(input.getStatus()));
 
   return app;
 }
