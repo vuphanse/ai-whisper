@@ -39,13 +39,13 @@
 5. Implement in small scoped commits.
 6. Verify with repo commands.
 7. Review the current phase before planning the next one.
-8. Merge or open a PR into `master`.
+8. Ask before merging into `master`.
 
 ## Branch And Merge Policy
 
 - `master` is the protected base branch.
-- Contributors should merge through PRs into `master`.
-- Local merges into `master` are allowed only intentionally and after verification.
+- Use worktrees for phase or feature work, not PRs.
+- Always ask before merging back to `master`.
 - Keep commits small and scoped to one task or checkpoint.
 
 ## Verification Rules
