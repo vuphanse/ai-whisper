@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 3 adds the broker-only collaboration engine: collabs, sessions, threads, work items, replies, artifact manifests, and append-only event recording.
+This repository is being built in incremental phases. Phase 4 adds the generic companion runtime, provider contract, broker-side companion registration, and a deterministic mock provider for end-to-end testing.
 
 ## Workspace Commands
 
@@ -18,10 +18,10 @@ pnpm format
 
 ## Package Layout
 
-- `packages/shared` - shared IDs, literals, event envelopes, and collaboration entity schemas
-- `packages/broker` - broker runtime, storage bootstrap, repositories, and control service
+- `packages/shared` - shared schemas for broker, provider, and companion contracts
+- `packages/broker` - broker runtime, collaboration engine, and companion registration support
+- `packages/companion-core` - generic companion runtime, provider registry, and mock provider
 - `packages/cli` - future `whisper` command surface
-- `packages/companion-core` - future companion runtime
 - `packages/adapter-codex` - future Codex provider
 - `packages/adapter-claude` - future Claude provider
 

@@ -30,20 +30,20 @@ export function createMockProvider(): CompanionProvider {
     getHealthState() {
       return "healthy";
     },
-    async handleWork(request: ProviderWorkRequest): Promise<MockProviderReply> {
+    handleWork(request: ProviderWorkRequest): Promise<MockProviderReply> {
       if (request.requestedAction === "review_plan") {
-        return {
+        return Promise.resolve({
           kind: "review",
           content: "Mock review: add explicit retry policy.",
           transitionIntent: "awaiting_user",
-        };
+        });
       }
 
-      return {
+      return Promise.resolve({
         kind: "answer",
         content: `Mock result for ${request.requestedAction}`,
         transitionIntent: "completed",
-      };
+      });
     },
   };
 }
