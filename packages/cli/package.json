@@ -4,14 +4,25 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "whisper": "./dist/bin/whisper.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
+  "dependencies": {
+    "@ai-whisper/adapter-claude": "workspace:*",
+    "@ai-whisper/adapter-codex": "workspace:*",
+    "@ai-whisper/broker": "workspace:*",
+    "@ai-whisper/companion-core": "workspace:*",
+    "@ai-whisper/shared": "workspace:*",
+    "commander": "^13.1.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc -b --emitDeclarationOnly"
   }
 }
