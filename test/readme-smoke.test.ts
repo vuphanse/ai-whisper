@@ -15,5 +15,10 @@ describe("README", () => {
     expect(readme).toContain("pnpm lint");
     expect(readme).toContain("packages/shared");
     expect(readme).toContain("packages/broker");
+    expect(readme).toContain("whisper collab start");
+    expect(readme).toContain("whisper collab status");
+    expect(readme).toContain("whisper collab tell");
+    expect(readme).toContain("whisper collab stop");
+    expect(readme).toContain("Phase 5");
   });
 });

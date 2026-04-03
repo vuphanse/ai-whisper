@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 4 adds the generic companion runtime, provider contract, broker-side companion registration, and a deterministic mock provider for end-to-end testing.
+This repository is being built in incremental phases. Phase 5 delivers a CLI-first MVP with the `whisper collab` workflow, real Codex and Claude providers, broker-backed turn routing, collab lifecycle commands, and active-thread-aware tell behavior.
 
 ## Workspace Commands
 
@@ -21,9 +21,18 @@ pnpm format
 - `packages/shared` - shared schemas for broker, provider, and companion contracts
 - `packages/broker` - broker runtime, collaboration engine, and companion registration support
 - `packages/companion-core` - generic companion runtime, provider registry, and mock provider
-- `packages/cli` - future `whisper` command surface
-- `packages/adapter-codex` - future Codex provider
-- `packages/adapter-claude` - future Claude provider
+- `packages/cli` - `whisper` command surface with collab lifecycle and tell commands
+- `packages/adapter-codex` - Codex provider
+- `packages/adapter-claude` - Claude provider
+
+## MVP Commands
+
+```bash
+whisper collab start
+whisper collab status
+whisper collab tell codex --action review_plan --artifact docs/plan.md "review this plan"
+whisper collab stop
+```
 
 ## Phase Roadmap
 
