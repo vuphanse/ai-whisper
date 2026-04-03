@@ -24,6 +24,7 @@ import {
 import {
   getWorkItem,
   insertWorkItem,
+  markWorkItemCompleted,
   markWorkItemDelivered,
 } from "../storage/repositories/work-item-repository.js";
 
@@ -73,6 +74,12 @@ export function createControlService(db: Database.Database) {
       capabilities: Record<string, boolean>;
       now: string;
     }) {
+      const collab = getCollab(db, input.collabId);
+
+      if (!collab) {
+        throw new Error(`Unknown collab: ${input.collabId}`);
+      }
+
       const session = sessionSchema.parse({
         version: 1,
         sessionId: input.sessionId,
@@ -86,11 +93,6 @@ export function createControlService(db: Database.Database) {
       });
 
       insertSession(db, session);
-      const collab = getCollab(db, input.collabId);
-
-      if (!collab) {
-        throw new Error(`Unknown collab: ${input.collabId}`);
-      }
 
       appendEvent(db, {
         version: brokerSchemaVersion,
@@ -111,7 +113,11 @@ export function createControlService(db: Database.Database) {
       createdBySessionId: string;
       now: string;
     }) {
-      markOnlyThreadActive(db, input.collabId, null);
+      const collab = getCollab(db, input.collabId);
+
+      if (!collab) {
+        throw new Error(`Unknown collab: ${input.collabId}`);
+      }
 
       const thread = threadSchema.parse({
         version: 1,
@@ -127,24 +133,23 @@ export function createControlService(db: Database.Database) {
         updatedAt: input.now,
       });
 
-      insertThread(db, thread);
-      markOnlyThreadActive(db, input.collabId, thread.threadId);
-      const collab = getCollab(db, input.collabId);
+      const txn = db.transaction(() => {
+        markOnlyThreadActive(db, input.collabId, null);
+        insertThread(db, thread);
+        markOnlyThreadActive(db, input.collabId, thread.threadId);
 
-      if (!collab) {
-        throw new Error(`Unknown collab: ${input.collabId}`);
-      }
-
-      appendEvent(db, {
-        version: brokerSchemaVersion,
-        eventId: buildEventId("thread_created", input.threadId, input.now),
-        eventType: "thread.created",
-        collabId: input.collabId,
-        workspaceRoot: collab.workspaceRoot,
-        timestamp: input.now,
-        payload: { status: "created" },
+        appendEvent(db, {
+          version: brokerSchemaVersion,
+          eventId: buildEventId("thread_created", input.threadId, input.now),
+          eventType: "thread.created",
+          collabId: input.collabId,
+          workspaceRoot: collab.workspaceRoot,
+          timestamp: input.now,
+          payload: { status: "created" },
+        });
       });
 
+      txn();
       return thread;
     },
     enqueueWorkItem(input: {
@@ -267,6 +272,16 @@ export function createControlService(db: Database.Database) {
         throw new Error(`Unknown collab: ${input.collabId}`);
       }
 
+      const workItem = getWorkItem(db, input.workItemId);
+
+      if (!workItem) {
+        throw new Error(`Unknown work item: ${input.workItemId}`);
+      }
+
+      if (workItem.threadId !== input.threadId || workItem.collabId !== input.collabId) {
+        throw new Error(`Work item ${input.workItemId} does not belong to thread ${input.threadId} / collab ${input.collabId}`);
+      }
+
       const reply = replySchema.parse({
         version: 1,
         replyId: input.replyId,
@@ -283,6 +298,10 @@ export function createControlService(db: Database.Database) {
       });
 
       insertReply(db, reply);
+
+      if (reply.transitionIntent === "completed" || reply.transitionIntent === "failed") {
+        markWorkItemCompleted(db, input.workItemId, input.now);
+      }
 
       if (reply.transitionIntent) {
         updateThreadState(db, input.threadId, reply.transitionIntent, input.now);
