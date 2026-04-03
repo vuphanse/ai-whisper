@@ -1,5 +1,7 @@
 import { Command } from "commander";
 
 export function createCli(): Command {
-  return new Command().name("whisper").description("ai-whisper CLI");
+  const cli = new Command().name("whisper").description("ai-whisper CLI");
+  cli.command("collab");
+  return cli;
 }

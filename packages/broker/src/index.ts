@@ -16,3 +16,4 @@ export {
   updateCompanionHeartbeat,
 } from "./storage/repositories/companion-session-repository.js";
 export { appendEvent, listEventsForCollab } from "./storage/repositories/event-log-repository.js";
+export { getSession, insertSession, listSessionsForCollab, updateSessionHealth } from "./storage/repositories/session-repository.js";
