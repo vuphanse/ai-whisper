@@ -3,13 +3,14 @@ import { dirname } from "node:path";
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import { createSessionId } from "@ai-whisper/shared";
 import { createCliCollabId, createCliSessionId } from "../../runtime/id-factory.js";
+import type { LaunchMode } from "../../runtime/launcher.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
 import { writeCliCollabState } from "../../runtime/state-file.js";
 
 export async function runCollabStart(input: {
   workspaceRoot: string;
   now: string;
-  launchMode: "tmux" | "terminals";
+  launchMode: LaunchMode;
 }) {
   const sqlitePath = getBrokerSqlitePath(input.workspaceRoot);
   mkdirSync(dirname(sqlitePath), { recursive: true });

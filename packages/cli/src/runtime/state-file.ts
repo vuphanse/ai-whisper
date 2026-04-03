@@ -1,21 +1,33 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { z } from "zod";
+import type { LaunchMode } from "./launcher.js";
 
-export type CliCollabState = {
-  version: 1;
-  collabId: string;
-  workspaceRoot: string;
-  broker: {
-    sqlitePath: string;
-    host: "127.0.0.1";
-    port: number;
-  };
-  sessions: {
-    codex: { sessionId: string; providerId: string; launchMode: "tmux" | "terminals" };
-    claude: { sessionId: string; providerId: string; launchMode: "tmux" | "terminals" };
-  };
-  startedAt: string;
-};
+const launchModeSchema: z.ZodType<LaunchMode> = z.enum(["tmux", "terminals"]);
+
+const sessionEntrySchema = z.object({
+  sessionId: z.string(),
+  providerId: z.string(),
+  launchMode: launchModeSchema,
+});
+
+export const cliCollabStateSchema = z.object({
+  version: z.literal(1),
+  collabId: z.string(),
+  workspaceRoot: z.string(),
+  broker: z.object({
+    sqlitePath: z.string(),
+    host: z.literal("127.0.0.1"),
+    port: z.number(),
+  }),
+  sessions: z.object({
+    codex: sessionEntrySchema,
+    claude: sessionEntrySchema,
+  }),
+  startedAt: z.string(),
+});
+
+export type CliCollabState = z.infer<typeof cliCollabStateSchema>;
 
 export function writeCliCollabState(path: string, state: CliCollabState): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -24,7 +36,7 @@ export function writeCliCollabState(path: string, state: CliCollabState): void {
 
 export function readCliCollabState(path: string): CliCollabState | null {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as CliCollabState;
+    return cliCollabStateSchema.parse(JSON.parse(readFileSync(path, "utf8")));
   } catch {
     return null;
   }
