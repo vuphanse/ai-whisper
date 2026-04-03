@@ -8,5 +8,6 @@ describe("cli context policy", () => {
     expect(requiresExplicitArtifacts("review_diff")).toBe(true);
     expect(requiresExplicitArtifacts("validate_against_plan")).toBe(true);
     expect(requiresExplicitArtifacts("answer_question")).toBe(false);
+    expect(requiresExplicitArtifacts("request_clarification")).toBe(false);
   });
 });
