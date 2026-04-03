@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@ai-whisper/shared": resolve(__dirname, "packages/shared/src/index.ts"),
+      "@ai-whisper/broker": resolve(__dirname, "packages/broker/src/index.ts"),
     },
   },
   test: {
