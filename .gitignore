@@ -1,4 +1,5 @@
 .worktrees/
+docs/superpowers/plans/
 node_modules
 dist
 coverage
