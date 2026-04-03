@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
+import { createControlService } from "../control/create-control-service.js";
 import { createBrokerApp } from "../http/create-broker-app.js";
 import { brokerConfigSchema, type BrokerConfig } from "../config.js";
 import { applyMigrations } from "../storage/apply-migrations.js";
@@ -10,6 +11,7 @@ export type BrokerRuntime = {
   app: FastifyInstance;
   config: BrokerConfig;
   db: Database.Database;
+  control: ReturnType<typeof createControlService>;
   start(): Promise<void>;
   stop(): Promise<void>;
   getHealth(): { readonly ok: true };
@@ -30,6 +32,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 
   applyMigrations(db);
 
+  const control = createControlService(db);
   const app = createBrokerApp({
     getStatus: () => ({
       version: 1 as const,
@@ -46,6 +49,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
     app,
     config,
     db,
+    control,
     async start(): Promise<void> {
       await app.listen({
         host: config.host,

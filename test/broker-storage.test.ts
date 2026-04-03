@@ -7,8 +7,8 @@ import { getBrokerState } from "../packages/broker/src/storage/repositories/brok
 import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
 
 describe("broker storage bootstrap", () => {
-  it("creates broker state and event log tables", () => {
-    const dir = mkdtempSync(join(tmpdir(), "ai-whisper-phase2-"));
+  it("creates broker state and the phase 3 collaboration tables", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ai-whisper-phase3-"));
     const db = openDatabase(join(dir, "broker.sqlite"));
 
     applyMigrations(db);
@@ -18,12 +18,19 @@ describe("broker storage bootstrap", () => {
       migrated: true,
     });
 
-    const eventLogTable = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'event_log'",
-      )
-      .get() as { name: string } | undefined;
+    const eventLogColumns = db
+      .prepare("PRAGMA table_info(event_log)")
+      .all() as Array<{ name: string }>;
 
-    expect(eventLogTable?.name).toBe("event_log");
+    expect(eventLogColumns.map((column) => column.name)).toEqual([
+      "id",
+      "event_id",
+      "schema_version",
+      "event_type",
+      "collab_id",
+      "workspace_root",
+      "payload_json",
+      "created_at",
+    ]);
   });
 });

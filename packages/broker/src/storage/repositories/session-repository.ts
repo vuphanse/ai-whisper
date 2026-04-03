@@ -1,0 +1,60 @@
+import type Database from "better-sqlite3";
+import { sessionSchema, type Session } from "@ai-whisper/shared";
+
+export function insertSession(db: Database.Database, session: Session): void {
+  db.prepare(
+    `INSERT INTO session (
+      session_id,
+      collab_id,
+      agent_type,
+      registration_state,
+      health_state,
+      capabilities_json,
+      registered_at,
+      last_seen_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    session.sessionId,
+    session.collabId,
+    session.agentType,
+    session.registrationState,
+    session.healthState,
+    JSON.stringify(session.capabilities),
+    session.registeredAt,
+    session.lastSeenAt,
+  );
+}
+
+export function listSessionsForCollab(db: Database.Database, collabId: string): Session[] {
+  const rows = db
+    .prepare(
+      `SELECT session_id, collab_id, agent_type, registration_state, health_state, capabilities_json, registered_at, last_seen_at
+       FROM session
+       WHERE collab_id = ?
+       ORDER BY registered_at ASC`,
+    )
+    .all(collabId) as Array<{
+      session_id: string;
+      collab_id: string;
+      agent_type: "codex" | "claude";
+      registration_state: "registered";
+      health_state: "healthy" | "degraded" | "offline";
+      capabilities_json: string;
+      registered_at: string;
+      last_seen_at: string;
+    }>;
+
+  return rows.map((row) =>
+    sessionSchema.parse({
+      version: 1,
+      sessionId: row.session_id,
+      collabId: row.collab_id,
+      agentType: row.agent_type,
+      registrationState: row.registration_state,
+      healthState: row.health_state,
+      capabilities: JSON.parse(row.capabilities_json) as Record<string, boolean>,
+      registeredAt: row.registered_at,
+      lastSeenAt: row.last_seen_at,
+    }),
+  );
+}
