@@ -2,7 +2,10 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@ai-whisper/shared": ["./packages/shared/src/index.ts"]
+    }
   },
   "include": ["test/**/*.ts", "vitest.config.ts"]
 }
