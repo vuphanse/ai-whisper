@@ -160,4 +160,53 @@ describe("codex live session", () => {
 			transitionIntent: "completed",
 		});
 	});
+
+	it("forwards terminal escape responses while broker work is pending", async () => {
+		const fakePty = createFakePty();
+		const writes: string[] = [];
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createCodexLiveSession({
+			config: { executable: "codex", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return {
+					...fakePty,
+					write(data: string) {
+						writes.push(data);
+						fakePty.write(data);
+					},
+				};
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_codex_terminal",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		});
+
+		session.writeUserInput("\u001b[1;1R");
+		session.writeUserInput("x");
+
+		expect(writes).toContain("\u001b[1;1R");
+		expect(writes).not.toContain("x");
+
+		fakePty.emitData(
+			`${beginBrokerReply("work_codex_terminal")}\n{"kind":"answer","content":"terminal","transitionIntent":"completed"}\n${endBrokerReply("work_codex_terminal")}\n`,
+		);
+
+		await expect(replyPromise).resolves.toEqual({
+			kind: "answer",
+			content: "terminal",
+			transitionIntent: "completed",
+		});
+	});
 });

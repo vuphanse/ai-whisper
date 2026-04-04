@@ -25,6 +25,10 @@ type PtyLike = {
 	kill(): void;
 };
 
+function isLikelyTerminalResponse(data: string) {
+	return data.startsWith("\u001b");
+}
+
 function createNodePty(input: { config: CodexCommandConfig; cwd: string }): PtyLike {
 	ensureNodePtySpawnHelperExecutable({
 		unixTerminalPath: nodePtyUnixTerminalPath,
@@ -140,7 +144,7 @@ export function createCodexLiveSession(input: {
 			return Promise.resolve();
 		},
 		writeUserInput(data: string) {
-			if (pending) return;
+			if (pending && !isLikelyTerminalResponse(data)) return;
 			pty?.write(data);
 		},
 		sendLocalMessage(message: string) {

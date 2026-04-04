@@ -12,22 +12,72 @@ import type { ClaudeCommandConfig } from "./claude-command.js";
 import { buildClaudeInteractiveBrokerPrompt } from "./claude-live-session-prompt.js";
 
 const REPLY_TIMEOUT_MS = 15_000;
+const SUBMIT_RETRY_MS = 1_500;
 const RECENT_OUTPUT_LIMIT = 400;
+const BRACKETED_PASTE_START = "\u001b[200~";
+const BRACKETED_PASTE_END = "\u001b[201~";
 const require = createRequire(import.meta.url);
 const nodePtyUnixTerminalPath = require.resolve("node-pty/lib/unixTerminal.js");
+
+type PtyLike = {
+	onData(handler: (data: string) => void): unknown;
+	write(data: string): void;
+	kill(): void;
+};
+
+function isLikelyTerminalResponse(data: string) {
+	return data.startsWith("\u001b");
+}
+
+function createNodePty(input: { config: ClaudeCommandConfig; cwd: string }): PtyLike {
+	ensureNodePtySpawnHelperExecutable({
+		unixTerminalPath: nodePtyUnixTerminalPath,
+	});
+	return spawn(
+		input.config.executable,
+		input.config.execArgs,
+		{
+			name: "xterm-256color",
+			cols: 120,
+			rows: 40,
+			cwd: input.cwd,
+		},
+	);
+}
+
+function submitPrompt(
+	pty: PtyLike,
+	input: { prompt: string; mode: "bracketedPaste" | "newline" },
+) {
+	if (input.mode === "newline") {
+		pty.write(input.prompt);
+		pty.write("\n");
+		return;
+	}
+
+	pty.write(
+		`${BRACKETED_PASTE_START}${input.prompt}${BRACKETED_PASTE_END}`,
+	);
+	pty.write("\r");
+}
 
 export function createClaudeLiveSession(input: {
 	config: ClaudeCommandConfig;
 	cwd: string;
 	stdout: NodeJS.WritableStream;
+	createPty?: (input: { config: ClaudeCommandConfig; cwd: string }) => PtyLike;
 }): InteractiveSessionController {
-	let pty: ReturnType<typeof spawn> | null = null;
+	let pty: PtyLike | null = null;
 	let recentOutput = "";
 	let frameState = { insideFrame: false, buffer: "" };
 	let pending:
 		| {
 				resolve: (reply: ProviderReply) => void;
 				timer: ReturnType<typeof setTimeout>;
+				retryTimer: ReturnType<typeof setTimeout>;
+				frameStarted: boolean;
+				prompt: string;
+				retried: boolean;
 		  }
 		| undefined;
 
@@ -40,11 +90,15 @@ export function createClaudeLiveSession(input: {
 
 		const result = appendInteractiveBrokerChunk(frameState, data);
 		frameState = result.state;
+		if (pending && (result.state.insideFrame || result.completedFrame !== null)) {
+			pending.frameStarted = true;
+		}
 
 		if (result.completedFrame !== null && pending) {
-			const { resolve, timer } = pending;
+			const { resolve, retryTimer, timer } = pending;
 			pending = undefined;
 			clearTimeout(timer);
+			clearTimeout(retryTimer);
 
 			let reply: ProviderReply;
 			try {
@@ -70,23 +124,19 @@ export function createClaudeLiveSession(input: {
 
 	return {
 		start() {
-			ensureNodePtySpawnHelperExecutable({
-				unixTerminalPath: nodePtyUnixTerminalPath,
+			pty = (input.createPty ?? createNodePty)({
+				config: input.config,
+				cwd: input.cwd,
 			});
-			pty = spawn(
-				input.config.executable,
-				input.config.execArgs,
-				{
-					name: "xterm-256color",
-					cols: 120,
-					rows: 40,
-					cwd: input.cwd,
-				},
-			);
 			pty.onData(handleData);
 			return Promise.resolve();
 		},
 		stop() {
+			if (pending) {
+				clearTimeout(pending.timer);
+				clearTimeout(pending.retryTimer);
+				pending = undefined;
+			}
 			if (pty) {
 				pty.kill();
 				pty = null;
@@ -94,7 +144,7 @@ export function createClaudeLiveSession(input: {
 			return Promise.resolve();
 		},
 		writeUserInput(data: string) {
-			if (pending) return;
+			if (pending && !isLikelyTerminalResponse(data)) return;
 			pty?.write(data);
 		},
 		sendLocalMessage(message: string) {
@@ -118,10 +168,12 @@ export function createClaudeLiveSession(input: {
 
 			const prompt = buildClaudeInteractiveBrokerPrompt(request);
 			frameState = { insideFrame: false, buffer: "" };
+			recentOutput = "";
 
 			return new Promise<ProviderReply>((resolve) => {
 				const timer = setTimeout(() => {
 					if (pending) {
+						clearTimeout(pending.retryTimer);
 						pending = undefined;
 						resolve({
 							kind: "failure",
@@ -130,9 +182,27 @@ export function createClaudeLiveSession(input: {
 						});
 					}
 				}, REPLY_TIMEOUT_MS);
+				const retryTimer = setTimeout(() => {
+					if (!pty || !pending || pending.frameStarted || pending.retried) {
+						return;
+					}
 
-				pending = { resolve, timer };
-				pty!.write(`${prompt}\n`);
+					pending.retried = true;
+					submitPrompt(pty, {
+						prompt: pending.prompt,
+						mode: "newline",
+					});
+				}, SUBMIT_RETRY_MS);
+
+				pending = {
+					resolve,
+					timer,
+					retryTimer,
+					frameStarted: false,
+					prompt,
+					retried: false,
+				};
+				submitPrompt(pty!, { prompt, mode: "bracketedPaste" });
 			});
 		},
 	};
