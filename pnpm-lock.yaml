@@ -44,12 +44,18 @@ importers:
       '@ai-whisper/shared':
         specifier: workspace:*
         version: link:../shared
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
 
   packages/adapter-codex:
     dependencies:
       '@ai-whisper/shared':
         specifier: workspace:*
         version: link:../shared
+      node-pty:
+        specifier: ^1.1.0
+        version: 1.1.0
 
   packages/broker:
     dependencies:
