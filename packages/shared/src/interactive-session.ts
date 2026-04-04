@@ -1,3 +1,4 @@
+import type { BrokerArtifactHandle } from "./broker-artifact.js";
 import type { ProviderReply, ProviderWorkRequest } from "./provider-contract.js";
 import type { relayTargets } from "./relay-host.js";
 
@@ -8,5 +9,5 @@ export interface InteractiveSessionController {
 	stop(): Promise<void>;
 	writeUserInput(data: string): void;
 	sendLocalMessage(message: string): void;
-	runBrokerWork(request: ProviderWorkRequest): Promise<ProviderReply>;
+	runBrokerWork(request: ProviderWorkRequest, artifactHandle: BrokerArtifactHandle): Promise<ProviderReply>;
 }

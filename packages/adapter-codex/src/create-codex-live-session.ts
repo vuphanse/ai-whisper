@@ -4,6 +4,8 @@ import {
 	appendInteractiveBrokerChunk,
 	ensureNodePtySpawnHelperExecutable,
 	mockProviderReplySchema,
+	InteractiveBrokerError,
+	type BrokerArtifactHandle,
 	type InteractiveSessionController,
 	type ProviderReply,
 	type ProviderWorkRequest,
@@ -112,6 +114,7 @@ export function createCodexLiveSession(input: {
 	let pending:
 		| {
 				resolve: (reply: ProviderReply) => void;
+				reject: (err: InteractiveBrokerError) => void;
 				timer: ReturnType<typeof setTimeout>;
 				retryTimer: ReturnType<typeof setTimeout>;
 				submitTimer: ReturnType<typeof setTimeout>;
@@ -142,7 +145,7 @@ export function createCodexLiveSession(input: {
 		}
 
 		if (result.completedFrame !== null && pending) {
-			const { resolve, retryTimer, timer } = pending;
+			const { resolve, reject, retryTimer, timer } = pending;
 			clearTimeout(pending.submitTimer);
 			clearTimeout(pending.frameArmTimer);
 			pending = undefined;
@@ -155,11 +158,8 @@ export function createCodexLiveSession(input: {
 					JSON.parse(result.completedFrame),
 				);
 			} catch {
-				reply = {
-					kind: "failure",
-					content: `Invalid broker reply JSON: ${result.completedFrame.slice(0, 200)}`,
-					transitionIntent: "failed",
-				};
+				reject(new InteractiveBrokerError("invalid_reply", `Invalid broker reply JSON: ${result.completedFrame.slice(0, 200)}`));
+				return;
 			}
 
 			resolve(reply);
@@ -186,7 +186,9 @@ export function createCodexLiveSession(input: {
 				clearTimeout(pending.retryTimer);
 				clearTimeout(pending.submitTimer);
 				clearTimeout(pending.frameArmTimer);
+				const { reject } = pending;
 				pending = undefined;
+				reject(new InteractiveBrokerError("submit_failed", "Session stopped while broker work was pending"));
 			}
 			if (pty) {
 				pty.kill();
@@ -201,27 +203,19 @@ export function createCodexLiveSession(input: {
 		sendLocalMessage(message: string) {
 			input.stdout.write(message);
 		},
-		runBrokerWork(request: ProviderWorkRequest): Promise<ProviderReply> {
+		runBrokerWork(request: ProviderWorkRequest, artifactHandle: BrokerArtifactHandle): Promise<ProviderReply> {
 			if (!pty) {
-				return Promise.resolve({
-					kind: "failure",
-					content: "PTY session is not running",
-					transitionIntent: "failed",
-				});
+				throw new InteractiveBrokerError("submit_failed", "PTY session is not running");
 			}
 			if (pending) {
-				return Promise.resolve({
-					kind: "failure",
-					content: "Another broker work request is already in progress",
-					transitionIntent: "failed",
-				});
+				throw new InteractiveBrokerError("submit_failed", "Another broker work request is already in progress");
 			}
 
-			const prompt = buildCodexInteractiveBrokerPrompt(request);
+			const prompt = buildCodexInteractiveBrokerPrompt(artifactHandle.requestFilePath, artifactHandle.workItemId);
 			frameState = { insideFrame: false, buffer: "" };
 			recentOutput = "";
 
-			return new Promise<ProviderReply>((resolve) => {
+			return new Promise<ProviderReply>((resolve, reject) => {
 				const scheduleAttempt = (attempt: SubmitAttempt) => {
 					writePromptPrelude(pty!, {
 						prompt,
@@ -244,11 +238,7 @@ export function createCodexLiveSession(input: {
 						clearTimeout(pending.retryTimer);
 						clearTimeout(pending.submitTimer);
 						pending = undefined;
-						resolve({
-							kind: "failure",
-							content: `Broker work timed out after ${REPLY_TIMEOUT_MS}ms. Recent output: ${recentOutput.slice(-200)}`,
-							transitionIntent: "failed",
-						});
+						reject(new InteractiveBrokerError("timed_out", `Broker work timed out after ${REPLY_TIMEOUT_MS}ms. Recent output: ${recentOutput.slice(-200)}`));
 					}
 				}, REPLY_TIMEOUT_MS);
 				const retryTimer = setTimeout(() => {
@@ -270,6 +260,7 @@ export function createCodexLiveSession(input: {
 
 				pending = {
 					resolve,
+					reject,
 					timer,
 					retryTimer,
 					submitTimer: undefined as unknown as ReturnType<typeof setTimeout>,

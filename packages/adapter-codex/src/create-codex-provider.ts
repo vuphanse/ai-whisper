@@ -4,6 +4,7 @@ import {
 	type CompanionProvider,
 	type InteractiveSessionController,
 	type ProviderReply,
+	type ProviderWorkContext,
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { CodexCommandConfig } from "./codex-command.js";
@@ -39,9 +40,12 @@ export function createCodexProvider(
 		attachInteractiveSession(session: InteractiveSessionController) {
 			interactiveSession = session;
 		},
-		handleWork(request: ProviderWorkRequest): Promise<ProviderReply> {
+		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
 			if (interactiveSession) {
-				return interactiveSession.runBrokerWork(request);
+				if (!context?.artifactHandle) {
+					throw new Error("BrokerArtifactHandle is required when an interactive session is attached");
+				}
+				return interactiveSession.runBrokerWork(request, context.artifactHandle);
 			}
 
 			const prompt = buildCodexPrompt(request);

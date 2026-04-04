@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
-import { resolve } from "node:path";
 import { createCodexLiveSession } from "../../packages/adapter-codex/dist/create-codex-live-session.js";
 import { createClaudeLiveSession } from "../../packages/adapter-claude/dist/create-claude-live-session.js";
 import { buildCodexInteractiveBrokerPrompt } from "../../packages/adapter-codex/dist/codex-live-session-prompt.js";
@@ -152,8 +154,14 @@ function escapeBytes(input) {
 
 function createProbeMessage(options) {
 	if (options.probePayload === "broker-current") {
-		const request = {
-			workItemId: `work_probe_${options.provider}`,
+		// DEBUG ONLY — not the supported broker-delivery path.
+		// This probe mode mimics the file-backed prompt shape for manual inspection
+		// of PTY submission mechanics. The real delivery path goes through
+		// BrokerArtifactService inside createLiveSessionBrokerExecutor.
+		const workItemId = `work_probe_${options.provider}`;
+		const requestData = {
+			schemaVersion: 1,
+			workItemId,
 			collabId: "collab_probe",
 			threadId: "thread_probe",
 			requestedAction: "answer_question",
@@ -161,9 +169,17 @@ function createProbeMessage(options) {
 				"Reply with a minimal valid JSON object following the requested schema.",
 		};
 
+		const username = process.env["USER"] ?? process.env["USERNAME"] ?? "unknown";
+		const probeDir = join(os.tmpdir(), "ai-whisper", username, "probe-smoke", workItemId);
+		fs.mkdirSync(probeDir, { recursive: true });
+		const requestFilePath = join(probeDir, "request.json");
+		const tmpPath = `${requestFilePath}.tmp`;
+		fs.writeFileSync(tmpPath, JSON.stringify(requestData, null, 2));
+		fs.renameSync(tmpPath, requestFilePath);
+
 		return options.provider === "codex"
-			? buildCodexInteractiveBrokerPrompt(request)
-			: buildClaudeInteractiveBrokerPrompt(request);
+			? buildCodexInteractiveBrokerPrompt(requestFilePath, workItemId)
+			: buildClaudeInteractiveBrokerPrompt(requestFilePath, workItemId);
 	}
 
 	if (options.probePayload === "framed-minimal") {
@@ -221,10 +237,46 @@ function createProbeAttempts(provider, message) {
 	];
 }
 
+function createSmokeArtifactHandle(provider) {
+	const workItemId = `work_smoke_${provider}`;
+	const username = process.env["USER"] ?? process.env["USERNAME"] ?? "unknown";
+	const artifactDirPath = join(
+		os.tmpdir(),
+		"ai-whisper",
+		username,
+		"live-session-broker",
+		`${new Date().toISOString().replace(/[:.]/g, "-")}-${workItemId}`,
+	);
+
+	const requestFilePath = join(artifactDirPath, "request.json");
+	const statusFilePath = join(artifactDirPath, "status.json");
+
+	const requestData = {
+		schemaVersion: 1,
+		workItemId,
+		collabId: "collab_smoke",
+		threadId: "thread_smoke",
+		requestedAction: "answer_question",
+		instruction:
+			"Reply with a minimal valid JSON object following the requested schema.",
+	};
+
+	fs.mkdirSync(artifactDirPath, { recursive: true });
+	const tmpRequestPath = `${requestFilePath}.tmp`;
+	fs.writeFileSync(tmpRequestPath, JSON.stringify(requestData, null, 2));
+	fs.renameSync(tmpRequestPath, requestFilePath);
+
+	// status.json not pre-written; populated by BrokerArtifactService when wired
+	return { workItemId, artifactDirPath, requestFilePath, statusFilePath };
+}
+
 async function runBrokerMode(input) {
 	const { options, outputText, session } = input;
+	const artifactHandle = createSmokeArtifactHandle(options.provider);
+
+	// must match the request written into artifactHandle
 	const request = {
-		workItemId: `work_smoke_${options.provider}`,
+		workItemId: artifactHandle.workItemId,
 		collabId: "collab_smoke",
 		threadId: "thread_smoke",
 		requestedAction: "answer_question",
@@ -235,7 +287,7 @@ async function runBrokerMode(input) {
 	let timeoutId;
 	try {
 		const reply = await Promise.race([
-			session.runBrokerWork(request),
+			session.runBrokerWork(request, artifactHandle),
 			new Promise((_, reject) => {
 				timeoutId = setTimeout(() => {
 					reject(new Error(`Timed out after ${options.timeoutMs}ms`));

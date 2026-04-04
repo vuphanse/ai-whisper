@@ -1,11 +1,12 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
-import type { CompanionProvider } from "@ai-whisper/shared";
+import type { CompanionProvider, ProviderReply, ProviderWorkRequest } from "@ai-whisper/shared";
 
 export function createCompanionRuntime(input: {
 	broker: BrokerRuntime;
 	collabId: string;
 	sessionId: string;
 	provider: CompanionProvider;
+	executor?: (request: ProviderWorkRequest) => Promise<ProviderReply>;
 }) {
 	let sessionSecret: string | null = null;
 
@@ -57,13 +58,16 @@ export function createCompanionRuntime(input: {
 
 			let reply;
 			try {
-				reply = await input.provider.handleWork({
+				// No artifact context when no executor is configured (one-shot path)
+				const doWork = input.executor ?? ((req) => input.provider.handleWork(req));
+				const request: ProviderWorkRequest = {
 					workItemId: workItem.workItemId,
 					collabId: workItem.collabId,
 					threadId: workItem.threadId,
 					requestedAction: workItem.requestedAction,
 					instruction: workItem.instruction,
-				});
+				};
+				reply = await doWork(request);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				const failReplyId = `reply_fail_${workItem.workItemId}_${now.replace(/[^0-9]/g, "")}`;

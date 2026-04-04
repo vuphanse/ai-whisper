@@ -107,6 +107,10 @@ if [[ "$PROBE_PAYLOAD" != "plain" && "$PROBE_PAYLOAD" != "framed-minimal" && "$P
   exit 1
 fi
 
+# Note: --probe-payload framed-minimal and broker-current are DEBUG ONLY modes.
+# They exercise PTY submission mechanics using inline or file-backed payloads
+# and are not the supported broker-delivery path used in production.
+
 cd "$REPO_ROOT"
 
 if [[ "$NO_BUILD" -ne 1 ]]; then

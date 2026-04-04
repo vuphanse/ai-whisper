@@ -2,10 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	beginBrokerReply,
 	endBrokerReply,
+	InteractiveBrokerError,
+	type BrokerArtifactHandle,
 } from "../packages/shared/src/index.ts";
 import { createCodexLiveSession } from "../packages/adapter-codex/src/index.ts";
 import { buildCodexInteractiveBrokerPrompt } from "../packages/adapter-codex/src/codex-live-session-prompt.ts";
 import { createFakePty } from "./helpers/fake-pty.ts";
+
+const stubHandle: BrokerArtifactHandle = {
+	workItemId: "stub",
+	artifactDirPath: "/tmp/artifacts/stub",
+	requestFilePath: "/tmp/artifacts/stub/request.json",
+	statusFilePath: "/tmp/artifacts/stub/status.json",
+};
 
 function expectedLinewiseWrites(
 	prompt: string,
@@ -58,17 +67,11 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		expect(writes).toEqual(
 			expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_submit",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "",
@@ -79,13 +82,7 @@ describe("codex live session", () => {
 
 		expect(writes).toEqual(
 			expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_submit",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "\n",
@@ -137,33 +134,21 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		await vi.advanceTimersByTimeAsync(1_425);
 
 		expect(writes).toEqual([
 			...expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_retry",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "\n",
 				},
 			),
 			...expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_retry",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "",
@@ -174,26 +159,14 @@ describe("codex live session", () => {
 
 		expect(writes).toEqual([
 			...expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_retry",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "\n",
 				},
 			),
 			...expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_retry",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "\r\n",
@@ -245,7 +218,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		await vi.advanceTimersByTimeAsync(300);
@@ -254,13 +227,7 @@ describe("codex live session", () => {
 
 		expect(writes).toEqual(
 			expectedLinewiseWrites(
-				buildCodexInteractiveBrokerPrompt({
-					workItemId: "work_codex_no_retry",
-					collabId: "collab_smoke",
-					threadId: "thread_smoke",
-					requestedAction: "answer_question",
-					instruction: "Reply with valid JSON.",
-				}),
+				buildCodexInteractiveBrokerPrompt(stubHandle.requestFilePath, stubHandle.workItemId),
 				{
 					lineTerminator: "\r",
 					submitTerminator: "\n",
@@ -305,7 +272,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		fakePty.emitData(`${beginBrokerReply("work_codex_echo")}\n`);
@@ -354,7 +321,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		session.writeUserInput("\u001b[1;1R");
 		session.writeUserInput("x");
@@ -372,6 +339,116 @@ describe("codex live session", () => {
 			kind: "answer",
 			content: "terminal",
 			transitionIntent: "completed",
+		});
+	});
+
+	it("rejects with InteractiveBrokerError timed_out when reply does not arrive", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createCodexLiveSession({
+			config: { executable: "codex", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_codex_timeout",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		}, stubHandle);
+
+		const assertion = expect(replyPromise).rejects.toMatchObject({
+			name: "InteractiveBrokerError",
+			code: "timed_out",
+		});
+		await vi.advanceTimersByTimeAsync(15_000);
+		await assertion;
+	});
+
+	it("rejects pending runBrokerWork with submit_failed when stop() is called", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createCodexLiveSession({
+			config: { executable: "codex", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_codex_stop",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		}, stubHandle);
+
+		await session.stop();
+
+		await expect(replyPromise).rejects.toMatchObject({
+			name: "InteractiveBrokerError",
+			code: "submit_failed",
+		});
+	});
+
+	it("rejects with InteractiveBrokerError invalid_reply when JSON is malformed", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createCodexLiveSession({
+			config: { executable: "codex", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_codex_invalid",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		}, stubHandle);
+
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(300);
+
+		fakePty.emitData(
+			`${beginBrokerReply("work_codex_invalid")}\nnot-valid-json\n${endBrokerReply("work_codex_invalid")}\n`,
+		);
+
+		await expect(replyPromise).rejects.toMatchObject({
+			name: "InteractiveBrokerError",
+			code: "invalid_reply",
 		});
 	});
 });

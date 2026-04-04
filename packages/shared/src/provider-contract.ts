@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { BrokerArtifactHandle } from "./broker-artifact.js";
 import type { InteractiveSessionController } from "./interactive-session.js";
 import type { ProviderCapabilities } from "./provider-capabilities.js";
 import type { ProviderIdentity } from "./provider-identity.js";
@@ -23,10 +24,14 @@ export type ProviderWorkRequest = {
 	readonly instruction: string;
 };
 
+export type ProviderWorkContext = {
+	readonly artifactHandle?: BrokerArtifactHandle;
+};
+
 export interface CompanionProvider {
 	getIdentity(): ProviderIdentity;
 	getCapabilities(): ProviderCapabilities;
 	getHealthState(): "healthy" | "degraded" | "offline";
-	handleWork(request: ProviderWorkRequest): Promise<ProviderReply>;
+	handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply>;
 	attachInteractiveSession?(session: InteractiveSessionController): void;
 }
