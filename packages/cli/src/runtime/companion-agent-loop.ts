@@ -28,6 +28,10 @@ export function runCompanionAgentLoop(input: {
 
 	companion.register(new Date().toISOString());
 	let stopping = false;
+	let loopDoneResolve!: () => void;
+	const loopDone = new Promise<void>((resolve) => {
+		loopDoneResolve = resolve;
+	});
 
 	void (async () => {
 		let lastHeartbeatAt = 0;
@@ -40,10 +44,11 @@ export function runCompanionAgentLoop(input: {
 			await companion.processNext(new Date().toISOString());
 			await sleep(input.pollIntervalMs ?? 25);
 		}
+		loopDoneResolve();
 	})();
 
-	return Promise.resolve(() => {
+	return Promise.resolve(async () => {
 		stopping = true;
-		return Promise.resolve();
+		await loopDone;
 	});
 }

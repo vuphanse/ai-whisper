@@ -30,7 +30,7 @@ export function createInteractiveSessionForTarget(input: {
 		return createCodexLiveSession({
 			config: {
 				executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-				execArgs: ["exec"],
+				execArgs: [],
 			},
 			cwd: input.cwd,
 			stdout: input.stdout,
@@ -39,7 +39,7 @@ export function createInteractiveSessionForTarget(input: {
 	return createClaudeLiveSession({
 		config: {
 			executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-			execArgs: ["-p"],
+			execArgs: [],
 		},
 		cwd: input.cwd,
 		stdout: input.stdout,

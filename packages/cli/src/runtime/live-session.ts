@@ -12,7 +12,10 @@ export function createLiveSessionRuntime(input: {
 	interactiveSession: InteractiveSessionController;
 	stdin: NodeJS.ReadableStream;
 	stdout: NodeJS.WritableStream;
-	onRelay: (directive: RelayDirective) => Promise<string>;
+	onRelay: (
+		directive: RelayDirective,
+		sendNow: (message: string) => void,
+	) => Promise<string | null>;
 }) {
 	const lineBuffer = createRelayLineBuffer({
 		getError: getRelayDirectiveError,
@@ -47,7 +50,10 @@ export function createLiveSessionRuntime(input: {
 		}
 
 		try {
-			const message = await input.onRelay(directive);
+			const message = await input.onRelay(
+				directive,
+				(msg) => input.interactiveSession.sendLocalMessage(msg),
+			);
 			if (message) {
 				input.interactiveSession.sendLocalMessage(message);
 			}

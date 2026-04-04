@@ -50,7 +50,7 @@ async function main(): Promise<void> {
 		interactiveSession,
 		stdin: process.stdin,
 		stdout: process.stdout,
-		onRelay: async (directive) => {
+		onRelay: async (directive, sendNow) => {
 			const relay = enqueueRelayWork({
 				broker,
 				collabId,
@@ -62,23 +62,24 @@ async function main(): Promise<void> {
 				now: new Date().toISOString(),
 			});
 
+			sendNow(
+				`${formatRelayAcknowledgement({
+					target: directive.target,
+					createdNewThread: relay.createdNewThread,
+				})}\n`,
+			);
+
 			const reply = await waitForReply({
 				broker,
 				threadId: relay.thread.threadId,
 				workItemId: relay.workItem.workItemId,
 			});
 
-			return [
-				`${formatRelayAcknowledgement({
-					target: directive.target,
-					createdNewThread: relay.createdNewThread,
-				})}\n`,
-				`${formatRelayReplySummary({
-					target: directive.target,
-					replyKind: reply.kind,
-					content: reply.content,
-				})}\n`,
-			].join("");
+			return `${formatRelayReplySummary({
+				target: directive.target,
+				replyKind: reply.kind,
+				content: reply.content,
+			})}\n`;
 		},
 	});
 
