@@ -47,7 +47,7 @@ Codex and Claude Code can operate in the same workspace, but they do not nativel
 ### Out of Scope for v1
 
 - Full session transcript syncing
-- Terminal scraping or PTY injection as the primary transport
+- Broker-owned terminal scraping or PTY injection as the primary transport
 - Cloud-hosted relay or multi-machine synchronization
 - Arbitrary multi-agent orchestration beyond thread routing
 - Rich GUI
@@ -104,10 +104,20 @@ Responsibilities:
 - Register the local agent identity with the broker
 - Poll or subscribe for incoming thread events
 - Ask the host agent for a structured handoff or reply packet
+- Deliver broker work into an attached live session when Phase 6 relay is active
+- Return framed live-session replies back to the broker
 - Return messages and artifact references back to the broker
 - Report whether the agent can continue autonomously or requires user escalation
 
-The companion isolates `ai-whisper` from terminal-specific behavior. The broker should never depend on directly controlling an interactive terminal session as its primary mechanism.
+The broker should never depend on directly controlling an interactive terminal session as its primary mechanism. That boundary still matters in Phase 6.
+
+However, attached live-session companions may use host-side interactive terminal control as a local delivery seam for already-running Codex or Claude sessions. In that mode, the companion remains responsible for the terminal-specific behavior:
+
+- injecting a short provider-specific broker instruction into the attached session
+- reading a file-backed structured request from disk
+- extracting a framed reply back into the broker reply model
+
+This keeps terminal-specific behavior localized to the host companion/adapter layer instead of turning the broker itself into a terminal controller.
 
 ### 4. Shared Task-Thread Store
 

@@ -56,6 +56,7 @@ Phase 6 should use a split design:
 
 - provider-specific relay interception
 - shared relay workflow logic
+- coordinator-owned broker artifact lifecycle
 - provider-specific origin-session notification
 
 The shared broker and thread model remains the source of truth for routing and lifecycle. The providers own only the host-specific seams: detecting relay directives in live sessions and injecting acknowledgement or reply-summary text back into those sessions.
@@ -88,6 +89,33 @@ Phase 6 should add a shared relay service that owns:
 - reply-summary formatting
 
 This service should align with the existing semantics already used by CLI `tell` rather than inventing a second policy surface.
+
+### `BrokerArtifactService`
+
+Phase 6 should add a coordinator-owned broker artifact service for live-session relay delivery.
+
+This service should:
+
+- create one retained artifact directory per broker work item under a machine temp root rather than the user workspace
+- write an authoritative `request.json` for the work item
+- maintain `status.json` with lifecycle state, attempt history, and short readable debugging metadata
+- apply best-effort cleanup with short retention windows rather than deleting artifacts immediately
+
+This keeps artifact lifecycle and cleanup in the collaboration coordinator path instead of pushing it into provider adapters.
+
+### File-Backed Broker Delivery
+
+The supported Phase 6 broker-delivery path for attached live sessions should be file-backed.
+
+That means:
+
+- the relay service still enqueues broker work through the shared collab and thread model
+- the coordinator creates a retained request artifact after enqueueing, once the real `workItemId` exists
+- the live-session adapter injects only a short provider-specific instruction that points to the absolute `request.json` path
+- the request file is the authoritative source of truth and must override conflicting ambient session context
+- the paired session still returns the existing three-line framed reply contract
+
+Phase 6 should not treat long inline broker prompt injection as a supported delivery mechanism. Any probe or submission experiments kept for debugging remain diagnostic tools, not product behavior.
 
 ### `OriginSessionNotifier`
 
@@ -187,6 +215,8 @@ Phase 6 should add tests that prove:
 7. new-thread actions that require explicit artifacts are rejected locally
 8. acknowledgement messages appear in the origin session
 9. concise reply summaries appear in the origin session after paired replies
+10. file-backed broker delivery creates authoritative retained request artifacts outside the user workspace
+11. live-session adapters consume artifact handles without owning artifact cleanup or lifecycle policy
 
 Phase 6 should not add attach, rebinding, or recovery tests. Those belong to Phase 7.
 

@@ -116,6 +116,7 @@ Examples:
 @@codex review this plan
 @@claude implement phase 1
 @@codex validate this diff against the plan
+@@claude[new] implement this in a fresh thread
 ```
 
 ### Design rule
@@ -154,22 +155,41 @@ This preserves continuity for the common case while still allowing the first rel
 
 ## Inline Thread Override
 
-The system should support inline thread override syntax even though the default workflow should rarely require it.
+Phase 6 should support only one minimal inline override even though the default workflow should rarely require it.
 
-### Example forms
+### Supported form
 
 ```text
 @@codex[new] review this independently
-@@claude[thread:thread_123] continue implementation
 ```
 
 ### Design rule
 
-Inline overrides are optional advanced controls, not the primary UX.
+The `[new]` override is the only supported inline routing control in Phase 6.
+
+Explicit thread targeting and broader inline routing controls should be deferred to a later phase.
 
 ### Rationale
 
-This keeps the core workflow simple while preserving an escape hatch for explicit routing when needed.
+This keeps the core workflow simple while preserving one escape hatch for fresh-thread routing when needed.
+
+## New-Thread Context Rule
+
+If a relay creates a new thread for an action that requires explicit artifacts, the live session should reject it locally and direct the user back to the CLI seeding path.
+
+Example:
+
+```bash
+whisper collab tell --target codex --action review_plan --artifact docs/plan.md "review this plan"
+```
+
+### Design rule
+
+Phase 6 live-session relay should not add inline artifact arguments or broad context-override grammar.
+
+### Rationale
+
+This preserves the CLI as the explicit-context escape hatch and keeps the in-session relay grammar intentionally small.
 
 ## Local Acknowledgement Behavior
 
