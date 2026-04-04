@@ -9,5 +9,9 @@ export interface InteractiveSessionController {
 	stop(): Promise<void>;
 	writeUserInput(data: string): void;
 	sendLocalMessage(message: string): void;
-	runBrokerWork(request: ProviderWorkRequest, artifactHandle: BrokerArtifactHandle): Promise<ProviderReply>;
+	runBrokerWork(
+		request: ProviderWorkRequest,
+		artifactHandle: BrokerArtifactHandle,
+		onAttemptStart?: (attemptNumber: number, strategy: string) => void,
+	): Promise<ProviderReply>;
 }

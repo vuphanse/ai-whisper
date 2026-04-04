@@ -27,28 +27,40 @@ export function createLiveSessionBrokerExecutor(input: {
 			return { kind: "failure", content: message, transitionIntent: "failed" };
 		}
 
+		// Sweep best-effort off the critical path — deferred to next event loop tick.
+		setTimeout(() => { input.artifactService.sweep(); }, 0);
+
+		// Track which attempt number the adapter is currently on. The adapter
+		// signals each attempt start (including the initial one and any retry) via
+		// the onAttemptStart callback so that status.json reflects actual retry history.
+		let currentAttempt = 0;
+
 		let reply: ProviderReply;
 		try {
-			input.artifactService.recordAttemptStart({
+			reply = await input.provider.handleWork(request, {
 				artifactHandle,
-				attemptNumber: 1,
-				submitStrategy: "file-backed",
-				startedAt: new Date().toISOString(),
+				onAttemptStart: (attemptNumber, strategy) => {
+					currentAttempt = attemptNumber;
+					input.artifactService.recordAttemptStart({
+						artifactHandle,
+						attemptNumber,
+						submitStrategy: strategy,
+						startedAt: new Date().toISOString(),
+					});
+				},
 			});
-
-			input.artifactService.sweep();
-
-			reply = await input.provider.handleWork(request, { artifactHandle });
 		} catch (err) {
 			if (err instanceof InteractiveBrokerError) {
 				const code = err.code;
-				input.artifactService.recordAttemptResult({
-					artifactHandle,
-					attemptNumber: 1,
-					result: code,
-					endedAt: new Date().toISOString(),
-					...(err.outputTail !== undefined ? { outputTail: err.outputTail } : {}),
-				});
+				if (currentAttempt > 0) {
+					input.artifactService.recordAttemptResult({
+						artifactHandle,
+						attemptNumber: currentAttempt,
+						result: code,
+						endedAt: new Date().toISOString(),
+						...(err.outputTail !== undefined ? { outputTail: err.outputTail } : {}),
+					});
+				}
 				input.artifactService.recordFailed({
 					artifactHandle,
 					state: code,
@@ -58,13 +70,15 @@ export function createLiveSessionBrokerExecutor(input: {
 			}
 
 			const message = err instanceof Error ? err.message : String(err);
-			input.artifactService.recordAttemptResult({
-				artifactHandle,
-				attemptNumber: 1,
-				result: "submit_failed",
-				endedAt: new Date().toISOString(),
-				outputTail: message,
-			});
+			if (currentAttempt > 0) {
+				input.artifactService.recordAttemptResult({
+					artifactHandle,
+					attemptNumber: currentAttempt,
+					result: "submit_failed",
+					endedAt: new Date().toISOString(),
+					outputTail: message,
+				});
+			}
 			input.artifactService.recordFailed({
 				artifactHandle,
 				state: "submit_failed",
@@ -73,12 +87,14 @@ export function createLiveSessionBrokerExecutor(input: {
 			return { kind: "failure", content: message, transitionIntent: "failed" };
 		}
 
-		input.artifactService.recordAttemptResult({
-			artifactHandle,
-			attemptNumber: 1,
-			result: "replied",
-			endedAt: new Date().toISOString(),
-		});
+		if (currentAttempt > 0) {
+			input.artifactService.recordAttemptResult({
+				artifactHandle,
+				attemptNumber: currentAttempt,
+				result: "replied",
+				endedAt: new Date().toISOString(),
+			});
+		}
 
 		input.artifactService.recordReplied({
 			artifactHandle,

@@ -45,7 +45,7 @@ export function createCodexProvider(
 				if (!context?.artifactHandle) {
 					throw new Error("BrokerArtifactHandle is required when an interactive session is attached");
 				}
-				return interactiveSession.runBrokerWork(request, context.artifactHandle);
+				return interactiveSession.runBrokerWork(request, context.artifactHandle, context.onAttemptStart);
 			}
 
 			const prompt = buildCodexPrompt(request);

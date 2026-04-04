@@ -40,6 +40,15 @@ const submitAttempts: SubmitAttempt[] = [
 	{ mode: "plain", terminator: "\n", submitDelayMs: SUBMIT_DELAY_MS },
 ];
 
+const submitStrategyNames: string[] = [
+	"plain_cr_delayed_submit",
+	"plain_lf_delayed_submit",
+];
+
+function getSubmitStrategyName(index: number): string {
+	return submitStrategyNames[Math.min(index, submitStrategyNames.length - 1)] ?? "plain_delayed_submit";
+}
+
 function getSubmitAttempt(index: number): SubmitAttempt {
 	return submitAttempts[
 		Math.min(index, submitAttempts.length - 1)
@@ -181,7 +190,11 @@ export function createClaudeLiveSession(input: {
 		sendLocalMessage(message: string) {
 			input.stdout.write(message);
 		},
-		runBrokerWork(request: ProviderWorkRequest, artifactHandle: BrokerArtifactHandle): Promise<ProviderReply> {
+		runBrokerWork(
+			request: ProviderWorkRequest,
+			artifactHandle: BrokerArtifactHandle,
+			onAttemptStart?: (attemptNumber: number, strategy: string) => void,
+		): Promise<ProviderReply> {
 			if (!pty) {
 				throw new InteractiveBrokerError("submit_failed", "PTY session is not running");
 			}
@@ -194,7 +207,8 @@ export function createClaudeLiveSession(input: {
 			recentOutput = "";
 
 			return new Promise<ProviderReply>((resolve, reject) => {
-				const scheduleAttempt = (attempt: SubmitAttempt) => {
+				const scheduleAttempt = (attempt: SubmitAttempt, attemptNumber: number) => {
+					onAttemptStart?.(attemptNumber, getSubmitStrategyName(attemptNumber - 1));
 					writePromptPrelude(pty!, {
 						prompt,
 						attempt,
@@ -228,12 +242,10 @@ export function createClaudeLiveSession(input: {
 					pending.frameArmed = false;
 					clearTimeout(pending.submitTimer);
 					clearTimeout(pending.frameArmTimer);
-					const attempt = getSubmitAttempt(pending.attemptIndex + 1);
-					pending.submitTimer = scheduleAttempt(attempt);
-					pending.attemptIndex = Math.min(
-						pending.attemptIndex + 1,
-						submitAttempts.length - 1,
-					);
+					const nextIndex = Math.min(pending.attemptIndex + 1, submitAttempts.length - 1);
+					const attempt = getSubmitAttempt(nextIndex);
+					pending.submitTimer = scheduleAttempt(attempt, 2);
+					pending.attemptIndex = nextIndex;
 				}, SUBMIT_RETRY_MS);
 
 				pending = {
@@ -249,7 +261,7 @@ export function createClaudeLiveSession(input: {
 					prompt,
 					retried: false,
 				};
-				pending.submitTimer = scheduleAttempt(getSubmitAttempt(0));
+				pending.submitTimer = scheduleAttempt(getSubmitAttempt(0), 1);
 			});
 		},
 	};

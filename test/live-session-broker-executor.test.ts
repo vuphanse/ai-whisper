@@ -4,6 +4,7 @@ import type {
 	BrokerArtifactHandle,
 	CompanionProvider,
 	ProviderReply,
+	ProviderWorkContext,
 	ProviderWorkRequest,
 } from "../packages/shared/src/index.ts";
 import type { BrokerArtifactService } from "../packages/cli/src/runtime/broker-artifact-service.ts";
@@ -47,7 +48,7 @@ function makeArtifactService(): BrokerArtifactService {
 	return service;
 }
 
-function makeProvider(handleWorkImpl?: (req: ProviderWorkRequest) => Promise<ProviderReply>): CompanionProvider {
+function makeProvider(handleWorkImpl?: (req: ProviderWorkRequest, ctx?: ProviderWorkContext) => Promise<ProviderReply>): CompanionProvider {
 	return {
 		getIdentity: vi.fn(() => ({
 			providerId: "test-provider",
@@ -65,7 +66,10 @@ function makeProvider(handleWorkImpl?: (req: ProviderWorkRequest) => Promise<Pro
 		getHealthState: vi.fn(() => "healthy" as const),
 		handleWork: handleWorkImpl
 			? vi.fn(handleWorkImpl)
-			: vi.fn(async () => SUCCESS_REPLY),
+			: vi.fn(async (_req: ProviderWorkRequest, ctx?: ProviderWorkContext) => {
+				ctx?.onAttemptStart?.(1, "test_strategy");
+				return SUCCESS_REPLY;
+			}),
 	};
 }
 
@@ -149,6 +153,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 
 	it("InteractiveBrokerError(submit_failed) records submit_failed and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
+		// Throws before any attempt starts — onAttemptStart never called, so no attempt result.
 		const provider = makeProvider(async () => {
 			throw new InteractiveBrokerError("submit_failed", "could not submit");
 		});
@@ -161,9 +166,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 		const result = await executor(BASE_REQUEST);
 
 		expect(result.kind).toBe("failure");
-		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
-			expect.objectContaining({ result: "submit_failed" }),
-		);
+		expect(artifactService.recordAttemptResult).not.toHaveBeenCalled();
 		expect(artifactService.recordFailed).toHaveBeenCalledWith(
 			expect.objectContaining({ state: "submit_failed" }),
 		);
@@ -171,7 +174,8 @@ describe("createLiveSessionBrokerExecutor", () => {
 
 	it("InteractiveBrokerError(timed_out) records timed_out and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
-		const provider = makeProvider(async () => {
+		const provider = makeProvider(async (_req, ctx) => {
+			ctx?.onAttemptStart?.(1, "test_strategy");
 			throw new InteractiveBrokerError("timed_out", "provider timed out");
 		});
 		const executor = createLiveSessionBrokerExecutor({
@@ -193,7 +197,8 @@ describe("createLiveSessionBrokerExecutor", () => {
 
 	it("InteractiveBrokerError(invalid_reply) records invalid_reply and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
-		const provider = makeProvider(async () => {
+		const provider = makeProvider(async (_req, ctx) => {
+			ctx?.onAttemptStart?.(1, "test_strategy");
 			throw new InteractiveBrokerError("invalid_reply", "reply was malformed");
 		});
 		const executor = createLiveSessionBrokerExecutor({
@@ -213,8 +218,9 @@ describe("createLiveSessionBrokerExecutor", () => {
 		);
 	});
 
-	it("generic Error records submit_failed with outputTail set to error message", async () => {
+	it("generic Error records submit_failed and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
+		// Throws before any attempt starts — onAttemptStart never called, so no attempt result.
 		const provider = makeProvider(async () => {
 			throw new Error("something unexpected");
 		});
@@ -227,12 +233,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 		const result = await executor(BASE_REQUEST);
 
 		expect(result.kind).toBe("failure");
-		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
-			expect.objectContaining({
-				result: "submit_failed",
-				outputTail: "something unexpected",
-			}),
-		);
+		expect(artifactService.recordAttemptResult).not.toHaveBeenCalled();
 		expect(artifactService.recordFailed).toHaveBeenCalledWith(
 			expect.objectContaining({ state: "submit_failed" }),
 		);
@@ -249,6 +250,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 		});
 
 		await executor(BASE_REQUEST);
+		vi.advanceTimersByTime(0);
 
 		expect(sweepSpy).toHaveBeenCalledOnce();
 	});
