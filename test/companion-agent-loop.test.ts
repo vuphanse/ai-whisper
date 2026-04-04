@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import type {
-	BrokerArtifactHandle,
 	CompanionProvider,
 	InteractiveSessionController,
 	ProviderWorkRequest,
@@ -51,14 +50,6 @@ describe("companion agent loop", () => {
 			stop: () => Promise.resolve(),
 			writeUserInput() {},
 			sendLocalMessage() {},
-			runBrokerWork(request, _handle: BrokerArtifactHandle) {
-				handled.push(request);
-				return Promise.resolve({
-					kind: "answer" as const,
-					content: `handled ${request.instruction}`,
-					transitionIntent: "completed" as const,
-				});
-			},
 		};
 
 		const provider: CompanionProvider = {
@@ -86,13 +77,14 @@ describe("companion agent loop", () => {
 				expect(session).toBe(interactiveSession);
 			},
 			async handleWork(request, context) {
-				const handle: BrokerArtifactHandle = context?.artifactHandle ?? {
-					workItemId: request.workItemId,
-					artifactDirPath: "/tmp/artifacts/stub",
-					requestFilePath: "/tmp/artifacts/stub/request.json",
-					statusFilePath: "/tmp/artifacts/stub/status.json",
+				// Verify the executor passed an artifactHandle
+				expect(context?.artifactHandle).toBeDefined();
+				handled.push(request);
+				return {
+					kind: "answer" as const,
+					content: `handled ${request.instruction}`,
+					transitionIntent: "completed" as const,
 				};
-				return interactiveSession.runBrokerWork(request, handle);
 			},
 		};
 

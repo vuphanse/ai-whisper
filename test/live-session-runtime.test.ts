@@ -19,10 +19,6 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
-				runBrokerWork: () =>
-					Promise.reject(
-						new Error("broker work is not used in this test"),
-					),
 			},
 			stdin,
 			stdout,
@@ -55,10 +51,6 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
-				runBrokerWork: () =>
-					Promise.reject(
-						new Error("broker work is not used in this test"),
-					),
 			},
 			stdin,
 			stdout,
@@ -95,10 +87,6 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
-				runBrokerWork: () =>
-					Promise.reject(
-						new Error("broker work is not used in this test"),
-					),
 			},
 			stdin,
 			stdout,
@@ -136,10 +124,6 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
-				runBrokerWork: () =>
-					Promise.reject(
-						new Error("broker work is not used in this test"),
-					),
 			},
 			stdin,
 			stdout,

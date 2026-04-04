@@ -1,330 +1,82 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	beginBrokerReply,
-	endBrokerReply,
-	InteractiveBrokerError,
-	type BrokerArtifactHandle,
-} from "../packages/shared/src/index.ts";
+import { describe, it, expect, vi } from "vitest";
 import { createClaudeLiveSession } from "../packages/adapter-claude/src/index.ts";
 import { createFakePty } from "./helpers/fake-pty.ts";
 
-const stubHandle: BrokerArtifactHandle = {
-	workItemId: "stub",
-	artifactDirPath: "/tmp/artifacts/stub",
-	requestFilePath: "/tmp/artifacts/stub/request.json",
-	statusFilePath: "/tmp/artifacts/stub/status.json",
-};
+function createFakeStdout() {
+	const chunks: string[] = [];
+	return {
+		chunks,
+		write(data: string) {
+			chunks.push(data);
+			return true;
+		},
+	} as unknown as NodeJS.WritableStream & { chunks: string[] };
+}
 
 describe("claude live session", () => {
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("submits broker work with plain text and carriage return", async () => {
-		vi.useFakeTimers();
-
-		const fakePty = createFakePty();
-		const writes: string[] = [];
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
+	it("can be instantiated without errors", () => {
+		const stdout = createFakeStdout();
 		const session = createClaudeLiveSession({
 			config: { executable: "claude", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
-			createPty() {
-				return {
-					...fakePty,
-					write(data: string) {
-						writes.push(data);
-						fakePty.write(data);
-					},
-				};
-			},
 		});
 
-		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_submit",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
-
-		expect(writes).toHaveLength(1);
-		expect(writes[0]).toContain("AI_WHISPER_REPLY_BEGIN:stub");
-		expect(writes[0]).toContain(stubHandle.requestFilePath);
-		expect(writes[0]).toContain(
-			'Line 2: one compact JSON object like {"kind":"answer","content":"...","transitionIntent":"completed"}',
-		);
-		await vi.advanceTimersByTimeAsync(75);
-		expect(writes).toHaveLength(2);
-		expect(writes[1]).toBe("\r");
-		await vi.advanceTimersByTimeAsync(300);
-
-		fakePty.emitData(
-			`${beginBrokerReply("work_claude_submit")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_claude_submit")}\n`,
-		);
-
-		await expect(replyPromise).resolves.toEqual({
-			kind: "answer",
-			content: "ok",
-			transitionIntent: "completed",
-		});
+		expect(typeof session.start).toBe("function");
+		expect(typeof session.stop).toBe("function");
+		expect(typeof session.writeUserInput).toBe("function");
+		expect(typeof session.sendLocalMessage).toBe("function");
 	});
 
-	it("forwards terminal escape responses while broker work is pending", async () => {
-		vi.useFakeTimers();
-
+	it("start() attaches PTY and routes data to stdout", async () => {
+		const stdout = createFakeStdout();
 		const fakePty = createFakePty();
-		const writes: string[] = [];
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
+
 		const session = createClaudeLiveSession({
 			config: { executable: "claude", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
-			createPty() {
-				return {
-					...fakePty,
-					write(data: string) {
-						writes.push(data);
-						fakePty.write(data);
-					},
-				};
-			},
+			createPty: () => fakePty,
 		});
 
 		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_terminal",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
+		fakePty.emitData("hello from pty");
 
-		session.writeUserInput("\u001b[1;1R");
-		session.writeUserInput("x");
-
-		expect(writes).toContain("\u001b[1;1R");
-		expect(writes).not.toContain("x");
-		await vi.advanceTimersByTimeAsync(75);
-		await vi.advanceTimersByTimeAsync(300);
-
-		fakePty.emitData(
-			`${beginBrokerReply("work_claude_terminal")}\n{"kind":"answer","content":"terminal","transitionIntent":"completed"}\n${endBrokerReply("work_claude_terminal")}\n`,
-		);
-
-		await expect(replyPromise).resolves.toEqual({
-			kind: "answer",
-			content: "terminal",
-			transitionIntent: "completed",
-		});
+		expect(stdout.chunks).toContain("hello from pty");
 	});
 
-	it("ignores echoed prompt markers before frame parsing is armed", async () => {
-		vi.useFakeTimers();
-
+	it("writeUserInput() forwards data to PTY", async () => {
+		const stdout = createFakeStdout();
 		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
+
 		const session = createClaudeLiveSession({
 			config: { executable: "claude", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
-			createPty() {
-				return fakePty;
-			},
+			createPty: () => fakePty,
 		});
 
 		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_echo",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
+		session.writeUserInput("hello");
 
-		fakePty.emitData(`${beginBrokerReply("work_claude_echo")}\n`);
-		await vi.advanceTimersByTimeAsync(75);
-		await vi.advanceTimersByTimeAsync(300);
-
-		fakePty.emitData(
-			`${beginBrokerReply("work_claude_echo")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_claude_echo")}\n`,
-		);
-
-		await expect(replyPromise).resolves.toEqual({
-			kind: "answer",
-			content: "ok",
-			transitionIntent: "completed",
-		});
+		expect(fakePty.writes).toContain("hello");
 	});
 
-	it("rejects with InteractiveBrokerError timed_out when reply does not arrive", async () => {
-		vi.useFakeTimers();
-
+	it("stop() kills the PTY", async () => {
+		const stdout = createFakeStdout();
 		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
+		const killSpy = vi.spyOn(fakePty, "kill");
+
 		const session = createClaudeLiveSession({
 			config: { executable: "claude", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
-			createPty() {
-				return fakePty;
-			},
+			createPty: () => fakePty,
 		});
 
 		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_timeout",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
-
-		const assertion = expect(replyPromise).rejects.toMatchObject({
-			name: "InteractiveBrokerError",
-			code: "timed_out",
-		});
-		await vi.advanceTimersByTimeAsync(15_000);
-		await assertion;
-	});
-
-	it("uses a configured reply timeout when provided", async () => {
-		vi.useFakeTimers();
-
-		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
-		const session = createClaudeLiveSession({
-			config: { executable: "claude", execArgs: [] },
-			cwd: "/tmp",
-			stdout,
-			replyTimeoutMs: 30_000,
-			createPty() {
-				return fakePty;
-			},
-		});
-
-		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_custom_timeout",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
-		let settled = false;
-		void replyPromise.then(
-			() => {
-				settled = true;
-			},
-			() => {
-				settled = true;
-			},
-		);
-
-		await vi.advanceTimersByTimeAsync(15_000);
-		expect(settled).toBe(false);
-		await vi.advanceTimersByTimeAsync(15_000);
-		await expect(replyPromise).rejects.toMatchObject({
-			name: "InteractiveBrokerError",
-			code: "timed_out",
-			message: expect.stringContaining("30000ms"),
-		});
-	});
-
-	it("rejects pending runBrokerWork with submit_failed when stop() is called", async () => {
-		vi.useFakeTimers();
-
-		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
-		const session = createClaudeLiveSession({
-			config: { executable: "claude", execArgs: [] },
-			cwd: "/tmp",
-			stdout,
-			createPty() {
-				return fakePty;
-			},
-		});
-
-		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_stop",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
-
 		await session.stop();
 
-		await expect(replyPromise).rejects.toMatchObject({
-			name: "InteractiveBrokerError",
-			code: "submit_failed",
-		});
-	});
-
-	it("rejects with InteractiveBrokerError invalid_reply when JSON is malformed", async () => {
-		vi.useFakeTimers();
-
-		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
-		const session = createClaudeLiveSession({
-			config: { executable: "claude", execArgs: [] },
-			cwd: "/tmp",
-			stdout,
-			createPty() {
-				return fakePty;
-			},
-		});
-
-		await session.start();
-		const replyPromise = session.runBrokerWork({
-			workItemId: "work_claude_invalid",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question",
-			instruction: "Reply with valid JSON.",
-		}, stubHandle);
-
-		await vi.advanceTimersByTimeAsync(75);
-		await vi.advanceTimersByTimeAsync(300);
-
-		fakePty.emitData(
-			`${beginBrokerReply("work_claude_invalid")}\nnot-valid-json\n${endBrokerReply("work_claude_invalid")}\n`,
-		);
-
-		await expect(replyPromise).rejects.toMatchObject({
-			name: "InteractiveBrokerError",
-			code: "invalid_reply",
-		});
+		expect(killSpy).toHaveBeenCalledOnce();
 	});
 });

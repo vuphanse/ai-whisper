@@ -1,19 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	beginBrokerReply,
 	companionHeartbeatSchema,
 	companionRegistrationSchema,
 	createProviderIdentity,
-	endBrokerReply,
 	mockProviderReplySchema,
 	providerCapabilitiesSchema,
 	type BrokerArtifactHandle,
 } from "../packages/shared/src/index.ts";
 import {
+	buildCodexFileBackedBrokerPrompt,
 	createCodexLiveSession,
 	createCodexProvider,
 } from "../packages/adapter-codex/src/index.ts";
 import {
+	buildClaudeFileBackedBrokerPrompt,
 	createClaudeLiveSession,
 	createClaudeProvider,
 } from "../packages/adapter-claude/src/index.ts";
@@ -27,10 +27,6 @@ const stubHandle: BrokerArtifactHandle = {
 };
 
 describe("provider and companion contracts", () => {
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
 	it("validates provider identity, capabilities, and companion registration payloads", () => {
 		const provider = createProviderIdentity({
 			providerId: "mock-provider",
@@ -133,52 +129,20 @@ describe("provider and companion contracts", () => {
 		expect(typeof createClaudeLiveSession).toBe("function");
 	});
 
-	it("handleWork calls runBrokerWork on attached interactive session when artifactHandle is provided", async () => {
-		vi.useFakeTimers();
-
-		const fakePty = createFakePty();
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
-
-		const codexSession = createCodexLiveSession({
-			config: { executable: "codex", execArgs: [] },
-			cwd: "/tmp",
-			stdout,
-			createPty() {
-				return fakePty;
-			},
-		});
-		await codexSession.start();
-		const codexProvider = createCodexProvider({ executable: "codex", execArgs: [] });
-		codexProvider.attachInteractiveSession!(codexSession);
-
-		const request = {
-			workItemId: "work_contract_test",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question" as const,
-			instruction: "test",
+	it("ProviderWorkContext only carries artifactHandle — onAttemptStart is not part of the contract", () => {
+		// The ProviderWorkContext type must be structurally { artifactHandle?: BrokerArtifactHandle }.
+		// onAttemptStart was a PTY retry-reporting hook and is now retired.
+		// This test verifies the shape at the type level by constructing valid contexts.
+		const noContext: import("../packages/shared/src/index.ts").ProviderWorkContext = {};
+		const withHandle: import("../packages/shared/src/index.ts").ProviderWorkContext = {
+			artifactHandle: stubHandle,
 		};
-
-		const replyPromise = codexProvider.handleWork(request, { artifactHandle: stubHandle });
-		await vi.advanceTimersByTimeAsync(75);
-		await vi.advanceTimersByTimeAsync(300);
-
-		fakePty.emitData(
-			`${beginBrokerReply("work_contract_test")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_contract_test")}\n`,
-		);
-
-		const reply = await replyPromise;
-		expect(reply.kind).toBe("answer");
+		// Type-level assertion: both are assignable, neither has onAttemptStart.
+		expect(Object.keys(noContext)).toEqual([]);
+		expect(Object.keys(withHandle)).toEqual(["artifactHandle"]);
 	});
 
-	it("handleWork throws when session is attached but artifactHandle is absent", () => {
-		const codexProvider = createCodexProvider({ executable: "codex", execArgs: [] });
-		const claudeProvider = createClaudeProvider({ executable: "claude", execArgs: [] });
-
+	it("live sessions satisfy InteractiveSessionController as relay-UX controllers", () => {
 		const fakePty = createFakePty();
 		const stdout = {
 			write() {
@@ -186,37 +150,110 @@ describe("provider and companion contracts", () => {
 			},
 		} as unknown as NodeJS.WritableStream;
 
-		const session = createCodexLiveSession({
-			config: { executable: "codex", execArgs: [] },
+		// Both live session factories must return objects satisfying InteractiveSessionController.
+		// The interface covers only relay UX methods: start, stop, writeUserInput, sendLocalMessage.
+		// Broker work execution is no longer part of the session contract.
+		const codexSession: import("../packages/shared/src/index.ts").InteractiveSessionController =
+			createCodexLiveSession({
+				config: { executable: "codex", execArgs: [] },
+				cwd: "/tmp",
+				stdout,
+				createPty() {
+					return fakePty;
+				},
+			});
+
+		const claudeSession: import("../packages/shared/src/index.ts").InteractiveSessionController =
+			createClaudeLiveSession({
+				config: { executable: "claude", execArgs: ["-p"] },
+				cwd: "/tmp",
+				stdout,
+				createPty() {
+					return fakePty;
+				},
+			});
+
+		expect(typeof codexSession.start).toBe("function");
+		expect(typeof codexSession.stop).toBe("function");
+		expect(typeof codexSession.writeUserInput).toBe("function");
+		expect(typeof codexSession.sendLocalMessage).toBe("function");
+
+		expect(typeof claudeSession.start).toBe("function");
+		expect(typeof claudeSession.stop).toBe("function");
+		expect(typeof claudeSession.writeUserInput).toBe("function");
+		expect(typeof claudeSession.sendLocalMessage).toBe("function");
+	});
+
+	it("file-backed broker prompt builders reference the request file path", () => {
+		const fakePath = "/tmp/artifacts/work-123/request.json";
+
+		const codexPrompt = buildCodexFileBackedBrokerPrompt(fakePath);
+		expect(codexPrompt).toContain(fakePath);
+		expect(codexPrompt).toContain('"kind": "answer" | "review" | "clarification" | "failure"');
+		expect(codexPrompt).toContain("Return ONLY valid JSON matching this schema:");
+
+		const claudePrompt = buildClaudeFileBackedBrokerPrompt(fakePath);
+		expect(claudePrompt).toContain(fakePath);
+		expect(claudePrompt).toContain('"kind": "answer" | "review" | "clarification" | "failure"');
+		expect(claudePrompt).toContain("Return ONLY valid JSON matching this schema:");
+	});
+
+	it("handleWork with artifactHandle uses file-backed spawn path regardless of attached session", async () => {
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+
+		const codexProvider = createCodexProvider({ executable: "nonexistent-codex-binary", execArgs: [] });
+		const codexSession = createCodexLiveSession({
+			config: { executable: "nonexistent-codex-binary", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
 			createPty() {
 				return fakePty;
 			},
 		});
+		codexProvider.attachInteractiveSession?.(codexSession);
 
-		codexProvider.attachInteractiveSession!(session);
-		claudeProvider.attachInteractiveSession!(session);
+		// handleWork with an artifactHandle must use the spawn path (not PTY).
+		// A nonexistent binary will cause a failure reply — not a thrown exception.
+		const codexReply = await codexProvider.handleWork(
+			{
+				requestedAction: "answer",
+				instruction: "Test",
+				collabId: "c1",
+				threadId: "t1",
+				workItemId: "w1",
+			},
+			{ artifactHandle: stubHandle },
+		);
+		expect(codexReply.kind).toBe("failure");
+		expect(codexReply.transitionIntent).toBe("failed");
 
-		const request = {
-			workItemId: "work_missing_handle",
-			collabId: "collab_smoke",
-			threadId: "thread_smoke",
-			requestedAction: "answer_question" as const,
-			instruction: "test",
-		};
+		const claudeProvider = createClaudeProvider({ executable: "nonexistent-claude-binary", execArgs: [] });
+		const claudeSession = createClaudeLiveSession({
+			config: { executable: "nonexistent-claude-binary", execArgs: ["-p"] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+		claudeProvider.attachInteractiveSession?.(claudeSession);
 
-		expect(() => codexProvider.handleWork(request, {})).toThrow(
-			"BrokerArtifactHandle is required when an interactive session is attached",
+		const claudeReply = await claudeProvider.handleWork(
+			{
+				requestedAction: "answer",
+				instruction: "Test",
+				collabId: "c1",
+				threadId: "t1",
+				workItemId: "w1",
+			},
+			{ artifactHandle: stubHandle },
 		);
-		expect(() => codexProvider.handleWork(request)).toThrow(
-			"BrokerArtifactHandle is required when an interactive session is attached",
-		);
-		expect(() => claudeProvider.handleWork(request, {})).toThrow(
-			"BrokerArtifactHandle is required when an interactive session is attached",
-		);
-		expect(() => claudeProvider.handleWork(request)).toThrow(
-			"BrokerArtifactHandle is required when an interactive session is attached",
-		);
+		expect(claudeReply.kind).toBe("failure");
+		expect(claudeReply.transitionIntent).toBe("failed");
 	});
 });

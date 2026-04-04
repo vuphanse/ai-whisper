@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type {
 	BrokerArtifactHandle,
 	CompanionProvider,
-	InteractiveSessionController,
 	ProviderReply,
 	ProviderWorkContext,
 	ProviderWorkRequest,
@@ -77,42 +76,6 @@ describe("broker artifact contracts", () => {
 		// With context (artifactHandle absent — optional field)
 		const reply3 = await provider.handleWork(mockRequest, {});
 		expect(reply3.kind).toBe("review");
-	});
-
-	it("InteractiveSessionController.runBrokerWork requires an artifact handle", async () => {
-		const stubReply: ProviderReply = {
-			kind: "answer",
-			content: "finished",
-			transitionIntent: null,
-		};
-
-		const mockRequest: ProviderWorkRequest = {
-			workItemId: "work_002",
-			collabId: "collab_001",
-			threadId: "thread_001",
-			requestedAction: "solve",
-			instruction: "do something else",
-		};
-
-		const mockHandle: BrokerArtifactHandle = {
-			workItemId: "work_002",
-			artifactDirPath: "/tmp/artifacts/work_002",
-			requestFilePath: "/tmp/artifacts/work_002/request.json",
-			statusFilePath: "/tmp/artifacts/work_002/status.json",
-		};
-
-		// Compile check: mock that satisfies InteractiveSessionController interface
-		const session: InteractiveSessionController = {
-			start: async () => undefined,
-			stop: async () => undefined,
-			writeUserInput: (_data: string) => undefined,
-			sendLocalMessage: (_msg: string) => undefined,
-			runBrokerWork: async (_req, _handle) => stubReply,
-		};
-
-		// Must be called with both request and artifactHandle
-		const reply = await session.runBrokerWork(mockRequest, mockHandle);
-		expect(reply.kind).toBe("answer");
 	});
 
 	it("InteractiveBrokerError preserves its code field at runtime", () => {

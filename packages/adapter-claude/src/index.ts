@@ -4,4 +4,5 @@ export const adapterClaudePackage = {
 
 export { createClaudeProvider } from "./create-claude-provider.js";
 export { createClaudeLiveSession } from "./create-claude-live-session.js";
+export { buildClaudeFileBackedBrokerPrompt, buildClaudePrompt } from "./claude-prompt.js";
 export type { ClaudeCommandConfig } from "./claude-command.js";
