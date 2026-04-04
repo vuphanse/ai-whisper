@@ -35,4 +35,52 @@ describe("live session protocol", () => {
 
 		expect(result.completedFrame).toBeNull();
 	});
+
+	it("extracts framed replies from ANSI-decorated terminal output", () => {
+		let state = { insideFrame: false, buffer: "" };
+
+		const opened = appendInteractiveBrokerChunk(
+			state,
+			`\u001b[32m${beginBrokerReply("work_ansi")}\u001b[39m\r\n`,
+		);
+		const middle = appendInteractiveBrokerChunk(
+			opened.state,
+			`\u001b[2m{"kind":"answer","content":"ok","transitionIntent":"completed"}\u001b[22m\r\n`,
+		);
+		const closed = appendInteractiveBrokerChunk(
+			middle.state,
+			`\u001b[33m${endBrokerReply("work_ansi")}\u001b[39m`,
+		);
+
+		expect(closed.completedFrame).toContain('"kind":"answer"');
+	});
+
+	it("extracts framed replies when markers are split across chunks", () => {
+		let state = { insideFrame: false, buffer: "" };
+
+		const first = appendInteractiveBrokerChunk(
+			state,
+			`${beginBrokerReply("work_split").slice(0, 18)}`,
+		);
+		const second = appendInteractiveBrokerChunk(
+			first.state,
+			`${beginBrokerReply("work_split").slice(18)}\n{"kind":"answer","content":"split","transitionIntent":"completed"}\n`,
+		);
+		const closed = appendInteractiveBrokerChunk(
+			second.state,
+			`${endBrokerReply("work_split")}`,
+		);
+
+		expect(closed.completedFrame).toContain('"content":"split"');
+	});
+
+	it("ignores marker text embedded inside ordinary echoed prompt lines", () => {
+		const result = appendInteractiveBrokerChunk(
+			{ insideFrame: false, buffer: "", textBuffer: "" },
+			`Reply with exactly three lines. Line 1: ${beginBrokerReply("work_echo")} Line 2: {"kind":"answer"} Line 3: ${endBrokerReply("work_echo")}\n`,
+		);
+
+		expect(result.completedFrame).toBeNull();
+		expect(result.state.insideFrame).toBe(false);
+	});
 });

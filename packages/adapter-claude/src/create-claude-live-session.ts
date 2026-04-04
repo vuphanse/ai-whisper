@@ -13,6 +13,8 @@ import { buildClaudeInteractiveBrokerPrompt } from "./claude-live-session-prompt
 
 const REPLY_TIMEOUT_MS = 15_000;
 const SUBMIT_RETRY_MS = 1_500;
+const FRAME_ARM_DELAY_MS = 300;
+const SUBMIT_DELAY_MS = 75;
 const RECENT_OUTPUT_LIMIT = 400;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
@@ -24,6 +26,23 @@ type PtyLike = {
 	write(data: string): void;
 	kill(): void;
 };
+
+type SubmitAttempt = {
+	mode: "bracketedPaste" | "plain";
+	terminator: "\r" | "\n" | "\r\n";
+	submitDelayMs: number;
+};
+
+const submitAttempts: SubmitAttempt[] = [
+	{ mode: "plain", terminator: "\r", submitDelayMs: SUBMIT_DELAY_MS },
+	{ mode: "plain", terminator: "\n", submitDelayMs: SUBMIT_DELAY_MS },
+];
+
+function getSubmitAttempt(index: number): SubmitAttempt {
+	return submitAttempts[
+		Math.min(index, submitAttempts.length - 1)
+	]!;
+}
 
 function isLikelyTerminalResponse(data: string) {
 	return data.startsWith("\u001b");
@@ -45,20 +64,18 @@ function createNodePty(input: { config: ClaudeCommandConfig; cwd: string }): Pty
 	);
 }
 
-function submitPrompt(
+function writePromptPrelude(
 	pty: PtyLike,
-	input: { prompt: string; mode: "bracketedPaste" | "newline" },
+	input: { prompt: string; attempt: SubmitAttempt },
 ) {
-	if (input.mode === "newline") {
+	if (input.attempt.mode === "plain") {
 		pty.write(input.prompt);
-		pty.write("\n");
 		return;
 	}
 
 	pty.write(
 		`${BRACKETED_PASTE_START}${input.prompt}${BRACKETED_PASTE_END}`,
 	);
-	pty.write("\r");
 }
 
 export function createClaudeLiveSession(input: {
@@ -75,7 +92,11 @@ export function createClaudeLiveSession(input: {
 				resolve: (reply: ProviderReply) => void;
 				timer: ReturnType<typeof setTimeout>;
 				retryTimer: ReturnType<typeof setTimeout>;
+				submitTimer: ReturnType<typeof setTimeout>;
+				frameArmTimer: ReturnType<typeof setTimeout>;
+				frameArmed: boolean;
 				frameStarted: boolean;
+				attemptIndex: number;
 				prompt: string;
 				retried: boolean;
 		  }
@@ -88,6 +109,10 @@ export function createClaudeLiveSession(input: {
 	function handleData(data: string) {
 		appendRecentOutput(data);
 
+		if (pending && !pending.frameArmed) {
+			return;
+		}
+
 		const result = appendInteractiveBrokerChunk(frameState, data);
 		frameState = result.state;
 		if (pending && (result.state.insideFrame || result.completedFrame !== null)) {
@@ -96,6 +121,8 @@ export function createClaudeLiveSession(input: {
 
 		if (result.completedFrame !== null && pending) {
 			const { resolve, retryTimer, timer } = pending;
+			clearTimeout(pending.submitTimer);
+			clearTimeout(pending.frameArmTimer);
 			pending = undefined;
 			clearTimeout(timer);
 			clearTimeout(retryTimer);
@@ -135,6 +162,8 @@ export function createClaudeLiveSession(input: {
 			if (pending) {
 				clearTimeout(pending.timer);
 				clearTimeout(pending.retryTimer);
+				clearTimeout(pending.submitTimer);
+				clearTimeout(pending.frameArmTimer);
 				pending = undefined;
 			}
 			if (pty) {
@@ -171,9 +200,27 @@ export function createClaudeLiveSession(input: {
 			recentOutput = "";
 
 			return new Promise<ProviderReply>((resolve) => {
+				const scheduleAttempt = (attempt: SubmitAttempt) => {
+					writePromptPrelude(pty!, {
+						prompt,
+						attempt,
+					});
+					return setTimeout(() => {
+						if (!pty || !pending) return;
+						pty.write(attempt.terminator);
+						pending.frameArmTimer = setTimeout(() => {
+							if (pending) {
+								frameState = { insideFrame: false, buffer: "" };
+								pending.frameArmed = true;
+							}
+						}, FRAME_ARM_DELAY_MS);
+					}, attempt.submitDelayMs);
+				};
+
 				const timer = setTimeout(() => {
 					if (pending) {
 						clearTimeout(pending.retryTimer);
+						clearTimeout(pending.submitTimer);
 						pending = undefined;
 						resolve({
 							kind: "failure",
@@ -188,21 +235,30 @@ export function createClaudeLiveSession(input: {
 					}
 
 					pending.retried = true;
-					submitPrompt(pty, {
-						prompt: pending.prompt,
-						mode: "newline",
-					});
+					pending.frameArmed = false;
+					clearTimeout(pending.submitTimer);
+					clearTimeout(pending.frameArmTimer);
+					const attempt = getSubmitAttempt(pending.attemptIndex + 1);
+					pending.submitTimer = scheduleAttempt(attempt);
+					pending.attemptIndex = Math.min(
+						pending.attemptIndex + 1,
+						submitAttempts.length - 1,
+					);
 				}, SUBMIT_RETRY_MS);
 
 				pending = {
 					resolve,
 					timer,
 					retryTimer,
+					submitTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+					frameArmTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+					frameArmed: false,
 					frameStarted: false,
+					attemptIndex: 0,
 					prompt,
 					retried: false,
 				};
-				submitPrompt(pty!, { prompt, mode: "bracketedPaste" });
+				pending.submitTimer = scheduleAttempt(getSubmitAttempt(0));
 			});
 		},
 	};

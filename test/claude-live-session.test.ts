@@ -11,7 +11,9 @@ describe("claude live session", () => {
 		vi.useRealTimers();
 	});
 
-	it("submits broker work with bracketed paste and an explicit submit keystroke", async () => {
+	it("submits broker work with plain text and carriage return", async () => {
+		vi.useFakeTimers();
+
 		const fakePty = createFakePty();
 		const writes: string[] = [];
 		const stdout = {
@@ -43,11 +45,15 @@ describe("claude live session", () => {
 			instruction: "Reply with valid JSON.",
 		});
 
+		expect(writes).toHaveLength(1);
+		expect(writes[0]).toContain("AI_WHISPER_REPLY_BEGIN:work_claude_submit");
+		expect(writes[0]).toContain(
+			'Line 2: one compact JSON object like {"kind":"answer","content":"...","transitionIntent":"completed"}',
+		);
+		await vi.advanceTimersByTimeAsync(75);
 		expect(writes).toHaveLength(2);
-		expect(writes[0]).toContain("\u001b[200~");
-		expect(writes[0]).toContain("Return ONLY valid JSON.");
-		expect(writes[0]).toContain("\u001b[201~");
 		expect(writes[1]).toBe("\r");
+		await vi.advanceTimersByTimeAsync(300);
 
 		fakePty.emitData(
 			`${beginBrokerReply("work_claude_submit")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_claude_submit")}\n`,
@@ -61,6 +67,8 @@ describe("claude live session", () => {
 	});
 
 	it("forwards terminal escape responses while broker work is pending", async () => {
+		vi.useFakeTimers();
+
 		const fakePty = createFakePty();
 		const writes: string[] = [];
 		const stdout = {
@@ -97,6 +105,8 @@ describe("claude live session", () => {
 
 		expect(writes).toContain("\u001b[1;1R");
 		expect(writes).not.toContain("x");
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(300);
 
 		fakePty.emitData(
 			`${beginBrokerReply("work_claude_terminal")}\n{"kind":"answer","content":"terminal","transitionIntent":"completed"}\n${endBrokerReply("work_claude_terminal")}\n`,
@@ -105,6 +115,48 @@ describe("claude live session", () => {
 		await expect(replyPromise).resolves.toEqual({
 			kind: "answer",
 			content: "terminal",
+			transitionIntent: "completed",
+		});
+	});
+
+	it("ignores echoed prompt markers before frame parsing is armed", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_claude_echo",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		});
+
+		fakePty.emitData(`${beginBrokerReply("work_claude_echo")}\n`);
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(300);
+
+		fakePty.emitData(
+			`${beginBrokerReply("work_claude_echo")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_claude_echo")}\n`,
+		);
+
+		await expect(replyPromise).resolves.toEqual({
+			kind: "answer",
+			content: "ok",
 			transitionIntent: "completed",
 		});
 	});

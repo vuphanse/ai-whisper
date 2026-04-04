@@ -15,6 +15,12 @@ describe("phase 6 manual smoke script", () => {
 
 		expect(output).toContain("Usage:");
 		expect(output).toContain("--provider");
+		expect(output).toContain("--mode");
+		expect(output).toContain("--message");
+		expect(output).toContain("--attempt");
+		expect(output).toContain("--probe-payload");
 		expect(output).toContain("--workspace");
+		expect(output).toContain("framed-minimal");
+		expect(output).toContain("broker-current");
 	});
 });

@@ -4,14 +4,31 @@ import {
 	endBrokerReply,
 } from "../packages/shared/src/index.ts";
 import { createCodexLiveSession } from "../packages/adapter-codex/src/index.ts";
+import { buildCodexInteractiveBrokerPrompt } from "../packages/adapter-codex/src/codex-live-session-prompt.ts";
 import { createFakePty } from "./helpers/fake-pty.ts";
+
+function expectedLinewiseWrites(
+	prompt: string,
+	input: { lineTerminator: "\r"; submitTerminator: "" | "\n" | "\r\n" },
+) {
+	const lines = prompt.split("\n");
+	return lines.flatMap((line, index) =>
+		index === lines.length - 1
+			? input.submitTerminator === ""
+				? [line]
+				: [line, input.submitTerminator]
+			: [line, input.lineTerminator],
+	);
+}
 
 describe("codex live session", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it("submits broker work with an explicit submit keystroke", async () => {
+	it("submits broker work with a plain newline submit", async () => {
+		vi.useFakeTimers();
+
 		const fakePty = createFakePty();
 		const writes: string[] = [];
 		const stdout = {
@@ -43,9 +60,39 @@ describe("codex live session", () => {
 			instruction: "Reply with valid JSON.",
 		});
 
-		expect(writes).toHaveLength(2);
-		expect(writes[0]).toContain("Return ONLY valid JSON.");
-		expect(writes[1]).toBe("\r");
+		expect(writes).toEqual(
+			expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_submit",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "",
+				},
+			),
+		);
+		await vi.advanceTimersByTimeAsync(75);
+
+		expect(writes).toEqual(
+			expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_submit",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "\n",
+				},
+			),
+		);
+		await vi.advanceTimersByTimeAsync(300);
 
 		fakePty.emitData(
 			`${beginBrokerReply("work_codex_submit")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_codex_submit")}\n`,
@@ -58,7 +105,7 @@ describe("codex live session", () => {
 		});
 	});
 
-	it("retries with bracketed paste if no framed reply starts", async () => {
+	it("retries with carriage return if no framed reply starts", async () => {
 		vi.useFakeTimers();
 
 		const fakePty = createFakePty();
@@ -92,12 +139,68 @@ describe("codex live session", () => {
 			instruction: "Reply with valid JSON.",
 		});
 
-		await vi.advanceTimersByTimeAsync(1_500);
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(1_425);
 
-		expect(writes[2]).toContain("\u001b[200~");
-		expect(writes[2]).toContain("Return ONLY valid JSON.");
-		expect(writes[2]).toContain("\u001b[201~");
-		expect(writes[3]).toBe("\r");
+		expect(writes).toEqual([
+			...expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_retry",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "\n",
+				},
+			),
+			...expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_retry",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "",
+				},
+			),
+		]);
+		await vi.advanceTimersByTimeAsync(75);
+
+		expect(writes).toEqual([
+			...expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_retry",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "\n",
+				},
+			),
+			...expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_retry",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "\r\n",
+				},
+			),
+		]);
+		await vi.advanceTimersByTimeAsync(300);
 
 		fakePty.emitData(
 			`${beginBrokerReply("work_codex_retry")}\n{"kind":"answer","content":"retried","transitionIntent":"completed"}\n${endBrokerReply("work_codex_retry")}\n`,
@@ -144,10 +247,26 @@ describe("codex live session", () => {
 			instruction: "Reply with valid JSON.",
 		});
 
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(300);
 		fakePty.emitData(`${beginBrokerReply("work_codex_no_retry")}\n`);
-		await vi.advanceTimersByTimeAsync(1_500);
+		await vi.advanceTimersByTimeAsync(1_125);
 
-		expect(writes).toHaveLength(2);
+		expect(writes).toEqual(
+			expectedLinewiseWrites(
+				buildCodexInteractiveBrokerPrompt({
+					workItemId: "work_codex_no_retry",
+					collabId: "collab_smoke",
+					threadId: "thread_smoke",
+					requestedAction: "answer_question",
+					instruction: "Reply with valid JSON.",
+				}),
+				{
+					lineTerminator: "\r",
+					submitTerminator: "\n",
+				},
+			),
+		);
 
 		fakePty.emitData(
 			'{"kind":"answer","content":"streaming","transitionIntent":"completed"}\n',
@@ -161,7 +280,51 @@ describe("codex live session", () => {
 		});
 	});
 
+	it("ignores echoed prompt markers before frame parsing is armed", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createCodexLiveSession({
+			config: { executable: "codex", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_codex_echo",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		});
+
+		await vi.advanceTimersByTimeAsync(75);
+		fakePty.emitData(`${beginBrokerReply("work_codex_echo")}\n`);
+		await vi.advanceTimersByTimeAsync(300);
+
+		fakePty.emitData(
+			`${beginBrokerReply("work_codex_echo")}\n{"kind":"answer","content":"ok","transitionIntent":"completed"}\n${endBrokerReply("work_codex_echo")}\n`,
+		);
+
+		await expect(replyPromise).resolves.toEqual({
+			kind: "answer",
+			content: "ok",
+			transitionIntent: "completed",
+		});
+	});
+
 	it("forwards terminal escape responses while broker work is pending", async () => {
+		vi.useFakeTimers();
+
 		const fakePty = createFakePty();
 		const writes: string[] = [];
 		const stdout = {
@@ -198,6 +361,8 @@ describe("codex live session", () => {
 
 		expect(writes).toContain("\u001b[1;1R");
 		expect(writes).not.toContain("x");
+		await vi.advanceTimersByTimeAsync(75);
+		await vi.advanceTimersByTimeAsync(300);
 
 		fakePty.emitData(
 			`${beginBrokerReply("work_codex_terminal")}\n{"kind":"answer","content":"terminal","transitionIntent":"completed"}\n${endBrokerReply("work_codex_terminal")}\n`,

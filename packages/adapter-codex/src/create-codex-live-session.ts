@@ -13,6 +13,8 @@ import { buildCodexInteractiveBrokerPrompt } from "./codex-live-session-prompt.j
 
 const REPLY_TIMEOUT_MS = 15_000;
 const SUBMIT_RETRY_MS = 1_500;
+const FRAME_ARM_DELAY_MS = 300;
+const SUBMIT_DELAY_MS = 75;
 const RECENT_OUTPUT_LIMIT = 400;
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
@@ -24,6 +26,34 @@ type PtyLike = {
 	write(data: string): void;
 	kill(): void;
 };
+
+type SubmitAttempt = {
+	mode: "plain" | "bracketedPaste" | "linewise";
+	lineTerminator?: "\r";
+	submitTerminator: "\r" | "\n" | "\r\n";
+	submitDelayMs: number;
+};
+
+const submitAttempts: SubmitAttempt[] = [
+	{
+		mode: "linewise",
+		lineTerminator: "\r",
+		submitTerminator: "\n",
+		submitDelayMs: SUBMIT_DELAY_MS,
+	},
+	{
+		mode: "linewise",
+		lineTerminator: "\r",
+		submitTerminator: "\r\n",
+		submitDelayMs: SUBMIT_DELAY_MS,
+	},
+];
+
+function getSubmitAttempt(index: number): SubmitAttempt {
+	return submitAttempts[
+		Math.min(index, submitAttempts.length - 1)
+	]!;
+}
 
 function isLikelyTerminalResponse(data: string) {
 	return data.startsWith("\u001b");
@@ -45,20 +75,29 @@ function createNodePty(input: { config: CodexCommandConfig; cwd: string }): PtyL
 	);
 }
 
-function submitPrompt(
+function writePromptPrelude(
 	pty: PtyLike,
-	input: { prompt: string; mode: "plain" | "bracketedPaste" },
+	input: { prompt: string; attempt: SubmitAttempt },
 ) {
-	if (input.mode === "plain") {
+	if (input.attempt.mode === "linewise") {
+		const lines = input.prompt.split("\n");
+		for (const [index, line] of lines.entries()) {
+			pty.write(line);
+			if (index !== lines.length - 1) {
+				pty.write(input.attempt.lineTerminator!);
+			}
+		}
+		return;
+	}
+
+	if (input.attempt.mode === "plain") {
 		pty.write(input.prompt);
-		pty.write("\r");
 		return;
 	}
 
 	pty.write(
 		`${BRACKETED_PASTE_START}${input.prompt}${BRACKETED_PASTE_END}`,
 	);
-	pty.write("\r");
 }
 
 export function createCodexLiveSession(input: {
@@ -75,7 +114,11 @@ export function createCodexLiveSession(input: {
 				resolve: (reply: ProviderReply) => void;
 				timer: ReturnType<typeof setTimeout>;
 				retryTimer: ReturnType<typeof setTimeout>;
+				submitTimer: ReturnType<typeof setTimeout>;
+				frameArmTimer: ReturnType<typeof setTimeout>;
+				frameArmed: boolean;
 				frameStarted: boolean;
+				attemptIndex: number;
 				prompt: string;
 				retried: boolean;
 		  }
@@ -88,6 +131,10 @@ export function createCodexLiveSession(input: {
 	function handleData(data: string) {
 		appendRecentOutput(data);
 
+		if (pending && !pending.frameArmed) {
+			return;
+		}
+
 		const result = appendInteractiveBrokerChunk(frameState, data);
 		frameState = result.state;
 		if (pending && (result.state.insideFrame || result.completedFrame !== null)) {
@@ -96,6 +143,8 @@ export function createCodexLiveSession(input: {
 
 		if (result.completedFrame !== null && pending) {
 			const { resolve, retryTimer, timer } = pending;
+			clearTimeout(pending.submitTimer);
+			clearTimeout(pending.frameArmTimer);
 			pending = undefined;
 			clearTimeout(timer);
 			clearTimeout(retryTimer);
@@ -135,6 +184,8 @@ export function createCodexLiveSession(input: {
 			if (pending) {
 				clearTimeout(pending.timer);
 				clearTimeout(pending.retryTimer);
+				clearTimeout(pending.submitTimer);
+				clearTimeout(pending.frameArmTimer);
 				pending = undefined;
 			}
 			if (pty) {
@@ -171,9 +222,27 @@ export function createCodexLiveSession(input: {
 			recentOutput = "";
 
 			return new Promise<ProviderReply>((resolve) => {
+				const scheduleAttempt = (attempt: SubmitAttempt) => {
+					writePromptPrelude(pty!, {
+						prompt,
+						attempt,
+					});
+					return setTimeout(() => {
+						if (!pty || !pending) return;
+						pty.write(attempt.submitTerminator);
+						pending.frameArmTimer = setTimeout(() => {
+							if (pending) {
+								frameState = { insideFrame: false, buffer: "" };
+								pending.frameArmed = true;
+							}
+						}, FRAME_ARM_DELAY_MS);
+					}, attempt.submitDelayMs);
+				};
+
 				const timer = setTimeout(() => {
 					if (pending) {
 						clearTimeout(pending.retryTimer);
+						clearTimeout(pending.submitTimer);
 						pending = undefined;
 						resolve({
 							kind: "failure",
@@ -188,21 +257,30 @@ export function createCodexLiveSession(input: {
 					}
 
 					pending.retried = true;
-					submitPrompt(pty, {
-						prompt: pending.prompt,
-						mode: "bracketedPaste",
-					});
+					pending.frameArmed = false;
+					clearTimeout(pending.submitTimer);
+					clearTimeout(pending.frameArmTimer);
+					const attempt = getSubmitAttempt(pending.attemptIndex + 1);
+					pending.submitTimer = scheduleAttempt(attempt);
+					pending.attemptIndex = Math.min(
+						pending.attemptIndex + 1,
+						submitAttempts.length - 1,
+					);
 				}, SUBMIT_RETRY_MS);
 
 				pending = {
 					resolve,
 					timer,
 					retryTimer,
+					submitTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+					frameArmTimer: undefined as unknown as ReturnType<typeof setTimeout>,
+					frameArmed: false,
 					frameStarted: false,
+					attemptIndex: 0,
 					prompt,
 					retried: false,
 				};
-				submitPrompt(pty!, { prompt, mode: "plain" });
+				pending.submitTimer = scheduleAttempt(getSubmitAttempt(0));
 			});
 		},
 	};
