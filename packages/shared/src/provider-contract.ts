@@ -26,7 +26,6 @@ export type ProviderWorkRequest = {
 
 export type ProviderWorkContext = {
 	readonly artifactHandle?: BrokerArtifactHandle;
-	readonly onAttemptStart?: (attemptNumber: number, strategy: string) => void;
 };
 
 export interface CompanionProvider {
