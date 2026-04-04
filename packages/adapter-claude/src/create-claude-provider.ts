@@ -8,7 +8,7 @@ import {
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { ClaudeCommandConfig } from "./claude-command.js";
-import { buildClaudePrompt } from "./claude-prompt.js";
+import { buildClaudeFileBackedBrokerPrompt, buildClaudePrompt } from "./claude-prompt.js";
 import { parseClaudeOutput } from "./parse-claude-output.js";
 
 export function createClaudeProvider(
@@ -38,11 +38,14 @@ export function createClaudeProvider(
 			return "healthy";
 		},
 		attachInteractiveSession(session: InteractiveSessionController) {
-			// interactiveSession will be used in Task 4's one-shot execution wiring.
 			interactiveSession = session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
-			const prompt = buildClaudePrompt(request);
+			// When an artifact handle is provided, use the retained request.json as
+			// the authoritative source of truth instead of rebuilding from inline fields.
+			const prompt = context?.artifactHandle
+				? buildClaudeFileBackedBrokerPrompt(context.artifactHandle.requestFilePath)
+				: buildClaudePrompt(request);
 
 			return new Promise((resolve) => {
 				const child = spawn(config.executable, [...config.execArgs, prompt], {

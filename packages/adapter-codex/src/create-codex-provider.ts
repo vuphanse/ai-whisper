@@ -8,7 +8,7 @@ import {
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { CodexCommandConfig } from "./codex-command.js";
-import { buildCodexPrompt } from "./codex-prompt.js";
+import { buildCodexFileBackedBrokerPrompt, buildCodexPrompt } from "./codex-prompt.js";
 import { parseCodexOutput } from "./parse-codex-output.js";
 
 export function createCodexProvider(
@@ -38,11 +38,14 @@ export function createCodexProvider(
 			return "healthy";
 		},
 		attachInteractiveSession(session: InteractiveSessionController) {
-			// interactiveSession will be used in Task 4's one-shot execution wiring.
 			interactiveSession = session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
-			const prompt = buildCodexPrompt(request);
+			// When an artifact handle is provided, use the retained request.json as
+			// the authoritative source of truth instead of rebuilding from inline fields.
+			const prompt = context?.artifactHandle
+				? buildCodexFileBackedBrokerPrompt(context.artifactHandle.requestFilePath)
+				: buildCodexPrompt(request);
 
 			return new Promise((resolve) => {
 				const child = spawn(config.executable, [...config.execArgs, prompt], {

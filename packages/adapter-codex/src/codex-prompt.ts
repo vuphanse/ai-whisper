@@ -16,3 +16,17 @@ export function buildCodexPrompt(request: ProviderWorkRequest): string {
 		`workItemId: ${request.workItemId}`,
 	].join("\n");
 }
+
+export function buildCodexFileBackedBrokerPrompt(requestFilePath: string): string {
+	return [
+		"Return ONLY valid JSON matching this schema:",
+		"{",
+		'  "kind": "answer" | "review" | "clarification" | "failure",',
+		'  "content": "string",',
+		'  "transitionIntent": "in_progress" | "awaiting_user" | "completed" | "failed" | null',
+		"}",
+		"",
+		`The work request is in the file: ${requestFilePath}`,
+		"That file is the authoritative source of truth. Read it and respond to the instruction in it.",
+	].join("\n");
+}

@@ -8,10 +8,12 @@ import {
 	type BrokerArtifactHandle,
 } from "../packages/shared/src/index.ts";
 import {
+	buildCodexFileBackedBrokerPrompt,
 	createCodexLiveSession,
 	createCodexProvider,
 } from "../packages/adapter-codex/src/index.ts";
 import {
+	buildClaudeFileBackedBrokerPrompt,
 	createClaudeLiveSession,
 	createClaudeProvider,
 } from "../packages/adapter-claude/src/index.ts";
@@ -180,5 +182,78 @@ describe("provider and companion contracts", () => {
 		expect(typeof claudeSession.stop).toBe("function");
 		expect(typeof claudeSession.writeUserInput).toBe("function");
 		expect(typeof claudeSession.sendLocalMessage).toBe("function");
+	});
+
+	it("file-backed broker prompt builders reference the request file path", () => {
+		const fakePath = "/tmp/artifacts/work-123/request.json";
+
+		const codexPrompt = buildCodexFileBackedBrokerPrompt(fakePath);
+		expect(codexPrompt).toContain(fakePath);
+		expect(codexPrompt).toContain('"kind": "answer" | "review" | "clarification" | "failure"');
+		expect(codexPrompt).toContain("Return ONLY valid JSON matching this schema:");
+
+		const claudePrompt = buildClaudeFileBackedBrokerPrompt(fakePath);
+		expect(claudePrompt).toContain(fakePath);
+		expect(claudePrompt).toContain('"kind": "answer" | "review" | "clarification" | "failure"');
+		expect(claudePrompt).toContain("Return ONLY valid JSON matching this schema:");
+	});
+
+	it("handleWork with artifactHandle uses file-backed spawn path regardless of attached session", async () => {
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+
+		const codexProvider = createCodexProvider({ executable: "nonexistent-codex-binary", execArgs: [] });
+		const codexSession = createCodexLiveSession({
+			config: { executable: "nonexistent-codex-binary", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+		codexProvider.attachInteractiveSession?.(codexSession);
+
+		// handleWork with an artifactHandle must use the spawn path (not PTY).
+		// A nonexistent binary will cause a failure reply — not a thrown exception.
+		const codexReply = await codexProvider.handleWork(
+			{
+				requestedAction: "answer",
+				instruction: "Test",
+				collabId: "c1",
+				threadId: "t1",
+				workItemId: "w1",
+			},
+			{ artifactHandle: stubHandle },
+		);
+		expect(codexReply.kind).toBe("failure");
+		expect(codexReply.transitionIntent).toBe("failed");
+
+		const claudeProvider = createClaudeProvider({ executable: "nonexistent-claude-binary", execArgs: [] });
+		const claudeSession = createClaudeLiveSession({
+			config: { executable: "nonexistent-claude-binary", execArgs: ["-p"] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+		claudeProvider.attachInteractiveSession?.(claudeSession);
+
+		const claudeReply = await claudeProvider.handleWork(
+			{
+				requestedAction: "answer",
+				instruction: "Test",
+				collabId: "c1",
+				threadId: "t1",
+				workItemId: "w1",
+			},
+			{ artifactHandle: stubHandle },
+		);
+		expect(claudeReply.kind).toBe("failure");
+		expect(claudeReply.transitionIntent).toBe("failed");
 	});
 });
