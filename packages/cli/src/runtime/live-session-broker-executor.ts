@@ -86,10 +86,11 @@ export function createLiveSessionBrokerExecutor(input: {
 		});
 
 		setTimeout(() => {
-			input.artifactService.recordConsumed({
-				artifactHandle,
-				at: new Date().toISOString(),
-			});
+			try {
+				input.artifactService.recordConsumed({ artifactHandle, at: new Date().toISOString() });
+			} catch {
+				// status file may no longer exist; ignore
+			}
 		}, 5000);
 
 		return reply;
