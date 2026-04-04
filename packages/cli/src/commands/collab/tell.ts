@@ -1,21 +1,11 @@
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import type { CompanionProvider, WorkItem } from "@ai-whisper/shared";
-import { inferRequestedAction } from "../../runtime/action-inference.js";
 import { normalizeArtifactPaths } from "../../runtime/artifact-input.js";
-import { requiresExplicitArtifacts } from "../../runtime/context-policy.js";
-import {
-	createCliThreadId,
-	createCliWorkItemId,
-} from "../../runtime/id-factory.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { processOneTurn } from "../../runtime/on-demand-processing.js";
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});
-}
+import { enqueueRelayWork } from "../../runtime/relay-service.js";
+import { waitForReply } from "../../runtime/reply-wait.js";
 
 export async function runCollabTell(input: {
 	workspaceRoot: string;
@@ -44,112 +34,43 @@ export async function runCollabTell(input: {
 		port: state.broker.port,
 	});
 
-	const action =
-		input.explicitAction ?? inferRequestedAction(input.instruction);
 	const artifactPaths = normalizeArtifactPaths(
 		input.workspaceRoot,
 		input.artifactPaths,
 	);
-	const existingThread = broker.control
-		.listThreads(state.collabId)
-		.find((thread) => thread.active);
-
-	if (
-		!existingThread &&
-		requiresExplicitArtifacts(action) &&
-		artifactPaths.length === 0
-	) {
-		throw new Error(
-			`Action ${action} requires at least one --artifact on a new thread.`,
-		);
-	}
 
 	const senderSessionId =
 		input.target === "codex"
 			? state.sessions.claude.sessionId
 			: state.sessions.codex.sessionId;
-	const targetSessionId =
-		input.target === "codex"
-			? state.sessions.codex.sessionId
-			: state.sessions.claude.sessionId;
 
-	const thread =
-		existingThread ??
-		broker.control.createThread({
-			threadId: createCliThreadId(input.now),
-			collabId: state.collabId,
-			title: input.threadTitle ?? input.instruction,
-			createdBySessionId: senderSessionId,
-			now: input.now,
-		});
-
-	const workItem = broker.control.enqueueWorkItem({
-		workItemId: createCliWorkItemId(input.now),
-		threadId: thread.threadId,
+	const relay = enqueueRelayWork({
+		broker,
 		collabId: state.collabId,
-		senderSessionId,
-		targetSessionId,
-		requestedAction: action,
+		originSessionId: senderSessionId,
+		target: input.target,
 		instruction: input.instruction,
-		contextPacket: {
-			kind: "full",
-			goal: input.instruction,
-			currentState: existingThread ? "Continuing active thread" : "New thread",
-			decisionsMade: [],
-			assumptions: [],
-			relevantArtifacts: artifactPaths,
-			openQuestions: [],
-			successCriteria: [],
-		},
-		artifactManifestIds: [],
+		artifactPaths,
+		forceNewThread: false,
 		now: input.now,
+		explicitAction: input.explicitAction,
+		threadTitle: input.threadTitle,
 	});
 
 	const reply = input.providerOverride
 		? await processOneTurn({
 				broker,
 				collabId: state.collabId,
-				sessionId: targetSessionId,
+				sessionId: relay.targetSessionId,
 				provider: input.providerOverride,
 				now: input.now,
 			})
-		: await waitForCompanionReply({
+		: await waitForReply({
 				broker,
-				threadId: thread.threadId,
-				workItemId: workItem.workItemId,
+				threadId: relay.thread.threadId,
+				workItemId: relay.workItem.workItemId,
 			});
 
 	await broker.stop();
 	return reply;
-}
-
-async function waitForCompanionReply(input: {
-	broker: ReturnType<typeof createBrokerRuntime>;
-	threadId: string;
-	workItemId: string;
-}) {
-	const timeoutAt = Date.now() + 15_000;
-
-	while (Date.now() < timeoutAt) {
-		const reply = input.broker.control
-			.listReplies(input.threadId)
-			.find((candidate) => candidate.workItemId === input.workItemId);
-
-		if (reply) {
-			return reply;
-		}
-
-		const workItem = input.broker.control.getWorkItem(input.workItemId);
-		if (workItem?.deliveryState === "failed") {
-			throw new Error(
-				`Work item ${input.workItemId} failed without a reply payload.`,
-			);
-		}
-
-		await sleep(50);
-	}
-
-	throw new Error(
-		`Timed out waiting for reply to work item ${input.workItemId}.`,
-	);
 }
