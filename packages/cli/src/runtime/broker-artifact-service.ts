@@ -58,6 +58,17 @@ interface StatusFile {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
+const terminalStates: ArtifactState[] = [
+	"consumed",
+	"replied",
+	"timed_out",
+	"invalid_reply",
+	"submit_failed",
+];
+
 const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
 
 function stripAnsi(text: string): string {
@@ -182,13 +193,14 @@ export class BrokerArtifactService {
 	}): void {
 		const status = readStatusFile(input.artifactHandle.statusFilePath);
 		const attempt = status.attempts.find((a) => a.attemptNumber === input.attemptNumber);
-		if (attempt !== undefined) {
-			attempt.result = input.result;
-			attempt.endedAt = input.endedAt;
-			const normalized = normalizeOutputTail(input.outputTail);
-			if (normalized !== undefined) {
-				attempt.outputTail = normalized;
-			}
+		if (!attempt) {
+			return;
+		}
+		attempt.result = input.result;
+		attempt.endedAt = input.endedAt;
+		const normalized = normalizeOutputTail(input.outputTail);
+		if (normalized !== undefined) {
+			attempt.outputTail = normalized;
 		}
 		status.updatedAt = input.endedAt;
 		atomicWriteJson(input.artifactHandle.statusFilePath, status);
@@ -206,6 +218,7 @@ export class BrokerArtifactService {
 		try {
 			if (!fs.existsSync(this.tempRoot)) return;
 			const entries = fs.readdirSync(this.tempRoot);
+			const now = Date.now();
 			for (const entry of entries) {
 				const dirPath = join(this.tempRoot, entry);
 				try {
@@ -214,17 +227,6 @@ export class BrokerArtifactService {
 					const raw = fs.readFileSync(statusPath, "utf8");
 					const status = JSON.parse(raw) as StatusFile;
 					const updatedAt = new Date(status.updatedAt).getTime();
-					const now = Date.now();
-					const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-					const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
-
-					const terminalStates: ArtifactState[] = [
-						"consumed",
-						"replied",
-						"timed_out",
-						"invalid_reply",
-						"submit_failed",
-					];
 
 					const shouldDelete =
 						(terminalStates.includes(status.currentState) &&
