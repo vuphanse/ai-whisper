@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Record the implementation obstacles that led Phase 6 live-session relay away from inline broker prompt injection and toward file-backed broker delivery.
+Record the implementation obstacles that first led Phase 6 live-session relay away from inline broker prompt injection and then, after further validation, away from PTY-driven live-session broker execution itself.
 
 This note is not a spec or an implementation plan. It is a compact engineering record of what failed, what was learned, and why the design changed.
 
@@ -94,17 +94,38 @@ This is better because:
 - artifact retention gives better debugging evidence than prompt echo tails
 - the coordinator can own lifecycle, retention, and cleanup without pushing that policy into adapters
 
+## What Additional Validation Showed
+
+File-backed delivery fixed the artifact and permission layer, but it did **not** make PTY-driven broker execution reliable enough.
+
+Follow-up real-provider smoke testing established:
+
+- retained `request.json` and `status.json` artifacts were created correctly
+- submit attempts and timeout transitions were recorded correctly
+- temp-root access could be granted explicitly to both providers
+- Claude-specific file-read permission prompts could be removed with explicit launch configuration
+
+But the decisive failures remained:
+
+- Codex still behaved as if injected broker prompts were sitting in the composer rather than becoming a real submitted turn
+- Claude could progress further, and in some probes clearly started thinking, but still did not reliably produce the required sentinel or framed broker reply through the live TUI path
+- longer adapter-local timeouts did not change the conclusion
+
+The core lesson was that file-backed artifacts solved the structured-input problem, but not the deeper TUI-execution problem.
+
 ## Architectural Consequences
 
-The file-backed redesign does not change the high-level Phase 6 goal. Relay still happens inside attached live sessions.
+The final architectural correction does not change the high-level Phase 6 goal. Relay still feels like it happens inside attached live sessions.
 
 What it does change is the internal delivery model:
 
 - `BrokerArtifactService` becomes a coordinator-owned runtime component
 - broker request artifacts move to a machine temp root instead of the user workspace
 - `request.json` becomes the authoritative source of truth for the provider turn
-- adapters consume artifact handles but do not own artifact lifecycle
-- long inline broker prompt injection is no longer a supported runtime path
+- companions keep relay interception plus acknowledgement and reply-summary injection in the live session
+- provider adapters consume artifact handles for broker execution without owning artifact lifecycle
+- PTY-driven live-session broker prompt execution is no longer a supported runtime path
+- broker work should execute through the provider's non-interactive path against the retained request artifact
 
 ## What Remains True
 
@@ -113,7 +134,7 @@ The redesign does **not** change these fundamentals:
 - the broker and thread model remain the source of truth
 - the live-session relay grammar remains intentionally small
 - the CLI is still the escape hatch for new-thread flows requiring explicit artifacts
-- the framed three-line reply contract remains the reply transport contract
+- the structured provider reply contract still defines what broker execution returns
 - the broker itself should remain terminal-agnostic even if host-side companions use interactive terminal control locally
 
 ## Reusable Lessons
@@ -124,6 +145,7 @@ These lessons likely apply beyond this specific feature:
 - short interactive instructions are often more robust than long structured prompts
 - when a system needs both debuggability and deterministic input, retained artifacts are often a better fit than injecting large protocol payloads inline
 - transport debugging and prompt-design debugging should be separated early, or the failure modes become hard to reason about
+- fixing structured input delivery does not guarantee reliable TUI execution semantics; provider interactive shells may still refuse to act like stable machine endpoints
 
 ## Related Records
 

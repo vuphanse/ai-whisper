@@ -111,13 +111,21 @@ Responsibilities:
 
 The broker should never depend on directly controlling an interactive terminal session as its primary mechanism. That boundary still matters in Phase 6.
 
-However, attached live-session companions may use host-side interactive terminal control as a local delivery seam for already-running Codex or Claude sessions. In that mode, the companion remains responsible for the terminal-specific behavior:
+However, attached live-session companions may use host-side interactive terminal control as a local UX seam for already-running Codex or Claude sessions. In that mode, the companion remains responsible for the terminal-specific behavior:
 
-- injecting a short provider-specific broker instruction into the attached session
-- reading a file-backed structured request from disk
-- extracting a framed reply back into the broker reply model
+- intercepting explicit relay directives from the attached session
+- injecting short acknowledgement and reply-summary text back into the attached session
+- preserving the conversational feel of an in-session collaboration loop
 
-This keeps terminal-specific behavior localized to the host companion/adapter layer instead of turning the broker itself into a terminal controller.
+Broker work execution itself should still prefer the provider's non-interactive path when reliability matters. Phase 6 debugging showed that PTY-driven broker prompt injection into interactive TUIs was not a stable cross-provider execution mechanism, even with file-backed artifacts and explicit temp-root access.
+
+The corrected boundary is:
+
+- broker and coordinator own task routing, artifact lifecycle, and structured work state
+- companions own live-session interception and user-visible notification
+- providers execute broker work non-interactively against the retained request artifact
+
+This keeps terminal-specific behavior localized to the host companion layer instead of turning the broker into a terminal controller or making broker execution depend on fragile TUI submission semantics.
 
 ### 4. Shared Task-Thread Store
 

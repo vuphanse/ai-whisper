@@ -58,6 +58,7 @@ Phase 6 should use a split design:
 - shared relay workflow logic
 - coordinator-owned broker artifact lifecycle
 - provider-specific origin-session notification
+- provider-specific one-shot broker execution behind the live relay UX
 
 The shared broker and thread model remains the source of truth for routing and lifecycle. The providers own only the host-specific seams: detecting relay directives in live sessions and injecting acknowledgement or reply-summary text back into those sessions.
 
@@ -105,17 +106,26 @@ This keeps artifact lifecycle and cleanup in the collaboration coordinator path 
 
 ### File-Backed Broker Delivery
 
-The supported Phase 6 broker-delivery path for attached live sessions should be file-backed.
+The supported Phase 6 broker-delivery path for relay work should be file-backed.
 
 That means:
 
 - the relay service still enqueues broker work through the shared collab and thread model
 - the coordinator creates a retained request artifact after enqueueing, once the real `workItemId` exists
-- the live-session adapter injects only a short provider-specific instruction that points to the absolute `request.json` path
+- the broker execution path reads the authoritative `request.json` rather than reconstructing structured work from inline prompt text
 - the request file is the authoritative source of truth and must override conflicting ambient session context
-- the paired session still returns the existing three-line framed reply contract
+- the broker reply still returns through the existing structured provider reply contract
 
-Phase 6 should not treat long inline broker prompt injection as a supported delivery mechanism. Any probe or submission experiments kept for debugging remain diagnostic tools, not product behavior.
+Phase 6 should not treat long inline broker prompt injection into an attached TUI as a supported delivery mechanism. Debug evidence showed that PTY-driven live-session prompt injection was not reliable enough across Codex and Claude, even after file-backed artifacts, temp-root access, submit timing, and timeout tuning were added.
+
+The architectural correction is:
+
+- keep the live session as the user-visible collaboration surface
+- keep relay interception and acknowledgement inside the live session
+- execute broker work through the provider's non-interactive path against the retained file-backed request artifact
+- inject only concise acknowledgement and reply-summary text back into the origin live session
+
+This preserves the Phase 6 user workflow while removing the least reliable part of the earlier design.
 
 ### `OriginSessionNotifier`
 
@@ -182,7 +192,7 @@ The raw relay directive should not remain in the host session as ordinary conver
 
 ## Reply Presentation
 
-When the paired session replies through the broker, the origin session should receive one concise inline summary.
+When the paired provider reply returns through the broker, the origin session should receive one concise inline summary.
 
 Examples:
 
@@ -216,7 +226,8 @@ Phase 6 should add tests that prove:
 8. acknowledgement messages appear in the origin session
 9. concise reply summaries appear in the origin session after paired replies
 10. file-backed broker delivery creates authoritative retained request artifacts outside the user workspace
-11. live-session adapters consume artifact handles without owning artifact cleanup or lifecycle policy
+11. non-interactive provider execution consumes those retained artifacts as the source of truth for broker work
+12. live-session relay remains responsible for interception, acknowledgement, and reply-summary injection without depending on PTY-driven broker prompt execution
 
 Phase 6 should not add attach, rebinding, or recovery tests. Those belong to Phase 7.
 
