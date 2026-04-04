@@ -66,8 +66,7 @@ function makeProvider(handleWorkImpl?: (req: ProviderWorkRequest, ctx?: Provider
 		getHealthState: vi.fn(() => "healthy" as const),
 		handleWork: handleWorkImpl
 			? vi.fn(handleWorkImpl)
-			: vi.fn(async (_req: ProviderWorkRequest, ctx?: ProviderWorkContext) => {
-				ctx?.onAttemptStart?.(1, "test_strategy");
+			: vi.fn(async (_req: ProviderWorkRequest, _ctx?: ProviderWorkContext) => {
 				return SUCCESS_REPLY;
 			}),
 	};
@@ -133,9 +132,6 @@ describe("createLiveSessionBrokerExecutor", () => {
 		const result = await executor(BASE_REQUEST);
 
 		expect(result).toEqual(SUCCESS_REPLY);
-		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
-			expect.objectContaining({ result: "replied" }),
-		);
 		expect(artifactService.recordReplied).toHaveBeenCalledWith(
 			expect.objectContaining({ artifactHandle: STUB_HANDLE }),
 		);
@@ -174,8 +170,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 
 	it("InteractiveBrokerError(timed_out) records timed_out and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
-		const provider = makeProvider(async (_req, ctx) => {
-			ctx?.onAttemptStart?.(1, "test_strategy");
+		const provider = makeProvider(async () => {
 			throw new InteractiveBrokerError("timed_out", "provider timed out");
 		});
 		const executor = createLiveSessionBrokerExecutor({
@@ -187,9 +182,6 @@ describe("createLiveSessionBrokerExecutor", () => {
 		const result = await executor(BASE_REQUEST);
 
 		expect(result.kind).toBe("failure");
-		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
-			expect.objectContaining({ result: "timed_out" }),
-		);
 		expect(artifactService.recordFailed).toHaveBeenCalledWith(
 			expect.objectContaining({ state: "timed_out" }),
 		);
@@ -197,8 +189,7 @@ describe("createLiveSessionBrokerExecutor", () => {
 
 	it("InteractiveBrokerError(invalid_reply) records invalid_reply and returns failure reply", async () => {
 		const artifactService = makeArtifactService();
-		const provider = makeProvider(async (_req, ctx) => {
-			ctx?.onAttemptStart?.(1, "test_strategy");
+		const provider = makeProvider(async () => {
 			throw new InteractiveBrokerError("invalid_reply", "reply was malformed");
 		});
 		const executor = createLiveSessionBrokerExecutor({
@@ -210,9 +201,6 @@ describe("createLiveSessionBrokerExecutor", () => {
 		const result = await executor(BASE_REQUEST);
 
 		expect(result.kind).toBe("failure");
-		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
-			expect.objectContaining({ result: "invalid_reply" }),
-		);
 		expect(artifactService.recordFailed).toHaveBeenCalledWith(
 			expect.objectContaining({ state: "invalid_reply" }),
 		);

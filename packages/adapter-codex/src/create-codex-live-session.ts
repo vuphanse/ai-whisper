@@ -5,10 +5,8 @@ import {
 	ensureNodePtySpawnHelperExecutable,
 	mockProviderReplySchema,
 	InteractiveBrokerError,
-	type BrokerArtifactHandle,
 	type InteractiveSessionController,
 	type ProviderReply,
-	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { CodexCommandConfig } from "./codex-command.js";
 import { buildCodexInteractiveBrokerPrompt } from "./codex-live-session-prompt.js";
@@ -211,80 +209,6 @@ export function createCodexLiveSession(input: {
 		},
 		sendLocalMessage(message: string) {
 			input.stdout.write(message);
-		},
-		runBrokerWork(
-			request: ProviderWorkRequest,
-			artifactHandle: BrokerArtifactHandle,
-			onAttemptStart?: (attemptNumber: number, strategy: string) => void,
-		): Promise<ProviderReply> {
-			if (!pty) {
-				throw new InteractiveBrokerError("submit_failed", "PTY session is not running");
-			}
-			if (pending) {
-				throw new InteractiveBrokerError("submit_failed", "Another broker work request is already in progress");
-			}
-
-			const prompt = buildCodexInteractiveBrokerPrompt(artifactHandle.requestFilePath, artifactHandle.workItemId);
-			frameState = { insideFrame: false, buffer: "" };
-			recentOutput = "";
-
-			return new Promise<ProviderReply>((resolve, reject) => {
-				const scheduleAttempt = (attempt: SubmitAttempt, attemptNumber: number) => {
-					onAttemptStart?.(attemptNumber, getSubmitStrategyName(attemptNumber - 1));
-					writePromptPrelude(pty!, {
-						prompt,
-						attempt,
-					});
-					return setTimeout(() => {
-						if (!pty || !pending) return;
-						pty.write(attempt.submitTerminator);
-						pending.frameArmTimer = setTimeout(() => {
-							if (pending) {
-								frameState = { insideFrame: false, buffer: "" };
-								pending.frameArmed = true;
-							}
-						}, FRAME_ARM_DELAY_MS);
-					}, attempt.submitDelayMs);
-				};
-
-				const timer = setTimeout(() => {
-					if (pending) {
-						clearTimeout(pending.retryTimer);
-						clearTimeout(pending.submitTimer);
-						pending = undefined;
-						reject(new InteractiveBrokerError("timed_out", `Broker work timed out after ${REPLY_TIMEOUT_MS}ms. Recent output: ${recentOutput.slice(-200)}`));
-					}
-				}, REPLY_TIMEOUT_MS);
-				const retryTimer = setTimeout(() => {
-					if (!pty || !pending || pending.frameStarted || pending.retried) {
-						return;
-					}
-
-					pending.retried = true;
-					pending.frameArmed = false;
-					clearTimeout(pending.submitTimer);
-					clearTimeout(pending.frameArmTimer);
-					const nextIndex = Math.min(pending.attemptIndex + 1, submitAttempts.length - 1);
-					const attempt = getSubmitAttempt(nextIndex);
-					pending.submitTimer = scheduleAttempt(attempt, 2);
-					pending.attemptIndex = nextIndex;
-				}, SUBMIT_RETRY_MS);
-
-				pending = {
-					resolve,
-					reject,
-					timer,
-					retryTimer,
-					submitTimer: undefined as unknown as ReturnType<typeof setTimeout>,
-					frameArmTimer: undefined as unknown as ReturnType<typeof setTimeout>,
-					frameArmed: false,
-					frameStarted: false,
-					attemptIndex: 0,
-					prompt,
-					retried: false,
-				};
-				pending.submitTimer = scheduleAttempt(getSubmitAttempt(0), 1);
-			});
 		},
 	};
 }

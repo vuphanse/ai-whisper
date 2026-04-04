@@ -30,37 +30,14 @@ export function createLiveSessionBrokerExecutor(input: {
 		// Sweep best-effort off the critical path — deferred to next event loop tick.
 		setTimeout(() => { input.artifactService.sweep(); }, 0);
 
-		// Track which attempt number the adapter is currently on. The adapter
-		// signals each attempt start (including the initial one and any retry) via
-		// the onAttemptStart callback so that status.json reflects actual retry history.
-		let currentAttempt = 0;
-
 		let reply: ProviderReply;
 		try {
 			reply = await input.provider.handleWork(request, {
 				artifactHandle,
-				onAttemptStart: (attemptNumber, strategy) => {
-					currentAttempt = attemptNumber;
-					input.artifactService.recordAttemptStart({
-						artifactHandle,
-						attemptNumber,
-						submitStrategy: strategy,
-						startedAt: new Date().toISOString(),
-					});
-				},
 			});
 		} catch (err) {
 			if (err instanceof InteractiveBrokerError) {
 				const code = err.code;
-				if (currentAttempt > 0) {
-					input.artifactService.recordAttemptResult({
-						artifactHandle,
-						attemptNumber: currentAttempt,
-						result: code,
-						endedAt: new Date().toISOString(),
-						...(err.outputTail !== undefined ? { outputTail: err.outputTail } : {}),
-					});
-				}
 				input.artifactService.recordFailed({
 					artifactHandle,
 					state: code,
@@ -70,30 +47,12 @@ export function createLiveSessionBrokerExecutor(input: {
 			}
 
 			const message = err instanceof Error ? err.message : String(err);
-			if (currentAttempt > 0) {
-				input.artifactService.recordAttemptResult({
-					artifactHandle,
-					attemptNumber: currentAttempt,
-					result: "submit_failed",
-					endedAt: new Date().toISOString(),
-					outputTail: message,
-				});
-			}
 			input.artifactService.recordFailed({
 				artifactHandle,
 				state: "submit_failed",
 				at: new Date().toISOString(),
 			});
 			return { kind: "failure", content: message, transitionIntent: "failed" };
-		}
-
-		if (currentAttempt > 0) {
-			input.artifactService.recordAttemptResult({
-				artifactHandle,
-				attemptNumber: currentAttempt,
-				result: "replied",
-				endedAt: new Date().toISOString(),
-			});
 		}
 
 		input.artifactService.recordReplied({

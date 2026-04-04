@@ -41,13 +41,6 @@ export function createCodexProvider(
 			interactiveSession = session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
-			if (interactiveSession) {
-				if (!context?.artifactHandle) {
-					throw new Error("BrokerArtifactHandle is required when an interactive session is attached");
-				}
-				return interactiveSession.runBrokerWork(request, context.artifactHandle, context.onAttemptStart);
-			}
-
 			const prompt = buildCodexPrompt(request);
 
 			return new Promise((resolve) => {
