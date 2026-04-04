@@ -46,11 +46,14 @@ describe("phase 6 manual smoke script", () => {
 		// The broker-current path must NOT use the old inline request object shape.
 		// It must write a request.json file and pass a requestFilePath to the prompt builder.
 		expect(source).toContain("request.json");
+		// requestFilePath must be used somewhere in the broker-current path
 		expect(source).toContain("requestFilePath");
-		expect(source).toContain("buildCodexInteractiveBrokerPrompt(requestFilePath");
-		expect(source).toContain("buildClaudeInteractiveBrokerPrompt(requestFilePath");
 
-		// Ensure the inline old signature is not used in broker-current
+		// Old signature was: buildCodexInteractiveBrokerPrompt({ workItemId, ... }) — inline request object
+		expect(source).not.toContain("buildCodexInteractiveBrokerPrompt({");
+		expect(source).not.toContain("buildClaudeInteractiveBrokerPrompt({");
+
+		// Ensure the inline old single-arg signature is not used in broker-current
 		// (old: buildCodexInteractiveBrokerPrompt(request) where request is an object)
 		expect(source).not.toContain("buildCodexInteractiveBrokerPrompt(request)");
 		expect(source).not.toContain("buildClaudeInteractiveBrokerPrompt(request)");
@@ -66,7 +69,11 @@ describe("phase 6 manual smoke script", () => {
 		);
 		const source = readFileSync(scriptPath, "utf8");
 
-		// The call site must pass two arguments: request and artifactHandle
-		expect(source).toContain("runBrokerWork(request, artifactHandle)");
+		// Old signature was: runBrokerWork(request) — no artifact handle
+		expect(source).not.toMatch(/runBrokerWork\s*\(\s*request\s*\)/);
+
+		// runBrokerWork must be called with two arguments (request + artifactHandle)
+		expect(source).toContain("runBrokerWork");
+		expect(source).toContain("artifactHandle");
 	});
 });

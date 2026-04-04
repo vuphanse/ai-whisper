@@ -266,21 +266,23 @@ function createSmokeArtifactHandle(provider) {
 	fs.writeFileSync(tmpRequestPath, JSON.stringify(requestData, null, 2));
 	fs.renameSync(tmpRequestPath, requestFilePath);
 
+	// status.json not pre-written; populated by BrokerArtifactService when wired
 	return { workItemId, artifactDirPath, requestFilePath, statusFilePath };
 }
 
 async function runBrokerMode(input) {
 	const { options, outputText, session } = input;
+	const artifactHandle = createSmokeArtifactHandle(options.provider);
+
+	// must match the request written into artifactHandle
 	const request = {
-		workItemId: `work_smoke_${options.provider}`,
+		workItemId: artifactHandle.workItemId,
 		collabId: "collab_smoke",
 		threadId: "thread_smoke",
 		requestedAction: "answer_question",
 		instruction:
 			"Reply with a minimal valid JSON object following the requested schema.",
 	};
-
-	const artifactHandle = createSmokeArtifactHandle(options.provider);
 
 	let timeoutId;
 	try {
