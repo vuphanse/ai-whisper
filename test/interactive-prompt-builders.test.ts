@@ -17,6 +17,7 @@ describe("interactive prompt builders", () => {
 		expect(prompt).not.toContain("action=");
 		expect(prompt).not.toContain("Return ONLY valid JSON.");
 		expect(prompt).not.toContain('"kind": "answer" | "review" | "clarification" | "failure"');
+		expect(prompt).not.toContain("\n");
 	});
 
 	it("keeps the Codex interactive broker prompt minimal and framed", () => {
@@ -36,5 +37,6 @@ describe("interactive prompt builders", () => {
 		expect(prompt).not.toContain("collabId:");
 		expect(prompt).not.toContain("threadId:");
 		expect(prompt).not.toContain("workItemId:");
+		expect(prompt).not.toContain("\n");
 	});
 });

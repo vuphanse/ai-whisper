@@ -206,6 +206,41 @@ describe("claude live session", () => {
 		await assertion;
 	});
 
+	it("rejects pending runBrokerWork with submit_failed when stop() is called", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_claude_stop",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		}, stubHandle);
+
+		await session.stop();
+
+		await expect(replyPromise).rejects.toMatchObject({
+			name: "InteractiveBrokerError",
+			code: "submit_failed",
+		});
+	});
+
 	it("rejects with InteractiveBrokerError invalid_reply when JSON is malformed", async () => {
 		vi.useFakeTimers();
 

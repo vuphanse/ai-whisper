@@ -164,7 +164,9 @@ export function createClaudeLiveSession(input: {
 				clearTimeout(pending.retryTimer);
 				clearTimeout(pending.submitTimer);
 				clearTimeout(pending.frameArmTimer);
+				const { reject } = pending;
 				pending = undefined;
+				reject(new InteractiveBrokerError("submit_failed", "Session stopped while broker work was pending"));
 			}
 			if (pty) {
 				pty.kill();
