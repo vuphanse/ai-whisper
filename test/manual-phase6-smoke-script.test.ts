@@ -73,8 +73,12 @@ describe("phase 6 manual smoke script", () => {
 		expect(source).toContain("provider.handleWork");
 		expect(source).toContain("provider.handleWork(request, { artifactHandle })");
 		expect(source).toContain("provider.attachInteractiveSession?.(session)");
+		expect(source).toContain("createProviderForTarget");
+		expect(source).toContain("createInteractiveSessionForTarget");
 
 		// Must NOT use the retired PTY broker execution path
 		expect(source).not.toContain("runBrokerWork");
+		expect(source).not.toContain('execArgs: ["exec"]');
+		expect(source).not.toContain('execArgs: ["-p"]');
 	});
 });

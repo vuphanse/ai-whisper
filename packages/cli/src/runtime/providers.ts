@@ -21,16 +21,26 @@ export function getInteractiveSessionExecArgsForTarget(
 	return ["--add-dir", tempRoot, "--permission-mode", "dontAsk"];
 }
 
+export function getProviderExecArgsForTarget(target: "codex" | "claude"): string[] {
+	const tempRoot = getLiveSessionBrokerTempRoot();
+
+	if (target === "codex") {
+		return ["exec", "--add-dir", tempRoot];
+	}
+
+	return ["-p", "--add-dir", tempRoot, "--permission-mode", "dontAsk"];
+}
+
 export function createProviderForTarget(target: "codex" | "claude") {
 	if (target === "codex") {
 		return createCodexProvider({
 			executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-			execArgs: ["exec"],
+			execArgs: getProviderExecArgsForTarget("codex"),
 		});
 	}
 	return createClaudeProvider({
 		executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-		execArgs: ["-p"],
+		execArgs: getProviderExecArgsForTarget("claude"),
 	});
 }
 

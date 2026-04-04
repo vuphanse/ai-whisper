@@ -3,16 +3,18 @@ import fs from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
-import { createCodexLiveSession } from "../../packages/adapter-codex/dist/create-codex-live-session.js";
-import { createClaudeLiveSession } from "../../packages/adapter-claude/dist/create-claude-live-session.js";
-import { createCodexProvider } from "../../packages/adapter-codex/dist/create-codex-provider.js";
-import { createClaudeProvider } from "../../packages/adapter-claude/dist/create-claude-provider.js";
 import { buildCodexInteractiveBrokerPrompt } from "../../packages/adapter-codex/dist/codex-live-session-prompt.js";
 import { buildClaudeInteractiveBrokerPrompt } from "../../packages/adapter-claude/dist/claude-live-session-prompt.js";
 import {
 	beginBrokerReply,
 	endBrokerReply,
 } from "../../packages/shared/dist/index.js";
+import {
+	createInteractiveSessionForTarget,
+	createProviderForTarget,
+	getInteractiveSessionExecArgsForTarget,
+	getProviderExecArgsForTarget,
+} from "../../packages/cli/dist/runtime/providers.js";
 
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
@@ -131,36 +133,16 @@ function createOutputCapture(input = { echo: true }) {
 }
 
 function createSession(options, stdout) {
-	return options.provider === "codex"
-		? createCodexLiveSession({
-				config: {
-					executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-					execArgs: [],
-				},
-				cwd: options.workspace,
-				stdout,
-		  })
-		: createClaudeLiveSession({
-				config: {
-					executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-					execArgs: [],
-				},
-				cwd: options.workspace,
-				stdout,
-		  });
+	return createInteractiveSessionForTarget({
+		target: options.provider,
+		cwd: options.workspace,
+		stdout,
+		replyTimeoutMs: options.timeoutMs,
+	});
 }
 
 function createProvider(options) {
-	if (options.provider === "codex") {
-		return createCodexProvider({
-			executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-			execArgs: ["exec"],
-		});
-	}
-	return createClaudeProvider({
-		executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-		execArgs: ["-p"],
-	});
+	return createProviderForTarget(options.provider);
 }
 
 function escapeBytes(input) {

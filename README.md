@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 6 delivers the in-session relay workflow on top of the Phase 5 CLI-first MVP: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, and concise inline acknowledgement and reply summaries inside active sessions.
+This repository is being built in incremental phases. Phase 6 is complete and delivers the in-session relay workflow on top of the Phase 5 CLI-first MVP: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, and concise inline acknowledgement and reply summaries inside active sessions.
 
 ## Requirements
 
@@ -62,5 +62,5 @@ whisper collab stop
 - Phase 3: collaboration and thread engine
 - Phase 4: companion runtime and generic provider layer
 - Phase 5: CLI-first MVP
-- Phase 6: in-session relay workflow
+- Phase 6: in-session relay workflow (completed)
 - Phase 7: attach, recovery, and operator tooling

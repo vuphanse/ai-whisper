@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import {
 	createProviderIdentity,
 	type CompanionProvider,
@@ -46,9 +48,15 @@ export function createCodexProvider(
 			const prompt = context?.artifactHandle
 				? buildCodexFileBackedBrokerPrompt(context.artifactHandle.requestFilePath)
 				: buildCodexPrompt(request);
+			const outputLastMessagePath = context?.artifactHandle
+				? join(context.artifactHandle.artifactDirPath, ".codex-last-message.json")
+				: null;
+			const spawnArgs = outputLastMessagePath
+				? [...config.execArgs, "--output-last-message", outputLastMessagePath, prompt]
+				: [...config.execArgs, prompt];
 
 			return new Promise((resolve) => {
-				const child = spawn(config.executable, [...config.execArgs, prompt], {
+				const child = spawn(config.executable, spawnArgs, {
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 
@@ -85,7 +93,36 @@ export function createCodexProvider(
 						return;
 					}
 
-					resolve(parseCodexOutput(stdout));
+					if (outputLastMessagePath && existsSync(outputLastMessagePath)) {
+						try {
+							const fileReply = parseCodexOutput(readFileSync(outputLastMessagePath, "utf8"));
+							if (fileReply.kind !== "failure") {
+								resolve(fileReply);
+								return;
+							}
+						} finally {
+							try {
+								rmSync(outputLastMessagePath, { force: true });
+							} catch {
+								// best-effort cleanup
+							}
+						}
+					}
+
+					const stdoutReply = parseCodexOutput(stdout);
+					if (stdoutReply.kind !== "failure") {
+						resolve(stdoutReply);
+						return;
+					}
+
+					const stderrReply = parseCodexOutput(stderr);
+					if (stderrReply.kind !== "failure") {
+						resolve(stderrReply);
+						return;
+					}
+
+					const combinedReply = parseCodexOutput(`${stdout}\n${stderr}`);
+					resolve(combinedReply);
 				});
 			});
 		},
