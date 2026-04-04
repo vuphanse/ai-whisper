@@ -1,28 +1,82 @@
-import { describe, it } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createClaudeLiveSession } from "../packages/adapter-claude/src/index.ts";
+import { createFakePty } from "./helpers/fake-pty.ts";
 
-// Broker work submission tests have been removed. createClaudeLiveSession no
-// longer exposes runBrokerWork on its returned InteractiveSessionController.
-// Tests will be re-added in Task 5 once the one-shot provider pattern is in place.
+function createFakeStdout() {
+	const chunks: string[] = [];
+	return {
+		chunks,
+		write(data: string) {
+			chunks.push(data);
+			return true;
+		},
+	} as unknown as NodeJS.WritableStream & { chunks: string[] };
+}
 
 describe("claude live session", () => {
 	it("can be instantiated without errors", () => {
-		const stdout = {
-			write() {
-				return true;
-			},
-		} as unknown as NodeJS.WritableStream;
-
+		const stdout = createFakeStdout();
 		const session = createClaudeLiveSession({
 			config: { executable: "claude", execArgs: [] },
 			cwd: "/tmp",
 			stdout,
 		});
 
-		// Just verify the object has the expected shape.
-		if (typeof session.start !== "function") throw new Error("start missing");
-		if (typeof session.stop !== "function") throw new Error("stop missing");
-		if (typeof session.writeUserInput !== "function") throw new Error("writeUserInput missing");
-		if (typeof session.sendLocalMessage !== "function") throw new Error("sendLocalMessage missing");
+		expect(typeof session.start).toBe("function");
+		expect(typeof session.stop).toBe("function");
+		expect(typeof session.writeUserInput).toBe("function");
+		expect(typeof session.sendLocalMessage).toBe("function");
+	});
+
+	it("start() attaches PTY and routes data to stdout", async () => {
+		const stdout = createFakeStdout();
+		const fakePty = createFakePty();
+
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty: () => fakePty,
+		});
+
+		await session.start();
+		fakePty.emitData("hello from pty");
+
+		expect(stdout.chunks).toContain("hello from pty");
+	});
+
+	it("writeUserInput() forwards data to PTY", async () => {
+		const stdout = createFakeStdout();
+		const fakePty = createFakePty();
+
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty: () => fakePty,
+		});
+
+		await session.start();
+		session.writeUserInput("hello");
+
+		expect(fakePty.writes).toContain("hello");
+	});
+
+	it("stop() kills the PTY", async () => {
+		const stdout = createFakeStdout();
+		const fakePty = createFakePty();
+		const killSpy = vi.spyOn(fakePty, "kill");
+
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			createPty: () => fakePty,
+		});
+
+		await session.start();
+		await session.stop();
+
+		expect(killSpy).toHaveBeenCalledOnce();
 	});
 });
