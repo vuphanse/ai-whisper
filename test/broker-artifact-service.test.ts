@@ -106,7 +106,8 @@ describe("BrokerArtifactService", () => {
 		service.recordAttemptStart({
 			artifactHandle: handle,
 			attemptNumber: 1,
-			submitStrategy: "direct-paste",
+			executionMode: "one_shot",
+			promptSummary: "file-backed one-shot provider execution",
 			startedAt: "2026-04-04T15:30:05.000Z",
 		});
 
@@ -118,7 +119,8 @@ describe("BrokerArtifactService", () => {
 		const attempts = status["attempts"] as Array<Record<string, unknown>>;
 		expect(attempts).toHaveLength(1);
 		expect(attempts[0]!["attemptNumber"]).toBe(1);
-		expect(attempts[0]!["submitStrategy"]).toBe("direct-paste");
+		expect(attempts[0]!["executionMode"]).toBe("one_shot");
+		expect(attempts[0]!["promptSummary"]).toBe("file-backed one-shot provider execution");
 		expect(attempts[0]!["startedAt"]).toBe("2026-04-04T15:30:05.000Z");
 		expect(attempts[0]!["result"]).toBeUndefined();
 	});
@@ -128,7 +130,8 @@ describe("BrokerArtifactService", () => {
 		service.recordAttemptStart({
 			artifactHandle: handle,
 			attemptNumber: 1,
-			submitStrategy: "direct-paste",
+			executionMode: "one_shot",
+			promptSummary: "file-backed one-shot provider execution",
 			startedAt: "2026-04-04T15:30:05.000Z",
 		});
 		service.recordAttemptResult({
@@ -154,7 +157,8 @@ describe("BrokerArtifactService", () => {
 		service.recordAttemptStart({
 			artifactHandle: handle,
 			attemptNumber: 1,
-			submitStrategy: "direct-paste",
+			executionMode: "one_shot",
+			promptSummary: "file-backed one-shot provider execution",
 			startedAt: "2026-04-04T15:30:05.000Z",
 		});
 
@@ -289,7 +293,8 @@ describe("BrokerArtifactService", () => {
 		service.recordAttemptStart({
 			artifactHandle: handle,
 			attemptNumber: 1,
-			submitStrategy: "direct-paste",
+			executionMode: "one_shot",
+			promptSummary: "file-backed one-shot provider execution",
 			startedAt: "2026-04-04T15:30:05.000Z",
 		});
 

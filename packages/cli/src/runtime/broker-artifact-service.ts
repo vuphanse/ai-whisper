@@ -25,7 +25,8 @@ interface StateTransition {
 
 interface AttemptEntry {
 	attemptNumber: number;
-	submitStrategy: string;
+	executionMode: "one_shot";
+	promptSummary: string;
 	startedAt: string;
 	result?: AttemptResult;
 	endedAt?: string;
@@ -170,13 +171,15 @@ export class BrokerArtifactService {
 	recordAttemptStart(input: {
 		artifactHandle: BrokerArtifactHandle;
 		attemptNumber: number;
-		submitStrategy: string;
+		executionMode: "one_shot";
+		promptSummary: string;
 		startedAt: string;
 	}): void {
 		const status = readStatusFile(input.artifactHandle.statusFilePath);
 		const newAttempt: AttemptEntry = {
 			attemptNumber: input.attemptNumber,
-			submitStrategy: input.submitStrategy,
+			executionMode: input.executionMode,
+			promptSummary: input.promptSummary,
 			startedAt: input.startedAt,
 		};
 		status.attempts.push(newAttempt);
