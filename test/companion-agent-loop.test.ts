@@ -76,7 +76,9 @@ describe("companion agent loop", () => {
 			attachInteractiveSession(session) {
 				expect(session).toBe(interactiveSession);
 			},
-			async handleWork(request) {
+			async handleWork(request, context) {
+				// Verify the executor passed an artifactHandle
+				expect(context?.artifactHandle).toBeDefined();
 				handled.push(request);
 				return {
 					kind: "answer" as const,

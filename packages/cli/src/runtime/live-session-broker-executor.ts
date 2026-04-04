@@ -30,6 +30,14 @@ export function createLiveSessionBrokerExecutor(input: {
 		// Sweep best-effort off the critical path — deferred to next event loop tick.
 		setTimeout(() => { input.artifactService.sweep(); }, 0);
 
+		input.artifactService.recordAttemptStart({
+			artifactHandle,
+			attemptNumber: 1,
+			executionMode: "one_shot",
+			promptSummary: "file-backed one-shot provider execution",
+			startedAt: new Date().toISOString(),
+		});
+
 		let reply: ProviderReply;
 		try {
 			reply = await input.provider.handleWork(request, {
@@ -38,6 +46,13 @@ export function createLiveSessionBrokerExecutor(input: {
 		} catch (err) {
 			if (err instanceof InteractiveBrokerError) {
 				const code = err.code;
+				input.artifactService.recordAttemptResult({
+					artifactHandle,
+					attemptNumber: 1,
+					result: code,
+					endedAt: new Date().toISOString(),
+					...(err.outputTail !== undefined ? { outputTail: err.outputTail } : {}),
+				});
 				input.artifactService.recordFailed({
 					artifactHandle,
 					state: code,
@@ -47,6 +62,13 @@ export function createLiveSessionBrokerExecutor(input: {
 			}
 
 			const message = err instanceof Error ? err.message : String(err);
+			input.artifactService.recordAttemptResult({
+				artifactHandle,
+				attemptNumber: 1,
+				result: "submit_failed",
+				endedAt: new Date().toISOString(),
+				outputTail: message,
+			});
 			input.artifactService.recordFailed({
 				artifactHandle,
 				state: "submit_failed",
@@ -54,6 +76,13 @@ export function createLiveSessionBrokerExecutor(input: {
 			});
 			return { kind: "failure", content: message, transitionIntent: "failed" };
 		}
+
+		input.artifactService.recordAttemptResult({
+			artifactHandle,
+			attemptNumber: 1,
+			result: "replied",
+			endedAt: new Date().toISOString(),
+		});
 
 		input.artifactService.recordReplied({
 			artifactHandle,
