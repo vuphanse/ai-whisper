@@ -38,6 +38,7 @@ export function createClaudeProvider(
 			return "healthy";
 		},
 		attachInteractiveSession(session: InteractiveSessionController) {
+			// interactiveSession will be used in Task 4's one-shot execution wiring.
 			interactiveSession = session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
