@@ -91,3 +91,4 @@ export {
 	endBrokerReply,
 	type InteractiveBrokerFrameState,
 } from "./interactive-broker-protocol.js";
+export { ensureNodePtySpawnHelperExecutable } from "./node-pty-support.js";

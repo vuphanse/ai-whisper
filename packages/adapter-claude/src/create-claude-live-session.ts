@@ -1,6 +1,8 @@
+import { createRequire } from "node:module";
 import { spawn } from "node-pty";
 import {
 	appendInteractiveBrokerChunk,
+	ensureNodePtySpawnHelperExecutable,
 	mockProviderReplySchema,
 	type InteractiveSessionController,
 	type ProviderReply,
@@ -11,6 +13,8 @@ import { buildClaudeInteractiveBrokerPrompt } from "./claude-live-session-prompt
 
 const REPLY_TIMEOUT_MS = 15_000;
 const RECENT_OUTPUT_LIMIT = 400;
+const require = createRequire(import.meta.url);
+const nodePtyUnixTerminalPath = require.resolve("node-pty/lib/unixTerminal.js");
 
 export function createClaudeLiveSession(input: {
 	config: ClaudeCommandConfig;
@@ -66,6 +70,9 @@ export function createClaudeLiveSession(input: {
 
 	return {
 		start() {
+			ensureNodePtySpawnHelperExecutable({
+				unixTerminalPath: nodePtyUnixTerminalPath,
+			});
 			pty = spawn(
 				input.config.executable,
 				input.config.execArgs,
