@@ -4,6 +4,8 @@ import type {
 	CompanionProvider,
 	InteractiveSessionController,
 } from "@ai-whisper/shared";
+import { createBrokerArtifactService } from "./broker-artifact-service.js";
+import { createLiveSessionBrokerExecutor } from "./live-session-broker-executor.js";
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,11 +21,21 @@ export function runCompanionAgentLoop(input: {
 }): Promise<() => Promise<void>> {
 	input.provider.attachInteractiveSession?.(input.interactiveSession);
 
+	const artifactService = createBrokerArtifactService();
+	const executor = createLiveSessionBrokerExecutor({
+		provider: input.provider,
+		artifactService,
+		sessionId: input.sessionId,
+	});
+
+	void artifactService.sweep();
+
 	const companion = createCompanionRuntime({
 		broker: input.broker,
 		collabId: input.collabId,
 		sessionId: input.sessionId,
 		provider: input.provider,
+		executor,
 	});
 
 	companion.register(new Date().toISOString());
