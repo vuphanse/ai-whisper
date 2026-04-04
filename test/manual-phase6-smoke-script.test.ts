@@ -62,18 +62,19 @@ describe("phase 6 manual smoke script", () => {
 		expect(source).toContain("DEBUG ONLY");
 	});
 
-	it("runBrokerWork in the mjs script is called with both request and artifactHandle", () => {
+	it("broker mode in the mjs script uses one-shot provider execution", () => {
 		const scriptPath = resolve(
 			process.cwd(),
 			"scripts/manual/phase-6-live-session-smoke.mjs",
 		);
 		const source = readFileSync(scriptPath, "utf8");
 
-		// Old signature was: runBrokerWork(request) — no artifact handle
-		expect(source).not.toMatch(/runBrokerWork\s*\(\s*request\s*\)/);
+		// Broker mode must use the provider's one-shot execution path
+		expect(source).toContain("provider.handleWork");
+		expect(source).toContain("provider.handleWork(request, { artifactHandle })");
+		expect(source).toContain("provider.attachInteractiveSession?.(session)");
 
-		// runBrokerWork must be called with two arguments (request + artifactHandle)
-		expect(source).toContain("runBrokerWork");
-		expect(source).toContain("artifactHandle");
+		// Must NOT use the retired PTY broker execution path
+		expect(source).not.toContain("runBrokerWork");
 	});
 });

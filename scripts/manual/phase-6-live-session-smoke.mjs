@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { createCodexLiveSession } from "../../packages/adapter-codex/dist/create-codex-live-session.js";
 import { createClaudeLiveSession } from "../../packages/adapter-claude/dist/create-claude-live-session.js";
+import { createCodexProvider } from "../../packages/adapter-codex/dist/create-codex-provider.js";
+import { createClaudeProvider } from "../../packages/adapter-claude/dist/create-claude-provider.js";
 import { buildCodexInteractiveBrokerPrompt } from "../../packages/adapter-codex/dist/codex-live-session-prompt.js";
 import { buildClaudeInteractiveBrokerPrompt } from "../../packages/adapter-claude/dist/claude-live-session-prompt.js";
 import {
@@ -148,6 +150,19 @@ function createSession(options, stdout) {
 		  });
 }
 
+function createProvider(options) {
+	if (options.provider === "codex") {
+		return createCodexProvider({
+			executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
+			execArgs: ["exec"],
+		});
+	}
+	return createClaudeProvider({
+		executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
+		execArgs: ["-p"],
+	});
+}
+
 function escapeBytes(input) {
 	return JSON.stringify(input).slice(1, -1);
 }
@@ -271,8 +286,11 @@ function createSmokeArtifactHandle(provider) {
 }
 
 async function runBrokerMode(input) {
-	const { options, outputText, session } = input;
+	const { options, outputText, session, provider } = input;
 	const artifactHandle = createSmokeArtifactHandle(options.provider);
+
+	// Attach the interactive session for relay UX display
+	provider.attachInteractiveSession?.(session);
 
 	// must match the request written into artifactHandle
 	const request = {
@@ -284,28 +302,14 @@ async function runBrokerMode(input) {
 			"Reply with a minimal valid JSON object following the requested schema.",
 	};
 
-	let timeoutId;
-	try {
-		const reply = await Promise.race([
-			session.runBrokerWork(request, artifactHandle),
-			new Promise((_, reject) => {
-				timeoutId = setTimeout(() => {
-					reject(new Error(`Timed out after ${options.timeoutMs}ms`));
-				}, options.timeoutMs);
-			}),
-		]);
+	const reply = await provider.handleWork(request, { artifactHandle });
 
-		return {
-			provider: options.provider,
-			workspace: options.workspace,
-			reply,
-			tail: outputText.value.slice(-OUTPUT_TAIL_LIMIT),
-		};
-	} finally {
-		if (timeoutId) {
-			clearTimeout(timeoutId);
-		}
-	}
+	return {
+		provider: options.provider,
+		workspace: options.workspace,
+		reply,
+		tail: outputText.value.slice(-OUTPUT_TAIL_LIMIT),
+	};
 }
 
 async function runProbeMode(input) {
@@ -384,9 +388,8 @@ async function main() {
 	const { outputText, tee } = createOutputCapture({
 		echo: options.mode !== "probe",
 	});
-	const session = createSession(options, tee);
-
 	let stdinListener;
+	let session; // only assigned in broker mode
 
 	try {
 		if (stdin.isTTY && typeof stdin.setRawMode === "function") {
@@ -398,11 +401,13 @@ async function main() {
 			options.mode === "probe"
 				? await runProbeMode({ options, stdin })
 				: await (async () => {
+						session = createSession(options, tee);
+						const provider = createProvider(options);
 						await session.start();
 						stdinListener = (chunk) => session.writeUserInput(String(chunk));
 						stdin.on("data", stdinListener);
 						await sleep(options.waitMs);
-						return runBrokerMode({ options, outputText, session });
+						return runBrokerMode({ options, outputText, session, provider });
 				  })();
 
 		process.stdout.write(
@@ -429,7 +434,7 @@ async function main() {
 		if (stdin.isTTY && typeof stdin.setRawMode === "function") {
 			stdin.setRawMode(Boolean(previousRawMode));
 		}
-		if (options.mode === "broker") {
+		if (session) {
 			await session.stop();
 		}
 	}
