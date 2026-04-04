@@ -23,6 +23,7 @@ describe("phase 6 manual smoke script", () => {
 		expect(output).toContain("--workspace");
 		expect(output).toContain("framed-minimal");
 		expect(output).toContain("broker-current");
+		expect(output).toContain("file-read-sentinel");
 	});
 
 	it("broker-current probe mode is labeled debug-only in the shell script", () => {
@@ -48,6 +49,8 @@ describe("phase 6 manual smoke script", () => {
 		expect(source).toContain("request.json");
 		// requestFilePath must be used somewhere in the broker-current path
 		expect(source).toContain("requestFilePath");
+		expect(source).toContain("FILE_READ_OK:");
+		expect(source).toContain('].join("\\n")');
 
 		// Old signature was: buildCodexInteractiveBrokerPrompt({ workItemId, ... }) — inline request object
 		expect(source).not.toContain("buildCodexInteractiveBrokerPrompt({");
@@ -62,18 +65,32 @@ describe("phase 6 manual smoke script", () => {
 		expect(source).toContain("DEBUG ONLY");
 	});
 
-	it("runBrokerWork in the mjs script is called with both request and artifactHandle", () => {
+	it("broker mode in the mjs script goes through the live-session broker executor", () => {
 		const scriptPath = resolve(
 			process.cwd(),
 			"scripts/manual/phase-6-live-session-smoke.mjs",
 		);
 		const source = readFileSync(scriptPath, "utf8");
 
-		// Old signature was: runBrokerWork(request) — no artifact handle
-		expect(source).not.toMatch(/runBrokerWork\s*\(\s*request\s*\)/);
+		expect(source).toContain("createBrokerArtifactService");
+		expect(source).toContain("createLiveSessionBrokerExecutor");
+		expect(source).toContain("provider.attachInteractiveSession?.(session)");
+		expect(source).toContain("executor(request)");
+	});
 
-		// runBrokerWork must be called with two arguments (request + artifactHandle)
-		expect(source).toContain("runBrokerWork");
-		expect(source).toContain("artifactHandle");
+	it("broker mode reports artifact diagnostics and configured timing in the mjs script", () => {
+		const scriptPath = resolve(
+			process.cwd(),
+			"scripts/manual/phase-6-live-session-smoke.mjs",
+		);
+		const source = readFileSync(scriptPath, "utf8");
+
+		expect(source).toContain("readArtifactDiagnostics");
+		expect(source).toContain("artifactDirPath");
+		expect(source).toContain("statusFilePath");
+		expect(source).toContain("statusExists");
+		expect(source).toContain("waitMs");
+		expect(source).toContain("timeoutMs");
+		expect(source).toContain("execArgs");
 	});
 });

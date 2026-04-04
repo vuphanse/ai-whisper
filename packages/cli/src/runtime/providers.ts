@@ -7,6 +7,19 @@ import {
 	createCodexProvider,
 } from "@ai-whisper/adapter-codex";
 import type { InteractiveSessionController } from "@ai-whisper/shared";
+import { getLiveSessionBrokerTempRoot } from "./paths.js";
+
+export function getInteractiveSessionExecArgsForTarget(
+	target: "codex" | "claude",
+): string[] {
+	const tempRoot = getLiveSessionBrokerTempRoot();
+
+	if (target === "codex") {
+		return ["--add-dir", tempRoot];
+	}
+
+	return ["--add-dir", tempRoot, "--permission-mode", "dontAsk"];
+}
 
 export function createProviderForTarget(target: "codex" | "claude") {
 	if (target === "codex") {
@@ -25,23 +38,31 @@ export function createInteractiveSessionForTarget(input: {
 	target: "codex" | "claude";
 	cwd: string;
 	stdout: NodeJS.WritableStream;
+	replyTimeoutMs?: number;
 }): InteractiveSessionController {
+	const execArgs = getInteractiveSessionExecArgsForTarget(input.target);
 	if (input.target === "codex") {
 		return createCodexLiveSession({
 			config: {
 				executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-				execArgs: [],
+				execArgs,
 			},
 			cwd: input.cwd,
 			stdout: input.stdout,
+			...(input.replyTimeoutMs !== undefined
+				? { replyTimeoutMs: input.replyTimeoutMs }
+				: {}),
 		});
 	}
 	return createClaudeLiveSession({
 		config: {
 			executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-			execArgs: [],
+			execArgs,
 		},
 		cwd: input.cwd,
 		stdout: input.stdout,
+		...(input.replyTimeoutMs !== undefined
+			? { replyTimeoutMs: input.replyTimeoutMs }
+			: {}),
 	});
 }

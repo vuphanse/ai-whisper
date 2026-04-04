@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import os from "node:os";
 import { join, resolve } from "node:path";
 import { Writable } from "node:stream";
-import { createCodexLiveSession } from "../../packages/adapter-codex/dist/create-codex-live-session.js";
-import { createClaudeLiveSession } from "../../packages/adapter-claude/dist/create-claude-live-session.js";
 import { buildCodexInteractiveBrokerPrompt } from "../../packages/adapter-codex/dist/codex-live-session-prompt.js";
 import { buildClaudeInteractiveBrokerPrompt } from "../../packages/adapter-claude/dist/claude-live-session-prompt.js";
+import { createBrokerArtifactService } from "../../packages/cli/dist/runtime/broker-artifact-service.js";
+import { createLiveSessionBrokerExecutor } from "../../packages/cli/dist/runtime/live-session-broker-executor.js";
+import { getLiveSessionBrokerTempRoot } from "../../packages/cli/dist/runtime/paths.js";
+import {
+	createInteractiveSessionForTarget,
+	createProviderForTarget,
+	getInteractiveSessionExecArgsForTarget,
+} from "../../packages/cli/dist/runtime/providers.js";
 import {
 	beginBrokerReply,
 	endBrokerReply,
@@ -24,7 +29,7 @@ Options:
   --mode <broker|probe>
   --message <text>
   --attempt <name>
-  --probe-payload <plain|framed-minimal|broker-current>
+  --probe-payload <plain|framed-minimal|broker-current|file-read-sentinel>
   --workspace <path>
   --wait-ms <ms>
   --timeout-ms <ms>
@@ -34,7 +39,7 @@ Options:
 }
 
 function parseArgs(argv) {
-	/** @type {{provider: "codex" | "claude" | null, mode: "broker" | "probe", message: string, attempt: string | null, probePayload: "plain" | "framed-minimal" | "broker-current", workspace: string, waitMs: number, timeoutMs: number, probeSettleMs: number}} */
+	/** @type {{provider: "codex" | "claude" | null, mode: "broker" | "probe", message: string, attempt: string | null, probePayload: "plain" | "framed-minimal" | "broker-current" | "file-read-sentinel", workspace: string, waitMs: number, timeoutMs: number, probeSettleMs: number}} */
 	const parsed = {
 		provider: null,
 		mode: "broker",
@@ -65,7 +70,7 @@ function parseArgs(argv) {
 				break;
 			case "--probe-payload":
 				parsed.probePayload =
-					/** @type {"plain" | "framed-minimal" | "broker-current"} */ (
+					/** @type {"plain" | "framed-minimal" | "broker-current" | "file-read-sentinel"} */ (
 						argv[++index] ?? parsed.probePayload
 					);
 				break;
@@ -100,9 +105,10 @@ function parseArgs(argv) {
 	if (
 		parsed.probePayload !== "plain" &&
 		parsed.probePayload !== "framed-minimal" &&
-		parsed.probePayload !== "broker-current"
+		parsed.probePayload !== "broker-current" &&
+		parsed.probePayload !== "file-read-sentinel"
 	) {
-		throw new Error("--probe-payload must be plain, framed-minimal, or broker-current");
+		throw new Error("--probe-payload must be plain, framed-minimal, broker-current, or file-read-sentinel");
 	}
 
 	return parsed;
@@ -128,71 +134,95 @@ function createOutputCapture(input = { echo: true }) {
 	return { outputText, tee };
 }
 
-function createSession(options, stdout) {
-	return options.provider === "codex"
-		? createCodexLiveSession({
-				config: {
-					executable: process.env.AI_WHISPER_CODEX_CMD ?? "codex",
-					execArgs: [],
-				},
-				cwd: options.workspace,
-				stdout,
-		  })
-		: createClaudeLiveSession({
-				config: {
-					executable: process.env.AI_WHISPER_CLAUDE_CMD ?? "claude",
-					execArgs: [],
-				},
-				cwd: options.workspace,
-				stdout,
-		  });
-}
-
 function escapeBytes(input) {
 	return JSON.stringify(input).slice(1, -1);
 }
 
-function createProbeMessage(options) {
-	if (options.probePayload === "broker-current") {
-		// DEBUG ONLY — not the supported broker-delivery path.
-		// This probe mode mimics the file-backed prompt shape for manual inspection
-		// of PTY submission mechanics. The real delivery path goes through
-		// BrokerArtifactService inside createLiveSessionBrokerExecutor.
+function createProbeArtifact(input) {
+	const tempRoot = getLiveSessionBrokerTempRoot();
+	const artifactDirPath = join(
+		tempRoot,
+		`${new Date().toISOString().replace(/[:.]/g, "-")}-${input.workItemId}`,
+	);
+	const requestFilePath = join(artifactDirPath, "request.json");
+	const statusFilePath = join(artifactDirPath, "status.json");
+	fs.mkdirSync(artifactDirPath, { recursive: true });
+	const tmpPath = `${requestFilePath}.tmp`;
+	fs.writeFileSync(tmpPath, JSON.stringify(input.requestData, null, 2));
+	fs.renameSync(tmpPath, requestFilePath);
+	return {
+		workItemId: input.workItemId,
+		artifactDirPath,
+		requestFilePath,
+		statusFilePath,
+	};
+}
+
+function createProbePayload(options) {
+	if (options.probePayload === "broker-current" || options.probePayload === "file-read-sentinel") {
+		// DEBUG ONLY — these probe modes exercise live-session PTY/file-consumption
+		// behavior and are not the supported production broker-delivery path.
 		const workItemId = `work_probe_${options.provider}`;
-		const requestData = {
-			schemaVersion: 1,
-			workItemId,
-			collabId: "collab_probe",
-			threadId: "thread_probe",
-			requestedAction: "answer_question",
-			instruction:
-				"Reply with a minimal valid JSON object following the requested schema.",
+		const requestData =
+			options.probePayload === "broker-current"
+				? {
+						schemaVersion: 1,
+						workItemId,
+						collabId: "collab_probe",
+						threadId: "thread_probe",
+						requestedAction: "answer_question",
+						instruction:
+							"Reply with a minimal valid JSON object following the requested schema.",
+				  }
+				: {
+						schemaVersion: 1,
+						workItemId,
+						collabId: "collab_probe",
+						threadId: "thread_probe",
+						requestedAction: "answer_question",
+						instruction: "FILE_READ_SENTINEL_ONLY",
+				  };
+		const artifactHandle = createProbeArtifact({ workItemId, requestData });
+
+		if (options.probePayload === "broker-current") {
+			return {
+				message:
+					options.provider === "codex"
+						? buildCodexInteractiveBrokerPrompt(artifactHandle.requestFilePath, workItemId)
+						: buildClaudeInteractiveBrokerPrompt(artifactHandle.requestFilePath, workItemId),
+				artifactHandle,
+			};
+		}
+
+		return {
+			message:
+				options.provider === "codex"
+					? [
+							`Read the JSON file at ${artifactHandle.requestFilePath}.`,
+							`Print exactly one line and nothing else: FILE_READ_OK:${workItemId}:answer_question`,
+					  ].join("\n")
+					: `Read the JSON file at ${artifactHandle.requestFilePath}. Print exactly one line and nothing else: FILE_READ_OK:${workItemId}:answer_question`,
+			artifactHandle,
 		};
-
-		const username = process.env["USER"] ?? process.env["USERNAME"] ?? "unknown";
-		const probeDir = join(os.tmpdir(), "ai-whisper", username, "probe-smoke", workItemId);
-		fs.mkdirSync(probeDir, { recursive: true });
-		const requestFilePath = join(probeDir, "request.json");
-		const tmpPath = `${requestFilePath}.tmp`;
-		fs.writeFileSync(tmpPath, JSON.stringify(requestData, null, 2));
-		fs.renameSync(tmpPath, requestFilePath);
-
-		return options.provider === "codex"
-			? buildCodexInteractiveBrokerPrompt(requestFilePath, workItemId)
-			: buildClaudeInteractiveBrokerPrompt(requestFilePath, workItemId);
 	}
 
 	if (options.probePayload === "framed-minimal") {
 		const workItemId = "work_probe_frame";
-		return [
-			`Print exactly this line: ${beginBrokerReply(workItemId)}`,
-			'Print exactly this line: {"kind":"answer","content":"ok","transitionIntent":"completed"}',
-			`Print exactly this line: ${endBrokerReply(workItemId)}`,
-			"Print nothing else.",
-		].join("\n");
+		return {
+			message: [
+				`Print exactly this line: ${beginBrokerReply(workItemId)}`,
+				'Print exactly this line: {"kind":"answer","content":"ok","transitionIntent":"completed"}',
+				`Print exactly this line: ${endBrokerReply(workItemId)}`,
+				"Print nothing else.",
+			].join("\n"),
+			artifactHandle: null,
+		};
 	}
 
-	return options.message;
+	return {
+		message: options.message,
+		artifactHandle: null,
+	};
 }
 
 function createProbeAttempts(provider, message) {
@@ -270,24 +300,105 @@ function createSmokeArtifactHandle(provider) {
 	return { workItemId, artifactDirPath, requestFilePath, statusFilePath };
 }
 
+function readJsonIfExists(path) {
+	if (!fs.existsSync(path)) {
+		return null;
+	}
+
+	try {
+		return JSON.parse(fs.readFileSync(path, "utf8"));
+	} catch (error) {
+		return {
+			parseError: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+function summarizeRequestArtifact(requestJson) {
+	if (!requestJson || typeof requestJson !== "object") {
+		return requestJson;
+	}
+
+	return {
+		schemaVersion: requestJson.schemaVersion,
+		workItemId: requestJson.workItemId,
+		collabId: requestJson.collabId,
+		threadId: requestJson.threadId,
+		requestedAction: requestJson.requestedAction,
+	};
+}
+
+function readArtifactDiagnostics(artifactHandle) {
+	if (!artifactHandle) {
+		return null;
+	}
+
+	const requestJson = readJsonIfExists(artifactHandle.requestFilePath);
+	const statusJson = readJsonIfExists(artifactHandle.statusFilePath);
+
+	return {
+		artifactDirPath: artifactHandle.artifactDirPath,
+		requestFilePath: artifactHandle.requestFilePath,
+		statusFilePath: artifactHandle.statusFilePath,
+		requestExists: fs.existsSync(artifactHandle.requestFilePath),
+		statusExists: fs.existsSync(artifactHandle.statusFilePath),
+		request: summarizeRequestArtifact(requestJson),
+		status: statusJson,
+	};
+}
+
+function findLatestArtifactHandle(workItemId) {
+	const tempRoot = getLiveSessionBrokerTempRoot();
+	if (!fs.existsSync(tempRoot)) {
+		return null;
+	}
+
+	const matchingDirs = fs
+		.readdirSync(tempRoot)
+		.filter((entry) => entry.endsWith(`-${workItemId}`))
+		.sort();
+	const latestDirName = matchingDirs.at(-1);
+	if (!latestDirName) {
+		return null;
+	}
+
+	const artifactDirPath = join(tempRoot, latestDirName);
+	return {
+		workItemId,
+		artifactDirPath,
+		requestFilePath: join(artifactDirPath, "request.json"),
+		statusFilePath: join(artifactDirPath, "status.json"),
+	};
+}
+
+function createProvider(options, session) {
+	const provider = createProviderForTarget(options.provider);
+	provider.attachInteractiveSession?.(session);
+	return provider;
+}
+
 async function runBrokerMode(input) {
 	const { options, outputText, session } = input;
-	const artifactHandle = createSmokeArtifactHandle(options.provider);
-
-	// must match the request written into artifactHandle
 	const request = {
-		workItemId: artifactHandle.workItemId,
+		workItemId: `work_smoke_${options.provider}`,
 		collabId: "collab_smoke",
 		threadId: "thread_smoke",
 		requestedAction: "answer_question",
 		instruction:
 			"Reply with a minimal valid JSON object following the requested schema.",
 	};
+	const provider = createProvider(options, session);
+	const artifactService = createBrokerArtifactService();
+	const executor = createLiveSessionBrokerExecutor({
+		provider,
+		artifactService,
+		sessionId: `smoke_session_${options.provider}`,
+	});
 
 	let timeoutId;
 	try {
 		const reply = await Promise.race([
-			session.runBrokerWork(request, artifactHandle),
+			executor(request),
 			new Promise((_, reject) => {
 				timeoutId = setTimeout(() => {
 					reject(new Error(`Timed out after ${options.timeoutMs}ms`));
@@ -298,8 +409,12 @@ async function runBrokerMode(input) {
 		return {
 			provider: options.provider,
 			workspace: options.workspace,
+			waitMs: options.waitMs,
+			timeoutMs: options.timeoutMs,
+			execArgs: getInteractiveSessionExecArgsForTarget(options.provider),
 			reply,
 			tail: outputText.value.slice(-OUTPUT_TAIL_LIMIT),
+			artifact: readArtifactDiagnostics(findLatestArtifactHandle(request.workItemId)),
 		};
 	} finally {
 		if (timeoutId) {
@@ -311,7 +426,8 @@ async function runBrokerMode(input) {
 async function runProbeMode(input) {
 	const { options, stdin } = input;
 	const attempts = [];
-	const probeMessage = createProbeMessage(options);
+	const probePayload = createProbePayload(options);
+	const probeMessage = probePayload.message;
 	const configuredAttempts = createProbeAttempts(
 		options.provider,
 		probeMessage,
@@ -328,7 +444,12 @@ async function runProbeMode(input) {
 
 	for (const attempt of attemptsToRun) {
 		const { outputText, tee } = createOutputCapture({ echo: true });
-		const session = createSession(options, tee);
+		const session = createInteractiveSessionForTarget({
+			target: options.provider,
+			cwd: options.workspace,
+			stdout: tee,
+			replyTimeoutMs: options.timeoutMs,
+		});
 		let stdinListener;
 
 		try {
@@ -372,6 +493,8 @@ async function runProbeMode(input) {
 		message: options.message,
 		attempt: options.attempt,
 		probePayload: options.probePayload,
+		execArgs: getInteractiveSessionExecArgsForTarget(options.provider),
+		artifact: readArtifactDiagnostics(probePayload.artifactHandle),
 		attempts,
 		tail: attempts.at(-1)?.outputTail ?? "",
 	};
@@ -384,7 +507,15 @@ async function main() {
 	const { outputText, tee } = createOutputCapture({
 		echo: options.mode !== "probe",
 	});
-	const session = createSession(options, tee);
+	const runtimeSession =
+		options.mode === "broker"
+			? createInteractiveSessionForTarget({
+					target: options.provider,
+					cwd: options.workspace,
+					stdout: tee,
+					replyTimeoutMs: options.timeoutMs,
+			  })
+			: null;
 
 	let stdinListener;
 
@@ -398,11 +529,15 @@ async function main() {
 			options.mode === "probe"
 				? await runProbeMode({ options, stdin })
 				: await (async () => {
-						await session.start();
-						stdinListener = (chunk) => session.writeUserInput(String(chunk));
+						await runtimeSession.start();
+						stdinListener = (chunk) => runtimeSession.writeUserInput(String(chunk));
 						stdin.on("data", stdinListener);
 						await sleep(options.waitMs);
-						return runBrokerMode({ options, outputText, session });
+						return runBrokerMode({
+							options,
+							outputText,
+							session: runtimeSession,
+						});
 				  })();
 
 		process.stdout.write(
@@ -414,8 +549,17 @@ async function main() {
 				{
 					provider: options.provider,
 					workspace: options.workspace,
+					waitMs: options.waitMs,
+					timeoutMs: options.timeoutMs,
+					execArgs: getInteractiveSessionExecArgsForTarget(options.provider),
 					error: error instanceof Error ? error.message : String(error),
 					tail: outputText.value.slice(-OUTPUT_TAIL_LIMIT),
+					artifact:
+						options.mode === "broker"
+							? readArtifactDiagnostics(
+									findLatestArtifactHandle(`work_smoke_${options.provider}`),
+							  )
+							: undefined,
 				},
 				null,
 				2,
@@ -430,7 +574,7 @@ async function main() {
 			stdin.setRawMode(Boolean(previousRawMode));
 		}
 		if (options.mode === "broker") {
-			await session.stop();
+			await runtimeSession.stop();
 		}
 	}
 }

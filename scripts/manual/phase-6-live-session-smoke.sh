@@ -22,7 +22,7 @@ Options:
   --mode <broker|probe>       Run the full broker smoke or plain-message probe
   --message <text>            Probe message payload when --mode probe is used
   --attempt <name>            Run a single named probe attempt
-  --probe-payload <kind>      Probe payload: plain, framed-minimal, or broker-current
+  --probe-payload <kind>      Probe payload: plain, framed-minimal, broker-current, or file-read-sentinel
   --workspace <path>          Working directory to open in the live session
   --wait-ms <ms>              Delay before broker prompt injection
   --timeout-ms <ms>           Maximum wait for framed reply
@@ -102,12 +102,12 @@ if [[ "$MODE" != "broker" && "$MODE" != "probe" ]]; then
   exit 1
 fi
 
-if [[ "$PROBE_PAYLOAD" != "plain" && "$PROBE_PAYLOAD" != "framed-minimal" && "$PROBE_PAYLOAD" != "broker-current" ]]; then
-  echo "--probe-payload must be plain, framed-minimal, or broker-current" >&2
+if [[ "$PROBE_PAYLOAD" != "plain" && "$PROBE_PAYLOAD" != "framed-minimal" && "$PROBE_PAYLOAD" != "broker-current" && "$PROBE_PAYLOAD" != "file-read-sentinel" ]]; then
+  echo "--probe-payload must be plain, framed-minimal, broker-current, or file-read-sentinel" >&2
   exit 1
 fi
 
-# Note: --probe-payload framed-minimal and broker-current are DEBUG ONLY modes.
+# Note: --probe-payload framed-minimal, broker-current, and file-read-sentinel are DEBUG ONLY modes.
 # They exercise PTY submission mechanics using inline or file-backed payloads
 # and are not the supported broker-delivery path used in production.
 

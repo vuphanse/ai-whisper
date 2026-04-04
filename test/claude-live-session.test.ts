@@ -206,6 +206,53 @@ describe("claude live session", () => {
 		await assertion;
 	});
 
+	it("uses a configured reply timeout when provided", async () => {
+		vi.useFakeTimers();
+
+		const fakePty = createFakePty();
+		const stdout = {
+			write() {
+				return true;
+			},
+		} as unknown as NodeJS.WritableStream;
+		const session = createClaudeLiveSession({
+			config: { executable: "claude", execArgs: [] },
+			cwd: "/tmp",
+			stdout,
+			replyTimeoutMs: 30_000,
+			createPty() {
+				return fakePty;
+			},
+		});
+
+		await session.start();
+		const replyPromise = session.runBrokerWork({
+			workItemId: "work_claude_custom_timeout",
+			collabId: "collab_smoke",
+			threadId: "thread_smoke",
+			requestedAction: "answer_question",
+			instruction: "Reply with valid JSON.",
+		}, stubHandle);
+		let settled = false;
+		void replyPromise.then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			},
+		);
+
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(settled).toBe(false);
+		await vi.advanceTimersByTimeAsync(15_000);
+		await expect(replyPromise).rejects.toMatchObject({
+			name: "InteractiveBrokerError",
+			code: "timed_out",
+			message: expect.stringContaining("30000ms"),
+		});
+	});
+
 	it("rejects pending runBrokerWork with submit_failed when stop() is called", async () => {
 		vi.useFakeTimers();
 

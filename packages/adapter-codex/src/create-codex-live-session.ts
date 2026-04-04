@@ -115,8 +115,10 @@ export function createCodexLiveSession(input: {
 	config: CodexCommandConfig;
 	cwd: string;
 	stdout: NodeJS.WritableStream;
+	replyTimeoutMs?: number;
 	createPty?: (input: { config: CodexCommandConfig; cwd: string }) => PtyLike;
 }): InteractiveSessionController {
+	const replyTimeoutMs = input.replyTimeoutMs ?? REPLY_TIMEOUT_MS;
 	let pty: PtyLike | null = null;
 	let recentOutput = "";
 	let frameState = { insideFrame: false, buffer: "" };
@@ -252,9 +254,9 @@ export function createCodexLiveSession(input: {
 						clearTimeout(pending.retryTimer);
 						clearTimeout(pending.submitTimer);
 						pending = undefined;
-						reject(new InteractiveBrokerError("timed_out", `Broker work timed out after ${REPLY_TIMEOUT_MS}ms. Recent output: ${recentOutput.slice(-200)}`));
+						reject(new InteractiveBrokerError("timed_out", `Broker work timed out after ${replyTimeoutMs}ms. Recent output: ${recentOutput.slice(-200)}`));
 					}
-				}, REPLY_TIMEOUT_MS);
+				}, replyTimeoutMs);
 				const retryTimer = setTimeout(() => {
 					if (!pty || !pending || pending.frameStarted || pending.retried) {
 						return;
