@@ -2,10 +2,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	beginBrokerReply,
 	endBrokerReply,
+	type BrokerArtifactHandle,
 } from "../packages/shared/src/index.ts";
 import { createCodexLiveSession } from "../packages/adapter-codex/src/index.ts";
 import { buildCodexInteractiveBrokerPrompt } from "../packages/adapter-codex/src/codex-live-session-prompt.ts";
 import { createFakePty } from "./helpers/fake-pty.ts";
+
+const stubHandle: BrokerArtifactHandle = {
+	workItemId: "work_codex_submit",
+	artifactDirPath: "/tmp/artifacts/stub",
+	requestFilePath: "/tmp/artifacts/stub/request.json",
+	statusFilePath: "/tmp/artifacts/stub/status.json",
+};
 
 function expectedLinewiseWrites(
 	prompt: string,
@@ -58,7 +66,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		expect(writes).toEqual(
 			expectedLinewiseWrites(
@@ -137,7 +145,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		await vi.advanceTimersByTimeAsync(1_425);
@@ -245,7 +253,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		await vi.advanceTimersByTimeAsync(300);
@@ -305,7 +313,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		await vi.advanceTimersByTimeAsync(75);
 		fakePty.emitData(`${beginBrokerReply("work_codex_echo")}\n`);
@@ -354,7 +362,7 @@ describe("codex live session", () => {
 			threadId: "thread_smoke",
 			requestedAction: "answer_question",
 			instruction: "Reply with valid JSON.",
-		});
+		}, stubHandle);
 
 		session.writeUserInput("\u001b[1;1R");
 		session.writeUserInput("x");

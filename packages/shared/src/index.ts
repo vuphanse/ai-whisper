@@ -1,4 +1,6 @@
 export const sharedPackageName = "@ai-whisper/shared";
+export type { BrokerArtifactHandle } from "./broker-artifact.js";
+export { InteractiveBrokerError } from "./interactive-broker-error.js";
 
 export { brokerSchemaVersion } from "./version.js";
 export type { Brand } from "./brand.js";
@@ -72,6 +74,7 @@ export {
 	type CompanionProvider,
 	type MockProviderReply,
 	type ProviderReply,
+	type ProviderWorkContext,
 	type ProviderWorkRequest,
 } from "./provider-contract.js";
 export {
