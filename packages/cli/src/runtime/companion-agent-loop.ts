@@ -28,7 +28,7 @@ export function runCompanionAgentLoop(input: {
 		sessionId: input.sessionId,
 	});
 
-	void artifactService.sweep();
+	artifactService.sweep();
 
 	const companion = createCompanionRuntime({
 		broker: input.broker,

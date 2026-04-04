@@ -27,17 +27,17 @@ export function createLiveSessionBrokerExecutor(input: {
 			return { kind: "failure", content: message, transitionIntent: "failed" };
 		}
 
-		input.artifactService.recordAttemptStart({
-			artifactHandle,
-			attemptNumber: 1,
-			submitStrategy: "file-backed",
-			startedAt: new Date().toISOString(),
-		});
-
-		void input.artifactService.sweep();
-
 		let reply: ProviderReply;
 		try {
+			input.artifactService.recordAttemptStart({
+				artifactHandle,
+				attemptNumber: 1,
+				submitStrategy: "file-backed",
+				startedAt: new Date().toISOString(),
+			});
+
+			input.artifactService.sweep();
+
 			reply = await input.provider.handleWork(request, { artifactHandle });
 		} catch (err) {
 			if (err instanceof InteractiveBrokerError) {
@@ -49,6 +49,11 @@ export function createLiveSessionBrokerExecutor(input: {
 					endedAt: new Date().toISOString(),
 					...(err.outputTail !== undefined ? { outputTail: err.outputTail } : {}),
 				});
+				input.artifactService.recordFailed({
+					artifactHandle,
+					state: code,
+					at: new Date().toISOString(),
+				});
 				return { kind: "failure", content: err.message, transitionIntent: "failed" };
 			}
 
@@ -59,6 +64,11 @@ export function createLiveSessionBrokerExecutor(input: {
 				result: "submit_failed",
 				endedAt: new Date().toISOString(),
 				outputTail: message,
+			});
+			input.artifactService.recordFailed({
+				artifactHandle,
+				state: "submit_failed",
+				at: new Date().toISOString(),
 			});
 			return { kind: "failure", content: message, transitionIntent: "failed" };
 		}

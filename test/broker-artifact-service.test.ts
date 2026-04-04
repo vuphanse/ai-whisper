@@ -271,6 +271,19 @@ describe("BrokerArtifactService", () => {
 		}
 	});
 
+	it("recordFailed transitions currentState to the given failure state", () => {
+		const handle = service.createArtifact(BASE_INPUT);
+		service.recordFailed({ artifactHandle: handle, state: "timed_out", at: "2026-04-04T15:30:30.000Z" });
+
+		const status = readJson(handle.statusFilePath) as Record<string, unknown>;
+		expect(status["currentState"]).toBe("timed_out");
+		expect(status["updatedAt"]).toBe("2026-04-04T15:30:30.000Z");
+
+		const transitions = status["transitions"] as Array<Record<string, unknown>>;
+		const lastTransition = transitions[transitions.length - 1]!;
+		expect(lastTransition["state"]).toBe("timed_out");
+	});
+
 	it("sweep() preserves short normalized plain-text output tails (ANSI stripped, truncated to 200 chars)", () => {
 		const handle = service.createArtifact(BASE_INPUT);
 		service.recordAttemptStart({

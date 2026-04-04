@@ -58,6 +58,7 @@ export function createCompanionRuntime(input: {
 
 			let reply;
 			try {
+				// No artifact context when no executor is configured (one-shot path)
 				const doWork = input.executor ?? ((req) => input.provider.handleWork(req));
 				const request: ProviderWorkRequest = {
 					workItemId: workItem.workItemId,

@@ -214,6 +214,14 @@ export class BrokerArtifactService {
 		this.transitionState(input.artifactHandle, "consumed", "consumed", input.at);
 	}
 
+	recordFailed(input: {
+		artifactHandle: BrokerArtifactHandle;
+		state: "timed_out" | "invalid_reply" | "submit_failed";
+		at: string;
+	}): void {
+		this.transitionState(input.artifactHandle, input.state, input.state, input.at);
+	}
+
 	sweep(): void {
 		try {
 			if (!fs.existsSync(this.tempRoot)) return;

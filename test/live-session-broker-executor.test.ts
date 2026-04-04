@@ -6,7 +6,7 @@ import type {
 	ProviderReply,
 	ProviderWorkRequest,
 } from "../packages/shared/src/index.ts";
-import { BrokerArtifactService } from "../packages/cli/src/runtime/broker-artifact-service.ts";
+import type { BrokerArtifactService } from "../packages/cli/src/runtime/broker-artifact-service.ts";
 import { createLiveSessionBrokerExecutor } from "../packages/cli/src/runtime/live-session-broker-executor.ts";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +41,7 @@ function makeArtifactService(): BrokerArtifactService {
 		recordAttemptResult: vi.fn(),
 		recordReplied: vi.fn(),
 		recordConsumed: vi.fn(),
+		recordFailed: vi.fn(),
 		sweep: vi.fn(),
 	} as unknown as BrokerArtifactService;
 	return service;
@@ -163,6 +164,9 @@ describe("createLiveSessionBrokerExecutor", () => {
 		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
 			expect.objectContaining({ result: "submit_failed" }),
 		);
+		expect(artifactService.recordFailed).toHaveBeenCalledWith(
+			expect.objectContaining({ state: "submit_failed" }),
+		);
 	});
 
 	it("InteractiveBrokerError(timed_out) records timed_out and returns failure reply", async () => {
@@ -182,6 +186,9 @@ describe("createLiveSessionBrokerExecutor", () => {
 		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
 			expect.objectContaining({ result: "timed_out" }),
 		);
+		expect(artifactService.recordFailed).toHaveBeenCalledWith(
+			expect.objectContaining({ state: "timed_out" }),
+		);
 	});
 
 	it("InteractiveBrokerError(invalid_reply) records invalid_reply and returns failure reply", async () => {
@@ -200,6 +207,9 @@ describe("createLiveSessionBrokerExecutor", () => {
 		expect(result.kind).toBe("failure");
 		expect(artifactService.recordAttemptResult).toHaveBeenCalledWith(
 			expect.objectContaining({ result: "invalid_reply" }),
+		);
+		expect(artifactService.recordFailed).toHaveBeenCalledWith(
+			expect.objectContaining({ state: "invalid_reply" }),
 		);
 	});
 
@@ -223,15 +233,14 @@ describe("createLiveSessionBrokerExecutor", () => {
 				outputTail: "something unexpected",
 			}),
 		);
+		expect(artifactService.recordFailed).toHaveBeenCalledWith(
+			expect.objectContaining({ state: "submit_failed" }),
+		);
 	});
 
-	it("cleanup sweep is triggered non-blocking (sweep called but not awaited)", async () => {
+	it("sweep() is called during executor invocation", async () => {
 		const artifactService = makeArtifactService();
-		// Make sweep never resolve to confirm we don't await it
-		let sweepResolve!: () => void;
-		vi.mocked(artifactService.sweep).mockImplementation(
-			() => void new Promise<void>((r) => { sweepResolve = r; }),
-		);
+		const sweepSpy = vi.mocked(artifactService.sweep);
 		const provider = makeProvider();
 		const executor = createLiveSessionBrokerExecutor({
 			provider,
@@ -239,13 +248,8 @@ describe("createLiveSessionBrokerExecutor", () => {
 			sessionId: "session_test",
 		});
 
-		// If executor awaits sweep, this would hang. It should complete quickly.
-		const result = await executor(BASE_REQUEST);
+		await executor(BASE_REQUEST);
 
-		expect(result).toEqual(SUCCESS_REPLY);
-		expect(artifactService.sweep).toHaveBeenCalledOnce();
-
-		// Resolve sweep to avoid unhandled rejections
-		sweepResolve?.();
+		expect(sweepSpy).toHaveBeenCalledOnce();
 	});
 });
