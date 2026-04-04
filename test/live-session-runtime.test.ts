@@ -112,4 +112,44 @@ describe("live session runtime", () => {
 		expect(fakePty.writes.join("")).not.toContain("thread_123");
 		expect(output.join("")).toContain("Unsupported relay syntax");
 	});
+
+	it("enables raw stdin mode while the live session is active", async () => {
+		const stdout = new PassThrough();
+		const rawModeCalls: boolean[] = [];
+		const stdin = new PassThrough() as PassThrough & {
+			isTTY: boolean;
+			isRaw: boolean;
+			setRawMode(mode: boolean): void;
+		};
+		stdin.isTTY = true;
+		stdin.isRaw = false;
+		stdin.setRawMode = (mode: boolean) => {
+			rawModeCalls.push(mode);
+			stdin.isRaw = mode;
+		};
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput() {},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				runBrokerWork: () =>
+					Promise.reject(
+						new Error("broker work is not used in this test"),
+					),
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		await runtime.stop();
+
+		expect(rawModeCalls).toEqual([true, false]);
+	});
 });

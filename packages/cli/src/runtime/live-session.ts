@@ -17,6 +17,12 @@ export function createLiveSessionRuntime(input: {
 		sendNow: (message: string) => void,
 	) => Promise<string | null>;
 }) {
+	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
+		isTTY?: boolean;
+		isRaw?: boolean;
+		setRawMode?: (mode: boolean) => void;
+	};
+	const previousRawMode = ttyStdin.isRaw;
 	const lineBuffer = createRelayLineBuffer({
 		getError: getRelayDirectiveError,
 		isRelayCandidate: (line) =>
@@ -70,11 +76,18 @@ export function createLiveSessionRuntime(input: {
 		async start() {
 			await input.interactiveSession.start();
 
+			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function") {
+				ttyStdin.setRawMode(true);
+			}
+
 			input.stdin.on("data", (chunk: Buffer | string) => {
 				void processChunk(String(chunk));
 			});
 		},
 		async stop() {
+			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function") {
+				ttyStdin.setRawMode(Boolean(previousRawMode));
+			}
 			await input.interactiveSession.stop();
 		},
 	};

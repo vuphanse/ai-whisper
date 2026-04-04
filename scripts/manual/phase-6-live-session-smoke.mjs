@@ -64,6 +64,8 @@ function sleep(ms) {
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
 	const output = [];
+	const stdin = process.stdin;
+	const previousRawMode = stdin.isRaw;
 	const tee = new Writable({
 		write(chunk, _enc, callback) {
 			const text = String(chunk);
@@ -102,9 +104,17 @@ async function main() {
 			  });
 
 	let timeoutId;
+	let stdinListener;
 
 	try {
+		if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+			stdin.setRawMode(true);
+		}
+		stdin.resume();
+
 		await session.start();
+		stdinListener = (chunk) => session.writeUserInput(String(chunk));
+		stdin.on("data", stdinListener);
 		await sleep(options.waitMs);
 
 		const reply = await Promise.race([
@@ -145,6 +155,12 @@ async function main() {
 	} finally {
 		if (timeoutId) {
 			clearTimeout(timeoutId);
+		}
+		if (stdinListener) {
+			stdin.off("data", stdinListener);
+		}
+		if (stdin.isTTY && typeof stdin.setRawMode === "function") {
+			stdin.setRawMode(Boolean(previousRawMode));
 		}
 		await session.stop();
 	}
