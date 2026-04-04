@@ -4,7 +4,11 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 5 delivers a CLI-first MVP with the `whisper collab` workflow, real Codex and Claude providers, broker-backed turn routing, collab lifecycle commands, and active-thread-aware tell behavior.
+This repository is being built in incremental phases. Phase 6 delivers the in-session relay workflow on top of the Phase 5 CLI-first MVP: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, and concise inline acknowledgement and reply summaries inside active sessions.
+
+## Requirements
+
+Phase 6 interactive sessions require `node-pty`, which is a native dependency. Local installs need a working native build toolchain available to `pnpm install` so the PTY binding can compile or load correctly.
 
 ## Workspace Commands
 
@@ -25,12 +29,29 @@ pnpm format
 - `packages/adapter-codex` - Codex provider
 - `packages/adapter-claude` - Claude provider
 
-## MVP Commands
+## Typical Workflow
 
 ```bash
 whisper collab start
+```
+
+Then inside a live session:
+
+```text
+@@codex review this plan
+@@claude[new] implement the agreed changes
+```
+
+And for a brand-new thread that needs explicit artifacts:
+
+```bash
+whisper collab tell --target codex --action review_plan --artifact docs/plan.md "review this plan"
+```
+
+Other lifecycle commands:
+
+```bash
 whisper collab status
-whisper collab tell codex --action review_plan --artifact docs/plan.md "review this plan"
 whisper collab stop
 ```
 

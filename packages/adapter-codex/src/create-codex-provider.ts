@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import {
 	createProviderIdentity,
 	type CompanionProvider,
+	type InteractiveSessionController,
+	type ProviderReply,
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { CodexCommandConfig } from "./codex-command.js";
@@ -11,6 +13,8 @@ import { parseCodexOutput } from "./parse-codex-output.js";
 export function createCodexProvider(
 	config: CodexCommandConfig,
 ): CompanionProvider {
+	let interactiveSession: InteractiveSessionController | null = null;
+
 	return {
 		getIdentity() {
 			return createProviderIdentity({
@@ -23,7 +27,7 @@ export function createCodexProvider(
 			return {
 				supportsDirectPackets: true,
 				supportsNormalization: true,
-				supportsRelayInterception: false,
+				supportsRelayInterception: true,
 				supportsLocalBuffering: false,
 				supportsLaunchHooks: true,
 				extensions: {},
@@ -32,7 +36,14 @@ export function createCodexProvider(
 		getHealthState() {
 			return "healthy";
 		},
-		handleWork(request: ProviderWorkRequest) {
+		attachInteractiveSession(session: InteractiveSessionController) {
+			interactiveSession = session;
+		},
+		handleWork(request: ProviderWorkRequest): Promise<ProviderReply> {
+			if (interactiveSession) {
+				return interactiveSession.runBrokerWork(request);
+			}
+
 			const prompt = buildCodexPrompt(request);
 
 			return new Promise((resolve) => {

@@ -19,6 +19,9 @@ describe("README", () => {
 		expect(readme).toContain("whisper collab status");
 		expect(readme).toContain("whisper collab tell");
 		expect(readme).toContain("whisper collab stop");
-		expect(readme).toContain("Phase 5");
+		expect(readme).toContain("Phase 6");
+		expect(readme).toContain("@@codex");
+		expect(readme).toContain("@@claude");
+		expect(readme).toContain("node-pty");
 	});
 });

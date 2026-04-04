@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InteractiveSessionController } from "./interactive-session.js";
 import type { ProviderCapabilities } from "./provider-capabilities.js";
 import type { ProviderIdentity } from "./provider-identity.js";
 import { replyKinds, transitionIntents } from "./literals.js";
@@ -9,7 +10,10 @@ export const mockProviderReplySchema = z.object({
 	transitionIntent: z.enum(transitionIntents).nullable(),
 });
 
-export type MockProviderReply = z.infer<typeof mockProviderReplySchema>;
+export type ProviderReply = z.infer<typeof mockProviderReplySchema>;
+
+/** @deprecated Use ProviderReply instead. */
+export type MockProviderReply = ProviderReply;
 
 export type ProviderWorkRequest = {
 	readonly workItemId: string;
@@ -23,5 +27,6 @@ export interface CompanionProvider {
 	getIdentity(): ProviderIdentity;
 	getCapabilities(): ProviderCapabilities;
 	getHealthState(): "healthy" | "degraded" | "offline";
-	handleWork(request: ProviderWorkRequest): Promise<MockProviderReply>;
+	handleWork(request: ProviderWorkRequest): Promise<ProviderReply>;
+	attachInteractiveSession?(session: InteractiveSessionController): void;
 }

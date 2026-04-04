@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import {
 	createProviderIdentity,
 	type CompanionProvider,
+	type InteractiveSessionController,
+	type ProviderReply,
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 import type { ClaudeCommandConfig } from "./claude-command.js";
@@ -11,6 +13,8 @@ import { parseClaudeOutput } from "./parse-claude-output.js";
 export function createClaudeProvider(
 	config: ClaudeCommandConfig,
 ): CompanionProvider {
+	let interactiveSession: InteractiveSessionController | null = null;
+
 	return {
 		getIdentity() {
 			return createProviderIdentity({
@@ -23,7 +27,7 @@ export function createClaudeProvider(
 			return {
 				supportsDirectPackets: true,
 				supportsNormalization: true,
-				supportsRelayInterception: false,
+				supportsRelayInterception: true,
 				supportsLocalBuffering: false,
 				supportsLaunchHooks: true,
 				extensions: {},
@@ -32,7 +36,14 @@ export function createClaudeProvider(
 		getHealthState() {
 			return "healthy";
 		},
-		handleWork(request: ProviderWorkRequest) {
+		attachInteractiveSession(session: InteractiveSessionController) {
+			interactiveSession = session;
+		},
+		handleWork(request: ProviderWorkRequest): Promise<ProviderReply> {
+			if (interactiveSession) {
+				return interactiveSession.runBrokerWork(request);
+			}
+
 			const prompt = buildClaudePrompt(request);
 
 			return new Promise((resolve) => {

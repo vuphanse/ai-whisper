@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 import { createBrokerRuntime } from "@ai-whisper/broker";
-import { createCompanionRuntime } from "@ai-whisper/companion-core";
-import { createProviderForTarget } from "../runtime/providers.js";
+import { createLiveSessionRuntime } from "../runtime/live-session.js";
+import { runCompanionAgentLoop } from "../runtime/companion-agent-loop.js";
+import {
+	createInteractiveSessionForTarget,
+	createProviderForTarget,
+} from "../runtime/providers.js";
+import {
+	enqueueRelayWork,
+	formatRelayAcknowledgement,
+	formatRelayReplySummary,
+} from "../runtime/relay-service.js";
+import { waitForReply } from "../runtime/reply-wait.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -9,12 +19,6 @@ function requireEnv(name: string): string {
 		throw new Error(`Missing required environment variable: ${name}`);
 	}
 	return value;
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});
 }
 
 async function main(): Promise<void> {
@@ -36,36 +40,81 @@ async function main(): Promise<void> {
 		host,
 		port,
 	});
-	const companion = createCompanionRuntime({
-		broker,
-		collabId,
-		sessionId,
-		provider: createProviderForTarget(agentArg),
+	const provider = createProviderForTarget(agentArg);
+	const interactiveSession = createInteractiveSessionForTarget({
+		target: agentArg,
+		cwd: process.cwd(),
+		stdout: process.stdout,
+	});
+	const liveSession = createLiveSessionRuntime({
+		interactiveSession,
+		stdin: process.stdin,
+		stdout: process.stdout,
+		onRelay: async (directive) => {
+			const relay = enqueueRelayWork({
+				broker,
+				collabId,
+				originSessionId: sessionId,
+				target: directive.target,
+				instruction: directive.instruction,
+				artifactPaths: [],
+				forceNewThread: directive.forceNewThread,
+				now: new Date().toISOString(),
+			});
+
+			const reply = await waitForReply({
+				broker,
+				threadId: relay.thread.threadId,
+				workItemId: relay.workItem.workItemId,
+			});
+
+			return [
+				`${formatRelayAcknowledgement({
+					target: directive.target,
+					createdNewThread: relay.createdNewThread,
+				})}\n`,
+				`${formatRelayReplySummary({
+					target: directive.target,
+					replyKind: reply.kind,
+					content: reply.content,
+				})}\n`,
+			].join("");
+		},
 	});
 
+	let stopLoop = async () => {};
+	let liveSessionStarted = false;
 	let stopping = false;
-	const shutdown = () => {
+	let requestExit!: () => void;
+	const exitRequested = new Promise<void>((resolve) => {
+		requestExit = resolve;
+	});
+
+	const onSignal = () => {
+		if (stopping) return;
 		stopping = true;
+		requestExit();
 	};
 
-	process.on("SIGTERM", shutdown);
-	process.on("SIGINT", shutdown);
-
-	companion.register(new Date().toISOString());
-	let lastHeartbeatAt = 0;
+	process.on("SIGTERM", onSignal);
+	process.on("SIGINT", onSignal);
 
 	try {
-		while (!stopping) {
-			const now = Date.now();
-			if (now - lastHeartbeatAt >= 1000) {
-				companion.heartbeat(new Date(now).toISOString());
-				lastHeartbeatAt = now;
-			}
-
-			const reply = await companion.processNext(new Date().toISOString());
-			await sleep(reply ? 25 : 250);
-		}
+		await liveSession.start();
+		liveSessionStarted = true;
+		stopLoop = await runCompanionAgentLoop({
+			broker,
+			collabId,
+			sessionId,
+			provider,
+			interactiveSession,
+		});
+		await exitRequested;
 	} finally {
+		await stopLoop();
+		if (liveSessionStarted) {
+			await liveSession.stop();
+		}
 		await broker.stop();
 	}
 }

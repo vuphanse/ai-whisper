@@ -6,8 +6,14 @@ import {
 	mockProviderReplySchema,
 	providerCapabilitiesSchema,
 } from "../packages/shared/src/index.ts";
-import { createCodexProvider } from "../packages/adapter-codex/src/index.ts";
-import { createClaudeProvider } from "../packages/adapter-claude/src/index.ts";
+import {
+	createCodexLiveSession,
+	createCodexProvider,
+} from "../packages/adapter-codex/src/index.ts";
+import {
+	createClaudeLiveSession,
+	createClaudeProvider,
+} from "../packages/adapter-claude/src/index.ts";
 
 describe("provider and companion contracts", () => {
 	it("validates provider identity, capabilities, and companion registration payloads", () => {
@@ -81,5 +87,34 @@ describe("provider and companion contracts", () => {
 				execArgs: ["-p"],
 			}).getIdentity().providerId,
 		).toBe("anthropic-claude-cli");
+	});
+
+	it("providers support relay interception capability", () => {
+		expect(
+			createCodexProvider({ executable: "codex", execArgs: ["exec"] })
+				.getCapabilities().supportsRelayInterception,
+		).toBe(true);
+
+		expect(
+			createClaudeProvider({ executable: "claude", execArgs: ["-p"] })
+				.getCapabilities().supportsRelayInterception,
+		).toBe(true);
+	});
+
+	it("providers expose attachInteractiveSession", () => {
+		expect(
+			typeof createCodexProvider({ executable: "codex", execArgs: ["exec"] })
+				.attachInteractiveSession,
+		).toBe("function");
+
+		expect(
+			typeof createClaudeProvider({ executable: "claude", execArgs: ["-p"] })
+				.attachInteractiveSession,
+		).toBe("function");
+	});
+
+	it("live session factories are exported", () => {
+		expect(typeof createCodexLiveSession).toBe("function");
+		expect(typeof createClaudeLiveSession).toBe("function");
 	});
 });
