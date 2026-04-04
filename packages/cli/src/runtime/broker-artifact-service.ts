@@ -220,6 +220,7 @@ export class BrokerArtifactService {
 
 					const terminalStates: ArtifactState[] = [
 						"consumed",
+						"replied",
 						"timed_out",
 						"invalid_reply",
 						"submit_failed",

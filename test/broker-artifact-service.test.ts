@@ -210,6 +210,26 @@ describe("BrokerArtifactService", () => {
 		}
 	});
 
+	it("sweep() deletes replied-state directories older than 6 hours", () => {
+		vi.useFakeTimers();
+		try {
+			const now = new Date("2026-04-04T15:30:00.000Z");
+			vi.setSystemTime(now);
+
+			const handle = service.createArtifact({ ...BASE_INPUT, now: now.toISOString() });
+			service.recordReplied({ artifactHandle: handle, at: now.toISOString() });
+
+			// Advance time past 6 hours
+			vi.setSystemTime(new Date("2026-04-04T21:31:00.000Z"));
+
+			service.sweep();
+
+			expect(fs.existsSync(handle.artifactDirPath)).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("sweep() deletes stale pending directories older than 12 hours", () => {
 		vi.useFakeTimers();
 		try {
