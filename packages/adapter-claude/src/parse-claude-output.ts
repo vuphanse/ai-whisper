@@ -1,9 +1,9 @@
 import {
 	mockProviderReplySchema,
-	type MockProviderReply,
+	type ProviderReply,
 } from "@ai-whisper/shared";
 
-export function parseClaudeOutput(stdout: string): MockProviderReply {
+export function parseClaudeOutput(stdout: string): ProviderReply {
 	const trimmed = stdout.trim();
 	const start = trimmed.indexOf("{");
 	const end = trimmed.lastIndexOf("}");

@@ -1,8 +1,8 @@
 import {
 	createProviderIdentity,
 	type CompanionProvider,
-	type MockProviderReply,
 	type ProviderCapabilities,
+	type ProviderReply,
 	type ProviderWorkRequest,
 } from "@ai-whisper/shared";
 
@@ -30,7 +30,7 @@ export function createMockProvider(): CompanionProvider {
 		getHealthState() {
 			return "healthy";
 		},
-		handleWork(request: ProviderWorkRequest): Promise<MockProviderReply> {
+		handleWork(request: ProviderWorkRequest): Promise<ProviderReply> {
 			if (request.requestedAction === "review_plan") {
 				return Promise.resolve({
 					kind: "review",

@@ -8,7 +8,7 @@ import { listSessionsForCollab } from "../packages/broker/src/storage/repositori
 import { getWorkItem } from "../packages/broker/src/storage/repositories/work-item-repository.ts";
 import type {
 	CompanionProvider,
-	MockProviderReply,
+	ProviderReply,
 } from "../packages/shared/src/index.ts";
 
 function makeRuntime() {
@@ -99,7 +99,7 @@ function createExplodingProvider(): CompanionProvider {
 		getHealthState() {
 			return "healthy";
 		},
-		handleWork(): Promise<MockProviderReply> {
+		handleWork(): Promise<ProviderReply> {
 			return Promise.reject(new Error("provider exploded"));
 		},
 	};

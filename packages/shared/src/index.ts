@@ -71,6 +71,7 @@ export {
 	mockProviderReplySchema,
 	type CompanionProvider,
 	type MockProviderReply,
+	type ProviderReply,
 	type ProviderWorkRequest,
 } from "./provider-contract.js";
 export {
@@ -78,3 +79,15 @@ export {
 	createProviderIdentity,
 	type ProviderIdentity,
 } from "./provider-identity.js";
+export {
+	relayDirectiveSchema,
+	relayTargets,
+	type RelayDirective,
+} from "./relay-host.js";
+export type { InteractiveSessionController } from "./interactive-session.js";
+export {
+	appendInteractiveBrokerChunk,
+	beginBrokerReply,
+	endBrokerReply,
+	type InteractiveBrokerFrameState,
+} from "./interactive-broker-protocol.js";
