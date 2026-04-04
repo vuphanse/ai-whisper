@@ -4,39 +4,33 @@ import { buildCodexInteractiveBrokerPrompt } from "../packages/adapter-codex/src
 
 describe("interactive prompt builders", () => {
 	it("keeps the Claude interactive broker prompt minimal and framed", () => {
-		const prompt = buildClaudeInteractiveBrokerPrompt({
-			workItemId: "work_probe",
-			collabId: "collab_probe",
-			threadId: "thread_probe",
-			requestedAction: "answer_question",
-			instruction: "Explain the main risk in one sentence.",
-		});
+		const requestFilePath = "/tmp/artifacts/work_probe/request.json";
+		const workItemId = "work_probe";
+		const prompt = buildClaudeInteractiveBrokerPrompt(requestFilePath, workItemId);
 
+		expect(prompt).toContain(requestFilePath);
 		expect(prompt).toContain("AI_WHISPER_REPLY_BEGIN:work_probe");
 		expect(prompt).toContain("AI_WHISPER_REPLY_END:work_probe");
 		expect(prompt).toContain('{"kind":"answer","content":"...');
-		expect(prompt).toContain("instruction=Explain the main risk in one sentence.");
 		expect(prompt).toContain("Reply with exactly three lines and nothing else.");
-		expect(prompt).not.toContain("\n");
+		expect(prompt).not.toContain("instruction=");
+		expect(prompt).not.toContain("action=");
 		expect(prompt).not.toContain("Return ONLY valid JSON.");
 		expect(prompt).not.toContain('"kind": "answer" | "review" | "clarification" | "failure"');
 	});
 
 	it("keeps the Codex interactive broker prompt minimal and framed", () => {
-		const prompt = buildCodexInteractiveBrokerPrompt({
-			workItemId: "work_probe",
-			collabId: "collab_probe",
-			threadId: "thread_probe",
-			requestedAction: "answer_question",
-			instruction: "Explain the main risk in one sentence.",
-		});
+		const requestFilePath = "/tmp/artifacts/work_probe/request.json";
+		const workItemId = "work_probe";
+		const prompt = buildCodexInteractiveBrokerPrompt(requestFilePath, workItemId);
 
+		expect(prompt).toContain(requestFilePath);
 		expect(prompt).toContain("AI_WHISPER_REPLY_BEGIN:work_probe");
 		expect(prompt).toContain("AI_WHISPER_REPLY_END:work_probe");
 		expect(prompt).toContain('{"kind":"answer","content":"...');
-		expect(prompt).toContain("instruction=Explain the main risk in one sentence.");
 		expect(prompt).toContain("Reply with exactly three lines and nothing else.");
-		expect(prompt).not.toContain("\n");
+		expect(prompt).not.toContain("instruction=");
+		expect(prompt).not.toContain("action=");
 		expect(prompt).not.toContain("Return ONLY valid JSON.");
 		expect(prompt).not.toContain('"kind": "answer" | "review" | "clarification" | "failure"');
 		expect(prompt).not.toContain("collabId:");

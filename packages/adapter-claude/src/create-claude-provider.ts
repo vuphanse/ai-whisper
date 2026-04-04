@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import {
 	createProviderIdentity,
-	type BrokerArtifactHandle,
 	type CompanionProvider,
 	type InteractiveSessionController,
 	type ProviderReply,
@@ -43,14 +42,10 @@ export function createClaudeProvider(
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
 			if (interactiveSession) {
-				// TODO(Task 4): broker will always supply artifactHandle; remove this fallback.
-				const handle: BrokerArtifactHandle = context?.artifactHandle ?? {
-					workItemId: request.workItemId,
-					artifactDirPath: "",
-					requestFilePath: "",
-					statusFilePath: "",
-				};
-				return interactiveSession.runBrokerWork(request, handle);
+				if (!context?.artifactHandle) {
+					throw new Error("BrokerArtifactHandle is required when an interactive session is attached");
+				}
+				return interactiveSession.runBrokerWork(request, context.artifactHandle);
 			}
 
 			const prompt = buildClaudePrompt(request);
