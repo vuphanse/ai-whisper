@@ -9,7 +9,7 @@ import { buildCodexInteractiveBrokerPrompt } from "../packages/adapter-codex/src
 import { createFakePty } from "./helpers/fake-pty.ts";
 
 const stubHandle: BrokerArtifactHandle = {
-	workItemId: "work_codex_submit",
+	workItemId: "stub",
 	artifactDirPath: "/tmp/artifacts/stub",
 	requestFilePath: "/tmp/artifacts/stub/request.json",
 	statusFilePath: "/tmp/artifacts/stub/status.json",

@@ -43,6 +43,7 @@ export function createCodexProvider(
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
 			if (interactiveSession) {
+				// TODO(Task 4): broker will always supply artifactHandle; remove this fallback.
 				const handle: BrokerArtifactHandle = context?.artifactHandle ?? {
 					workItemId: request.workItemId,
 					artifactDirPath: "",
