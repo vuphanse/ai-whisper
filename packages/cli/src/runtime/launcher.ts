@@ -61,12 +61,29 @@ function buildEnvPrefix(input: {
 	collabId: string;
 	sessionId: string;
 }): string {
+	const explicitEnv = {
+		AI_WHISPER_BROKER_SQLITE: input.brokerSqlitePath,
+		AI_WHISPER_BROKER_HOST: input.brokerHost,
+		AI_WHISPER_BROKER_PORT: String(input.brokerPort),
+		AI_WHISPER_COLLAB_ID: input.collabId,
+		AI_WHISPER_SESSION_ID: input.sessionId,
+	} as const;
+
+	const passthrough = Object.entries(process.env)
+		.filter(
+			(entry): entry is [string, string] =>
+				entry[0].startsWith("AI_WHISPER_") &&
+				!(entry[0] in explicitEnv) &&
+				typeof entry[1] === "string" &&
+				entry[1].length > 0,
+		)
+		.map(([key, value]) => `${key}=${shellQuote(value)}`);
+
 	return [
-		`AI_WHISPER_BROKER_SQLITE=${shellQuote(input.brokerSqlitePath)}`,
-		`AI_WHISPER_BROKER_HOST=${shellQuote(input.brokerHost)}`,
-		`AI_WHISPER_BROKER_PORT=${shellQuote(String(input.brokerPort))}`,
-		`AI_WHISPER_COLLAB_ID=${shellQuote(input.collabId)}`,
-		`AI_WHISPER_SESSION_ID=${shellQuote(input.sessionId)}`,
+		...Object.entries(explicitEnv).map(
+			([key, value]) => `${key}=${shellQuote(value)}`,
+		),
+		...passthrough,
 	].join(" ");
 }
 

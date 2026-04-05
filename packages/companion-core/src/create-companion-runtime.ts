@@ -70,7 +70,8 @@ export function createCompanionRuntime(input: {
 				reply = await doWork(request);
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				const failReplyId = `reply_fail_${workItem.workItemId}_${now.replace(/[^0-9]/g, "")}`;
+				const replyNow = new Date().toISOString();
+				const failReplyId = `reply_fail_${workItem.workItemId}_${replyNow.replace(/[^0-9]/g, "")}`;
 
 				return input.broker.control.postReply({
 					replyId: failReplyId,
@@ -82,11 +83,12 @@ export function createCompanionRuntime(input: {
 					content: `Provider error: ${message}`,
 					transitionIntent: "failed",
 					artifactManifestIds: [],
-					now,
+					now: replyNow,
 				});
 			}
 
-			const replyId = `reply_${workItem.workItemId}_${now.replace(/[^0-9]/g, "")}`;
+			const replyNow = new Date().toISOString();
+			const replyId = `reply_${workItem.workItemId}_${replyNow.replace(/[^0-9]/g, "")}`;
 
 			return input.broker.control.postReply({
 				replyId,
@@ -98,7 +100,7 @@ export function createCompanionRuntime(input: {
 				content: reply.content,
 				transitionIntent: reply.transitionIntent,
 				artifactManifestIds: [],
-				now,
+				now: replyNow,
 			});
 		},
 	};

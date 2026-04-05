@@ -1,5 +1,7 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
 
+const DEFAULT_REPLY_TIMEOUT_MS = 60_000;
+
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -10,7 +12,7 @@ export async function waitForReply(input: {
 	workItemId: string;
 	timeoutMs?: number;
 }) {
-	const timeoutAt = Date.now() + (input.timeoutMs ?? 15_000);
+	const timeoutAt = Date.now() + (input.timeoutMs ?? DEFAULT_REPLY_TIMEOUT_MS);
 
 	while (Date.now() < timeoutAt) {
 		const reply = input.broker.control

@@ -70,6 +70,76 @@ describe("live session runtime", () => {
 		expect(output.join("")).toContain("Relayed to codex");
 	});
 
+	it("renders a local colored relay preview while composing a relay directive", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to claude on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("@@claude");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("@@claude");
+		expect(output.join("")).toContain("\u001b[38;5;215m");
+	});
+
+	it("clears the local relay preview before printing the relay acknowledgement", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to claude on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("@@claude test\r");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("\u001b[2K");
+		expect(output.join("")).toContain("Relayed to claude");
+	});
+
 	it("rejects unsupported advanced relay syntax locally", async () => {
 		const stdin = new PassThrough();
 		const stdout = new PassThrough();
@@ -129,6 +199,42 @@ describe("live session runtime", () => {
 		stdin.write("\u001b]10;rgb:dcdc/dcdc/dcdc\u001b\\");
 
 		expect(fakePty.writes).toEqual([]);
+	});
+
+	it("ignores mouse and focus escape sequences when they share a chunk with a relay directive", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to codex on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[I\u001b[<0;40;12M@@codex review this plan\r");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes.join("")).not.toContain(
+			"@@codex review this plan",
+		);
+		expect(output.join("")).toContain("Relayed to codex");
 	});
 
 	it("enables raw stdin mode while the live session is active", async () => {

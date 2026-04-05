@@ -51,6 +51,34 @@ describe("launcher real behavior", () => {
 				"AI_WHISPER_SESSION_ID='session_claude_20260403000000000'",
 			);
 		});
+
+		it("passes through additional AI_WHISPER environment variables to launched sessions", () => {
+			const original = process.env.AI_WHISPER_DEBUG_INPUT_LOG;
+			process.env.AI_WHISPER_DEBUG_INPUT_LOG = "/tmp/ai-whisper-input.log";
+
+			try {
+				const result = launchSessions({
+					launchMode: "terminals",
+					...baseLaunchInput,
+					brokerSqlitePath:
+						"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+					spawn: () => {},
+				});
+
+				expect(result.commands.codex).toContain(
+					"AI_WHISPER_DEBUG_INPUT_LOG='/tmp/ai-whisper-input.log'",
+				);
+				expect(result.commands.claude).toContain(
+					"AI_WHISPER_DEBUG_INPUT_LOG='/tmp/ai-whisper-input.log'",
+				);
+			} finally {
+				if (original === undefined) {
+					delete process.env.AI_WHISPER_DEBUG_INPUT_LOG;
+				} else {
+					process.env.AI_WHISPER_DEBUG_INPUT_LOG = original;
+				}
+			}
+		});
 	});
 
 	describe("terminals mode", () => {

@@ -2,7 +2,7 @@ type RelayDecision =
 	| { kind: "passthrough"; data: string }
 	| { kind: "relay"; line: string }
 	| { kind: "error"; message: string }
-	| { kind: "buffering" };
+	| { kind: "buffering"; line: string };
 
 function isBackspace(char: string): boolean {
 	return char === "\u0008" || char === "\u007f";
@@ -10,7 +10,8 @@ function isBackspace(char: string): boolean {
 
 export function createRelayLineBuffer(input: {
 	getError: (line: string) => string | null;
-	isRelayCandidate: (line: string) => boolean;
+	isRelayDirective: (line: string) => boolean;
+	isRelayPrefix: (line: string) => boolean;
 }) {
 	let line = "";
 	let relayCandidate = false;
@@ -25,7 +26,9 @@ export function createRelayLineBuffer(input: {
 			results.push(
 				error
 					? { kind: "error", message: error }
-					: { kind: "relay", line: completed },
+					: input.isRelayDirective(completed)
+						? { kind: "relay", line: completed }
+						: { kind: "passthrough", data: `${completed}${terminator}` },
 			);
 			return;
 		}
@@ -61,20 +64,33 @@ export function createRelayLineBuffer(input: {
 
 				if (isBackspace(char)) {
 					line = line.slice(0, -1);
-					relayCandidate = line.startsWith("@@");
+					if (relayCandidate) {
+						if (line.startsWith("@@")) {
+							results.push({ kind: "buffering", line });
+							continue;
+						}
+
+						relayCandidate = false;
+						if (line.length > 0) {
+							results.push({ kind: "passthrough", data: line });
+							line = "";
+						}
+						continue;
+					}
+
 					results.push({ kind: "passthrough", data: char });
 					continue;
 				}
 
 				line += char;
 				if (!relayCandidate && line === "@") {
-					results.push({ kind: "buffering" });
+					results.push({ kind: "buffering", line });
 					continue;
 				}
 
 				if (!relayCandidate && line === "@@") {
 					relayCandidate = true;
-					results.push({ kind: "buffering" });
+					results.push({ kind: "buffering", line });
 					continue;
 				}
 
@@ -90,14 +106,12 @@ export function createRelayLineBuffer(input: {
 					continue;
 				}
 
-				if (relayCandidate && !input.isRelayCandidate(line)) {
-					results.push({ kind: "passthrough", data: line });
-					line = "";
-					relayCandidate = false;
+				if (relayCandidate && input.isRelayPrefix(line)) {
+					results.push({ kind: "buffering", line });
 					continue;
 				}
 
-				results.push({ kind: "buffering" });
+				results.push({ kind: "buffering", line });
 			}
 
 			return results;

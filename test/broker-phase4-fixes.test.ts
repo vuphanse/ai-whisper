@@ -155,7 +155,10 @@ describe("phase 4 code review fixes", () => {
 
 		const updated = getWorkItem(runtime.db, workItem.workItemId);
 		expect(updated?.deliveryState).toBe("failed");
-		expect(updated?.completedAt).toBe("2026-04-03T00:00:06.000Z");
+		expect(updated?.completedAt).not.toBe("2026-04-03T00:00:06.000Z");
+		expect(Date.parse(updated?.completedAt ?? "")).toBeGreaterThan(
+			Date.parse("2026-04-03T00:00:06.000Z"),
+		);
 	});
 
 	it("finding 3: companion heartbeat updates the main session health state", () => {
