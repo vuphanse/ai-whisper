@@ -65,7 +65,7 @@ whisper collab attach codex
 whisper collab attach claude
 ```
 
-Each `attach` command prints a snippet to run inside the corresponding live provider session.
+Each `attach` command prints a snippet to run from the corresponding provider terminal. In Phase 7A, that snippet starts the local `attach-session` bridge process from that terminal; it does not hook into or recover the provider's internal conversation state.
 
 If a role is already bound and you need to replace it:
 

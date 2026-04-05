@@ -28,7 +28,7 @@ Phase 7A is successful when a user can:
 
 1. create a collab without launching provider sessions
 2. start Codex and Claude independently in their own preferred terminal environment
-3. bind each existing live session into the collab through an in-session self-attach step
+3. bind each existing provider terminal into the collab through an in-terminal self-attach step
 4. explicitly replace an existing binding when needed
 5. use the attached sessions with the same relay and broker workflow already established in Phase 6
 
@@ -53,6 +53,7 @@ Phase 7A does not include:
 
 - creating a collab through attach
 - automatic tmux, PID, or terminal discovery as the primary workflow
+- attaching to or recovering a provider's internal conversation state
 - recovery after broker restart, tmux loss, or provider crash
 - replay or session resurrection UX
 - rich inspection of threads, replies, artifacts, or event history
@@ -66,7 +67,7 @@ Those belong to Phase 7B, Phase 7C, or later.
 Phase 7A should use a split model:
 
 - CLI-owned collab creation and attach-claim issuance
-- provider-specific in-session bootstrap snippets
+- provider-specific in-terminal bootstrap snippets
 - broker-owned claim validation and binding acceptance
 - shared session-binding rules for attach and rebind
 - minimal lifecycle visibility in existing status surfaces
@@ -118,11 +119,12 @@ The primary Phase 7A attach flow is:
 
 1. user runs `whisper collab start --no-launch`
 2. user starts Codex or Claude independently
-3. user runs a small provider-friendly attach command snippet inside that live session
-4. the snippet performs a local attach handshake back into `ai-whisper`
+3. user runs a small provider-friendly attach command snippet from that provider terminal
+4. the snippet launches the local attach bridge and performs a local attach handshake back into `ai-whisper`
 5. the broker accepts the binding for the requested collab role
+6. the provider terminal now hosts the attached bridge process for that role
 
-The binding must be initiated from inside the provider session itself, not inferred from an external pane or PID scan.
+The binding must be initiated from the provider terminal itself, not inferred from an external pane or PID scan.
 
 ### Rebind Flow
 
@@ -153,7 +155,7 @@ Responsibilities:
 - resolve the active local collab created by `whisper collab start`
 - verify the requested role is currently unbound
 - mint a short-lived attach claim for that role and collab
-- print the provider-specific in-session command snippet that should be run inside the live provider session
+- print the provider-specific command snippet that should be run from the live provider terminal
 
 Default behavior:
 
@@ -195,18 +197,20 @@ This is not Phase 7C inspection tooling. It is just enough state to operate Phas
 
 ## Attach Bootstrap Model
 
-### Primary UX: In-Session Command Snippet
+### Primary UX: In-Terminal Command Snippet
 
-The primary attach UX should be a command snippet that the user runs inside the live provider session.
+The primary attach UX should be a command snippet that the user runs from the live provider terminal.
 
 The snippet should:
 
 - be provider-friendly rather than one generic string pasted blindly into every host
-- call back into the local `whisper` runtime or helper path
+- launch the local attach helper or bridge path from that terminal
 - carry a short-lived attach claim
-- provide enough provider-specific session metadata to identify the live session being attached
+- provide enough local context to bind the requested collab role from that terminal
 
-The snippet should be the user-facing proof that “this exact live session is the one being bound.”
+The snippet should be the user-facing proof that “this exact provider terminal is the one being used to host the attached bridge.”
+
+Phase 7A does not require deep provider-native attachment. It does not inject into, recover, or assume ownership of the provider's existing conversation state. It only establishes the broker bridge from a user-owned provider terminal.
 
 ### Secondary Fallback: Pasteable Token
 
@@ -249,7 +253,7 @@ Attach succeeds only when:
 - the collab already exists
 - the requested role is currently unbound
 - the attach claim is valid and unexpired
-- the session passes provider-specific attach validation
+- the attach helper is launched from the intended provider terminal and passes provider-specific bootstrap validation
 
 On success:
 
@@ -287,15 +291,17 @@ This prevents split-brain behavior without requiring full recovery logic.
 
 ## Provider Responsibilities
 
-Each built-in provider should support an attach bootstrap path for an already-running live session.
+Each built-in provider should support an attach bootstrap path from an already-running provider terminal.
 
 That bootstrap path must be able to:
 
-- identify the live provider session from inside the session itself
+- be launched from the provider terminal the user wants to bind
 - invoke the local attach helper or equivalent callback into `ai-whisper`
-- hand off enough metadata to create or attach the provider-side interactive session controller
+- hand off enough metadata to create the provider-side bridge controller for that terminal
 
 The shared system should not assume that every provider exposes the same exact in-session command mechanism. It should assume only that each built-in provider can supply a provider-specific attach snippet and a provider-specific way to complete the attach handshake.
+
+For Phase 7A, "provider-specific attach validation" should be read narrowly: validating the claim, target role, and bridge bootstrap path. Rich validation of an existing provider conversation or editor/TUI state is later provider-specific work, not part of this phase.
 
 ## Minimal Status Model
 
