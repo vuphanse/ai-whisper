@@ -26,6 +26,7 @@ import {
 	getAttachClaim,
 	insertAttachClaim,
 	markAttachClaimConsumed,
+	markAttachClaimReplaced,
 } from "../storage/repositories/attach-claim-repository.js";
 import {
 	createCompanionAck,
@@ -625,27 +626,36 @@ export function createControlService(db: Database.Database) {
 				consumedAt: null,
 			});
 
-			insertAttachClaim(db, claim);
+			const txn = db.transaction(() => {
+				// If there is already a pending claim on the binding, mark it replaced
+				const existing = getSessionBinding(db, input.collabId, input.agentType);
+				if (existing?.pendingClaimId) {
+					markAttachClaimReplaced(db, existing.pendingClaimId);
+				}
 
-			// If rebind mode, preserve the existing active session but enter pending_attach state
-			const existing = getSessionBinding(db, input.collabId, input.agentType);
-			const existingSessionId = existing?.activeSessionId ?? null;
-			const existingSource = existing?.bindingSource ?? null;
+				insertAttachClaim(db, claim);
 
-			upsertSessionBinding(
-				db,
-				sessionBindingSchema.parse({
-					version: 1,
-					collabId: input.collabId,
-					agentType: input.agentType,
-					bindingState: "pending_attach",
-					activeSessionId: existingSessionId,
-					bindingSource: existingSource,
-					pendingClaimId: claimId,
-					pendingClaimExpiresAt: input.expiresAt,
-					updatedAt: input.now,
-				}),
-			);
+				// If rebind mode, preserve the existing active session but enter pending_attach state
+				const existingSessionId = existing?.activeSessionId ?? null;
+				const existingSource = existing?.bindingSource ?? null;
+
+				upsertSessionBinding(
+					db,
+					sessionBindingSchema.parse({
+						version: 1,
+						collabId: input.collabId,
+						agentType: input.agentType,
+						bindingState: "pending_attach",
+						activeSessionId: existingSessionId,
+						bindingSource: existingSource,
+						pendingClaimId: claimId,
+						pendingClaimExpiresAt: input.expiresAt,
+						updatedAt: input.now,
+					}),
+				);
+			});
+
+			txn();
 
 			return claim;
 		},
@@ -667,45 +677,52 @@ export function createControlService(db: Database.Database) {
 					`Attach claim ${input.claimId} has already been consumed (status: ${claim.status})`,
 				);
 			}
+			if (input.now > claim.expiresAt) {
+				throw new Error(`Attach claim ${input.claimId} has expired`);
+			}
 			if (claim.secret !== input.secret) {
 				throw new Error("Invalid attach claim secret");
 			}
 
-			// Register the session if it doesn't exist yet
-			const existing = getSession(db, input.sessionId);
-			if (!existing) {
-				const session = sessionSchema.parse({
-					version: 1,
-					sessionId: input.sessionId,
-					collabId: claim.collabId,
-					agentType: claim.agentType,
-					registrationState: "registered",
-					healthState: "healthy",
-					capabilities: input.capabilities,
-					registeredAt: input.now,
-					lastSeenAt: input.now,
-				});
-				insertSession(db, session);
-			}
+			const txn = db.transaction(() => {
+				// Register the session if it doesn't exist yet
+				const existing = getSession(db, input.sessionId);
+				if (!existing) {
+					const session = sessionSchema.parse({
+						version: 1,
+						sessionId: input.sessionId,
+						collabId: claim.collabId,
+						agentType: claim.agentType,
+						registrationState: "registered",
+						healthState: "healthy",
+						capabilities: input.capabilities,
+						registeredAt: input.now,
+						lastSeenAt: input.now,
+					});
+					insertSession(db, session);
+				}
 
-			// Update the binding to bound state
-			upsertSessionBinding(
-				db,
-				sessionBindingSchema.parse({
-					version: 1,
-					collabId: claim.collabId,
-					agentType: claim.agentType,
-					bindingState: "bound",
-					activeSessionId: input.sessionId,
-					bindingSource: input.bindingSource,
-					pendingClaimId: null,
-					pendingClaimExpiresAt: null,
-					updatedAt: input.now,
-				}),
-			);
+				// Update the binding to bound state
+				upsertSessionBinding(
+					db,
+					sessionBindingSchema.parse({
+						version: 1,
+						collabId: claim.collabId,
+						agentType: claim.agentType,
+						bindingState: "bound",
+						activeSessionId: input.sessionId,
+						bindingSource: input.bindingSource,
+						pendingClaimId: null,
+						pendingClaimExpiresAt: null,
+						updatedAt: input.now,
+					}),
+				);
 
-			// Mark the claim consumed
-			markAttachClaimConsumed(db, input.claimId, input.now);
+				// Mark the claim consumed
+				markAttachClaimConsumed(db, input.claimId, input.now);
+			});
+
+			txn();
 
 			return {
 				sessionId: input.sessionId,
