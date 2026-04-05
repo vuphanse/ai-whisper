@@ -87,27 +87,40 @@ export function createAttachSessionRuntime(input: {
 			});
 
 			let stopLoop = async () => {};
+			let liveSessionStarted = false;
 			let stopping = false;
 			const onSignal = async () => {
 				if (stopping) return;
 				stopping = true;
 				await stopLoop();
-				await liveSession.stop();
+				if (liveSessionStarted) {
+					await liveSession.stop();
+				}
 				await input.broker.stop();
 				process.exit(0);
 			};
 
-			process.on("SIGINT", () => void onSignal());
-			process.on("SIGTERM", () => void onSignal());
+			process.once("SIGINT", () => void onSignal());
+			process.once("SIGTERM", () => void onSignal());
 
-			await liveSession.start();
-			stopLoop = await (input.runLoop ?? runCompanionAgentLoop)({
-				broker: input.broker,
-				collabId: accepted.collabId,
-				sessionId: accepted.sessionId,
-				provider,
-				interactiveSession,
-			});
+			try {
+				await liveSession.start();
+				liveSessionStarted = true;
+				stopLoop = await (input.runLoop ?? runCompanionAgentLoop)({
+					broker: input.broker,
+					collabId: accepted.collabId,
+					sessionId: accepted.sessionId,
+					provider,
+					interactiveSession,
+				});
+			} catch (err) {
+				await stopLoop();
+				if (liveSessionStarted) {
+					await liveSession.stop();
+				}
+				await input.broker.stop();
+				throw err;
+			}
 		},
 	};
 }
