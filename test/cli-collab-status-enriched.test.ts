@@ -50,8 +50,8 @@ describe("cli collab status enriched", () => {
 			expect(status.brokerHealth).toEqual({ ok: true });
 			expect(status).not.toHaveProperty("codexSessionId");
 			expect(status).not.toHaveProperty("claudeSessionId");
-			expect(status.roles.codex.bindingState).toBe("bound");
-			expect(status.roles.claude.bindingState).toBe("bound");
+			expect(status.roles.codex).toMatchObject({ bindingState: "bound", healthState: "healthy" });
+			expect(status.roles.claude).toMatchObject({ bindingState: "bound", healthState: "healthy" });
 		}
 	});
 
@@ -75,8 +75,8 @@ describe("cli collab status enriched", () => {
 			expect(status.brokerHealth).toEqual({ ok: true });
 			expect(status).not.toHaveProperty("codexSessionId");
 			expect(status).not.toHaveProperty("claudeSessionId");
-			expect(status.roles.codex.bindingState).toBe("bound");
-			expect(status.roles.claude.bindingState).toBe("bound");
+			expect(status.roles.codex).toMatchObject({ bindingState: "bound", healthState: "healthy" });
+			expect(status.roles.claude).toMatchObject({ bindingState: "bound", healthState: "healthy" });
 		}
 	});
 
@@ -174,11 +174,76 @@ describe("cli collab status enriched", () => {
 		expect(status.active).toBe(true);
 		if (status.active) {
 			// healthState should be present on bound roles
-			expect(status.roles.codex).toHaveProperty("healthState");
-			expect(status.roles.claude).toHaveProperty("healthState");
-			// After runCollabStart, sessions start healthy
-			expect((status.roles.codex as { healthState: string | null }).healthState).toBe("healthy");
-			expect((status.roles.claude as { healthState: string | null }).healthState).toBe("healthy");
+			expect(status.roles.codex).toMatchObject({ bindingState: "bound", healthState: "healthy" });
+			expect(status.roles.claude).toMatchObject({ bindingState: "bound", healthState: "healthy" });
+		}
+	});
+});
+
+describe("phase 7c1 status output", () => {
+	it("includes per-role healthState on the status payload for bound roles", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-status-health-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const now = "2026-04-06T11:00:00.000Z";
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4452 });
+
+		broker.control.startCollab({
+			collabId: "collab_status_health",
+			workspaceRoot,
+			displayName: "status health",
+			now,
+		});
+		for (const agentType of ["codex", "claude"] as const) {
+			broker.control.registerSession({
+				sessionId: `session_${agentType}`,
+				collabId: "collab_status_health",
+				agentType,
+				capabilities: {
+					supportsDirectPackets: true,
+					supportsNormalization: false,
+					supportsRelayInterception: true,
+					supportsLocalBuffering: true,
+					supportsLaunchHooks: false,
+					extensions: {},
+				},
+				now,
+			});
+			broker.control.setSessionBinding({
+				collabId: "collab_status_health",
+				agentType,
+				sessionId: `session_${agentType}`,
+				bindingSource: "attached",
+				now,
+			});
+		}
+		await broker.stop();
+
+		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
+			version: 3,
+			collabId: "collab_status_health",
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4452, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+		});
+
+		const status = await runCollabStatus({
+			workspaceRoot,
+			assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+		});
+
+		expect(status.active).toBe(true);
+		if (status.active) {
+			expect(status.roles.codex).toMatchObject({
+				bindingState: "bound",
+				healthState: "healthy",
+			});
+			expect(status.roles.claude).toMatchObject({
+				bindingState: "bound",
+				healthState: "healthy",
+			});
 		}
 	});
 });
