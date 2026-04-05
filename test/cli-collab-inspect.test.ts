@@ -309,8 +309,9 @@ describe("inspect flagged items outside display window", () => {
 		]);
 		// But flaggedItems must still surface work_1
 		expect(snapshot.flaggedItems).toHaveLength(1);
-		expect(snapshot.flaggedItems[0].workItemId).toBe("work_1");
-		expect(snapshot.flaggedItems[0].deliveryState).toBe("failed");
+		const [flagged] = snapshot.flaggedItems;
+		expect(flagged?.workItemId).toBe("work_1");
+		expect(flagged?.deliveryState).toBe("failed");
 	});
 });
 
