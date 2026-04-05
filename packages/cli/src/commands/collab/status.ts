@@ -1,7 +1,7 @@
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import type { SessionBinding } from "@ai-whisper/shared";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
-import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
+import { getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
 
 export async function runCollabStatus(input: {
@@ -63,7 +63,7 @@ export async function runCollabStatus(input: {
 	let broker;
 	try {
 		broker = createBrokerRuntime({
-			sqlitePath: getBrokerSqlitePath(input.workspaceRoot),
+			sqlitePath: state.broker.sqlitePath,
 			host: state.broker.host,
 			port: state.broker.port,
 		});

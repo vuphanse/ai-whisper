@@ -599,6 +599,9 @@ export function createControlService(db: Database.Database) {
 		listReplies(threadId: string) {
 			return listRepliesForThread(db, threadId);
 		},
+		listWorkItems(threadId: string) {
+			return listWorkItemsForThread(db, threadId);
+		},
 		listSessions(collabId: string) {
 			return listSessions(db, collabId);
 		},

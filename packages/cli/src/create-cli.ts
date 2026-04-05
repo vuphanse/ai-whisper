@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { Command } from "commander";
 import { runCollabAttach } from "./commands/collab/attach.js";
+import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabReconnect } from "./commands/collab/reconnect.js";
@@ -197,6 +198,22 @@ export function createCli(): Command {
 				now: new Date().toISOString(),
 			});
 			console.log(result.snippet);
+		});
+
+	collab
+		.command("inspect")
+		.description("Inspect the active collab thread")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.option("--watch", "Continuously redraw the active-thread operator view")
+		.action(async (opts: WorkspaceOpts & { watch?: boolean }) => {
+			const output = await runCollabInspect({
+				workspaceRoot: opts.workspace,
+				now: new Date().toISOString(),
+				watch: Boolean(opts.watch),
+			});
+			if (output) {
+				process.stdout.write(output);
+			}
 		});
 
 	collab
