@@ -156,7 +156,7 @@ export function launchSessions(input: {
 			`tmux new-session -d -s ${shellQuote(tmuxSession)} -n codex sh -lc ${shellQuote(codexCmd)}`,
 		);
 		exec(
-			`tmux split-window -t ${shellQuote(`${tmuxSession}:codex`)} -h sh -lc ${shellQuote(claudeCmd)}`,
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -h sh -lc ${shellQuote(claudeCmd)}`,
 		);
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;

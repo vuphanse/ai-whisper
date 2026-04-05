@@ -108,6 +108,8 @@ describe("launcher real behavior", () => {
 			expect(execed).toHaveLength(2);
 			expect(execed[0]).toContain("tmux new-session");
 			expect(execed[1]).toContain("tmux split-window");
+			expect(execed[1]).toContain(":0");
+			expect(execed[1]).not.toContain(":codex");
 		});
 
 		it("returns tmux session name and executes tmux commands", () => {
