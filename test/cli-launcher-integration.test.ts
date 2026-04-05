@@ -41,6 +41,7 @@ describe("cli launcher integration", () => {
 			launchMode: "tmux",
 			spawnBroker: fakeBrokerSpawn(),
 			spawn: () => {},
+			exec: () => {},
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));

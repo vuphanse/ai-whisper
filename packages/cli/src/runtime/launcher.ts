@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 export type LaunchMode = "tmux" | "terminals";
 
 export type SpawnFn = (command: string) => number | void;
+export type ExecFn = (command: string) => void;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const companionAgentPath = resolve(__dirname, "../bin/companion-agent.js");
@@ -85,6 +86,10 @@ function defaultSpawn(command: string): number | undefined {
 	return child.pid;
 }
 
+function defaultExec(command: string): void {
+	execSync(command, { stdio: "ignore" });
+}
+
 function wrapForTerminalWindow(agentCommand: string, label: string): string {
 	if (process.platform === "darwin") {
 		const escaped = agentCommand.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -104,8 +109,10 @@ export function launchSessions(input: {
 	codexSessionId: string;
 	claudeSessionId: string;
 	spawn?: SpawnFn;
+	exec?: ExecFn;
 }): LaunchResult {
 	const run = input.spawn ?? defaultSpawn;
+	const exec = input.exec ?? defaultExec;
 
 	const codexEnv = buildEnvPrefix({
 		brokerSqlitePath: input.brokerSqlitePath,
@@ -145,11 +152,11 @@ export function launchSessions(input: {
 		const tmuxSession = `whisper-${input.collabId}`;
 		base.tmuxSession = tmuxSession;
 
-		run(
+		exec(
 			`tmux new-session -d -s ${shellQuote(tmuxSession)} -n codex sh -lc ${shellQuote(codexCmd)}`,
 		);
-		run(
-			`tmux split-window -t ${shellQuote(tmuxSession)} -h sh -lc ${shellQuote(claudeCmd)}`,
+		exec(
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:codex`)} -h sh -lc ${shellQuote(claudeCmd)}`,
 		);
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;

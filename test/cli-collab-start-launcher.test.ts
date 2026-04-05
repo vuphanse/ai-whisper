@@ -34,6 +34,7 @@ describe("cli collab start launcher integration", () => {
 			launchMode: "tmux",
 			spawnBroker: fakeBrokerSpawn(),
 			spawn: () => {},
+			exec: () => {},
 		});
 
 		expect(result).toMatchObject({

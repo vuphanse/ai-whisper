@@ -17,6 +17,7 @@ describe("cli binary commands", () => {
 			"start",
 			"--workspace",
 			workspaceRoot,
+			"--no-tmux",
 		]);
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
@@ -33,6 +34,7 @@ describe("cli binary commands", () => {
 			"start",
 			"--workspace",
 			workspaceRoot,
+			"--no-tmux",
 		]);
 
 		const statusCli = createCli();
@@ -65,6 +67,7 @@ describe("cli binary commands", () => {
 			"start",
 			"--workspace",
 			workspaceRoot,
+			"--no-tmux",
 		]);
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
 

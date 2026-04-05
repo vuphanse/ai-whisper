@@ -86,10 +86,10 @@ describe("launcher real behavior", () => {
 	});
 
 	describe("tmux mode", () => {
-		it("returns tmux session name and spawns via tmux commands", () => {
+		it("executes tmux setup commands synchronously instead of detached spawn", () => {
 			const execed: string[] = [];
-			const fakeSpawn: SpawnFn = (command) => {
-				execed.push(command);
+			const fakeSpawn: SpawnFn = () => {
+				throw new Error("tmux startup must not use detached spawn");
 			};
 
 			const result = launchSessions({
@@ -98,6 +98,30 @@ describe("launcher real behavior", () => {
 				brokerSqlitePath:
 					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
 				spawn: fakeSpawn,
+				exec: (command) => {
+					execed.push(command);
+				},
+			});
+
+			expect(result.launched).toBe(true);
+			expect(result.launchMode).toBe("tmux");
+			expect(execed).toHaveLength(2);
+			expect(execed[0]).toContain("tmux new-session");
+			expect(execed[1]).toContain("tmux split-window");
+		});
+
+		it("returns tmux session name and executes tmux commands", () => {
+			const execed: string[] = [];
+			const fakeExec = (command: string) => {
+				execed.push(command);
+			};
+
+			const result = launchSessions({
+				launchMode: "tmux",
+				...baseLaunchInput,
+				brokerSqlitePath:
+					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+				exec: fakeExec,
 			});
 
 			expect(result.launched).toBe(true);

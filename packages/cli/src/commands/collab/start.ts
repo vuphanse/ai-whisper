@@ -10,6 +10,7 @@ import {
 } from "../../runtime/id-factory.js";
 import {
 	launchSessions,
+	type ExecFn,
 	type LaunchMode,
 	type SpawnFn,
 } from "../../runtime/launcher.js";
@@ -46,6 +47,7 @@ export async function runCollabStart(input: {
 	now: string;
 	launchMode: LaunchMode;
 	spawn?: SpawnFn;
+	exec?: ExecFn;
 	spawnBroker?: (sqlitePath: string, host: string, port: number) => number;
 }) {
 	const statePath = getStateFilePath(input.workspaceRoot);
@@ -117,6 +119,7 @@ export async function runCollabStart(input: {
 		codexSessionId,
 		claudeSessionId,
 		...(input.spawn ? { spawn: input.spawn } : {}),
+		...(input.exec ? { exec: input.exec } : {}),
 	});
 
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
