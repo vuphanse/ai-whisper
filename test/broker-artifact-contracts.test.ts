@@ -61,7 +61,7 @@ describe("broker artifact contracts", () => {
 				extensions: {},
 			}),
 			getHealthState: () => "healthy",
-			handleWork: async (_req, _ctx?) => stubReply,
+			handleWork: () => Promise.resolve(stubReply),
 		};
 
 		// Without context

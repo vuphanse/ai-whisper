@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,14 +9,11 @@ describe("node-pty support", () => {
 
 	afterEach(() => {
 		for (const dir of tempDirs) {
-			try {
-				unlinkSync(join(dir, "lib", "unixTerminal.js"));
-			} catch {}
-			try {
-				unlinkSync(
-					join(dir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
-				);
-			} catch {}
+			rmSync(join(dir, "lib", "unixTerminal.js"), { force: true });
+			rmSync(
+				join(dir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
+				{ force: true },
+			);
 		}
 	});
 

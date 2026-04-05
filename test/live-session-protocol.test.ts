@@ -37,7 +37,7 @@ describe("live session protocol", () => {
 	});
 
 	it("extracts framed replies from ANSI-decorated terminal output", () => {
-		let state = { insideFrame: false, buffer: "" };
+		const state = { insideFrame: false, buffer: "" };
 
 		const opened = appendInteractiveBrokerChunk(
 			state,
@@ -45,7 +45,7 @@ describe("live session protocol", () => {
 		);
 		const middle = appendInteractiveBrokerChunk(
 			opened.state,
-			`\u001b[2m{"kind":"answer","content":"ok","transitionIntent":"completed"}\u001b[22m\r\n`,
+			"\u001b[2m{\"kind\":\"answer\",\"content\":\"ok\",\"transitionIntent\":\"completed\"}\u001b[22m\r\n",
 		);
 		const closed = appendInteractiveBrokerChunk(
 			middle.state,
@@ -56,7 +56,7 @@ describe("live session protocol", () => {
 	});
 
 	it("extracts framed replies when markers are split across chunks", () => {
-		let state = { insideFrame: false, buffer: "" };
+		const state = { insideFrame: false, buffer: "" };
 
 		const first = appendInteractiveBrokerChunk(
 			state,

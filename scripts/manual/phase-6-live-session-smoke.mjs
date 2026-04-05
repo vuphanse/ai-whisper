@@ -12,8 +12,6 @@ import {
 import {
 	createInteractiveSessionForTarget,
 	createProviderForTarget,
-	getInteractiveSessionExecArgsForTarget,
-	getProviderExecArgsForTarget,
 } from "../../packages/cli/dist/runtime/providers.js";
 
 const BRACKETED_PASTE_START = "\u001b[200~";

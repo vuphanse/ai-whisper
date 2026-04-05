@@ -6,6 +6,10 @@ export type InteractiveBrokerFrameState = {
 
 const BEGIN_PREFIX = "AI_WHISPER_REPLY_BEGIN:";
 const END_PREFIX = "AI_WHISPER_REPLY_END:";
+const ESC = String.fromCharCode(0x1b);
+const BEL = String.fromCharCode(0x07);
+const OSC_ESCAPE_RE = new RegExp(`${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`, "g");
+const CSI_ESCAPE_RE = new RegExp(`${ESC}\\[[0-?]*[ -/]*[@-~]`, "g");
 
 export function beginBrokerReply(workItemId: string) {
 	return `${BEGIN_PREFIX}${workItemId}`;
@@ -17,8 +21,8 @@ export function endBrokerReply(workItemId: string) {
 
 function stripAnsi(input: string) {
 	return input
-		.replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, "")
-		.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+		.replace(OSC_ESCAPE_RE, "")
+		.replace(CSI_ESCAPE_RE, "")
 		.replace(/\r/g, "");
 }
 

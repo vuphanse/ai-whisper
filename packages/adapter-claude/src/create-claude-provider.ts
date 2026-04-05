@@ -14,8 +14,6 @@ import { parseClaudeOutput } from "./parse-claude-output.js";
 export function createClaudeProvider(
 	config: ClaudeCommandConfig,
 ): CompanionProvider {
-	let interactiveSession: InteractiveSessionController | null = null;
-
 	return {
 		getIdentity() {
 			return createProviderIdentity({
@@ -38,7 +36,7 @@ export function createClaudeProvider(
 			return "healthy";
 		},
 		attachInteractiveSession(session: InteractiveSessionController) {
-			interactiveSession = session;
+			void session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
 			// When an artifact handle is provided, use the retained request.json as

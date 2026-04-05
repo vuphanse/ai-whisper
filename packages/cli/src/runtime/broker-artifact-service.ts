@@ -61,6 +61,7 @@ interface StatusFile {
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+const ESC = String.fromCharCode(0x1b);
 
 const terminalStates: ArtifactState[] = [
 	"consumed",
@@ -70,7 +71,7 @@ const terminalStates: ArtifactState[] = [
 	"submit_failed",
 ];
 
-const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*[a-zA-Z]/g;
+const ANSI_ESCAPE_RE = new RegExp(`${ESC}\\[[0-9;]*[a-zA-Z]`, "g");
 
 function stripAnsi(text: string): string {
 	return text.replace(ANSI_ESCAPE_RE, "");

@@ -16,8 +16,6 @@ import { parseCodexOutput } from "./parse-codex-output.js";
 export function createCodexProvider(
 	config: CodexCommandConfig,
 ): CompanionProvider {
-	let interactiveSession: InteractiveSessionController | null = null;
-
 	return {
 		getIdentity() {
 			return createProviderIdentity({
@@ -40,7 +38,7 @@ export function createCodexProvider(
 			return "healthy";
 		},
 		attachInteractiveSession(session: InteractiveSessionController) {
-			interactiveSession = session;
+			void session;
 		},
 		handleWork(request: ProviderWorkRequest, context?: ProviderWorkContext): Promise<ProviderReply> {
 			// When an artifact handle is provided, use the retained request.json as

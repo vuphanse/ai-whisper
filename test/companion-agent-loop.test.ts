@@ -76,15 +76,15 @@ describe("companion agent loop", () => {
 			attachInteractiveSession(session) {
 				expect(session).toBe(interactiveSession);
 			},
-			async handleWork(request, context) {
+			handleWork(request, context) {
 				// Verify the executor passed an artifactHandle
 				expect(context?.artifactHandle).toBeDefined();
 				handled.push(request);
-				return {
+				return Promise.resolve({
 					kind: "answer" as const,
 					content: `handled ${request.instruction}`,
 					transitionIntent: "completed" as const,
-				};
+				});
 			},
 		};
 

@@ -6,10 +6,21 @@ import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrokerArtifactHandle, ProviderWorkRequest } from "../packages/shared/src/index.ts";
 
-const spawnMock = vi.fn();
+type MockChildProcess = EventEmitter & {
+	stdout: PassThrough;
+	stderr: PassThrough;
+};
+
+type SpawnMock = (
+	command: string,
+	args: string[],
+	options: unknown,
+) => MockChildProcess;
+
+const spawnMock = vi.fn<SpawnMock>();
 
 vi.mock("node:child_process", () => ({
-	spawn: (...args: unknown[]) => spawnMock(...args),
+	spawn: spawnMock,
 }));
 
 const REQUEST: ProviderWorkRequest = {
@@ -35,10 +46,7 @@ describe("createCodexProvider", () => {
 	it("parses a successful provider reply from stderr when stdout is empty", async () => {
 		const stdout = new PassThrough();
 		const stderr = new PassThrough();
-		const child = new EventEmitter() as EventEmitter & {
-			stdout: PassThrough;
-			stderr: PassThrough;
-		};
+		const child = new EventEmitter() as MockChildProcess;
 		child.stdout = stdout;
 		child.stderr = stderr;
 		spawnMock.mockReturnValue(child);
@@ -73,10 +81,7 @@ describe("createCodexProvider", () => {
 
 		const stdout = new PassThrough();
 		const stderr = new PassThrough();
-		const child = new EventEmitter() as EventEmitter & {
-			stdout: PassThrough;
-			stderr: PassThrough;
-		};
+		const child = new EventEmitter() as MockChildProcess;
 		child.stdout = stdout;
 		child.stderr = stderr;
 		spawnMock.mockReturnValue(child);
@@ -90,8 +95,12 @@ describe("createCodexProvider", () => {
 		const replyPromise = provider.handleWork(REQUEST, { artifactHandle: handle });
 
 		const spawnArgs = spawnMock.mock.calls[0]?.[1];
+		expect(spawnArgs).toBeDefined();
+		if (!spawnArgs) {
+			throw new Error("spawn should receive argument list");
+		}
 		expect(spawnArgs).toContain("--output-last-message");
-		const outputFilePath = spawnArgs?.[spawnArgs.indexOf("--output-last-message") + 1];
+		const outputFilePath = spawnArgs[spawnArgs.indexOf("--output-last-message") + 1];
 		expect(typeof outputFilePath).toBe("string");
 		writeFileSync(
 			String(outputFilePath),
