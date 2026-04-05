@@ -774,16 +774,20 @@ export function createControlService(db: Database.Database) {
 			);
 		},
 		assertActiveBinding(input: { collabId: string; sessionId: string }) {
-			// Find a binding for this collab where the active session is the given sessionId
-			const bindings = listSessionBindingsForCollab(db, input.collabId);
-			const match = bindings.find(
-				(b) =>
-					b.bindingState === "bound" &&
-					b.activeSessionId === input.sessionId,
-			);
-			if (!match) {
+			const session = getSession(db, input.sessionId);
+			if (!session || session.collabId !== input.collabId) {
 				throw new Error(
-					`Session is no longer the active binding for this collab role.`,
+					`Unknown session: ${input.sessionId} in collab ${input.collabId}.`,
+				);
+			}
+
+			const binding = getSessionBinding(db, input.collabId, session.agentType);
+			// Accept both "bound" and "pending_attach" when this session is still activeSessionId.
+			// During a rebind-in-flight, the old session remains authoritative until the new session
+			// completes the claim.
+			if (!binding || binding.activeSessionId !== input.sessionId) {
+				throw new Error(
+					`Session ${input.sessionId} is no longer the active binding for collab ${input.collabId}.`,
 				);
 			}
 		},
