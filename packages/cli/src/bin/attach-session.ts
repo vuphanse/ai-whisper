@@ -14,7 +14,7 @@ import {
 } from "../runtime/relay-service.js";
 import { waitForReply } from "../runtime/reply-wait.js";
 import { createCliSessionId } from "../runtime/id-factory.js";
-import { readCliCollabState } from "../runtime/state-file.js";
+import { readCliCollabState, updateCliCollabState } from "../runtime/state-file.js";
 import { getStateFilePath } from "../runtime/paths.js";
 
 export function createAttachSessionRuntime(input: {
@@ -48,6 +48,33 @@ export function createAttachSessionRuntime(input: {
 				now: new Date().toISOString(),
 				bindingSource: "attached",
 			});
+
+			// Clear idleAfterRecovery if this was a reconnect and state file exists
+			const stateFilePath = getStateFilePath(input.workspaceRoot);
+			try {
+				updateCliCollabState(stateFilePath, (state) => {
+					if (state.recovery.state !== "recovered") return state;
+
+					const remainingDegraded = input.broker.control
+						.listSessionBindings(accepted.collabId)
+						.some((b) => {
+							if (!b.activeSessionId) return false;
+							const s = input.broker.control
+								.listSessions(accepted.collabId)
+								.find((sess) => sess.sessionId === b.activeSessionId);
+							return s?.healthState !== "healthy";
+						});
+
+					return {
+						...state,
+						recovery: remainingDegraded
+							? { ...state.recovery, idleAfterRecovery: false }
+							: { state: "normal" as const, idleAfterRecovery: false, recoveredAt: null },
+					};
+				});
+			} catch {
+				// State file may not exist in test environments — not fatal
+			}
 
 			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
 				interactiveSession,

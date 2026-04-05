@@ -8,7 +8,7 @@ import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 
-const healthyBroker = vi.fn(async () => ({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
+const healthyBroker = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 
 describe("cli collab status enriched", () => {
 	it("includes activeThread when a thread exists", async () => {

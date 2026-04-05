@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { runCollabAttach } from "./commands/collab/attach.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
+import { runCollabReconnect } from "./commands/collab/reconnect.js";
 import { runCollabStart } from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
@@ -172,6 +173,20 @@ export function createCli(): Command {
 				now: new Date().toISOString(),
 			});
 			console.log(`Collab recovered: ${result.bindings.length} remembered role bindings restored`);
+		});
+
+	collab
+		.command("reconnect")
+		.description("Reconnect a remembered role after broker recovery")
+		.argument("<agent>", "Target agent: codex or claude")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action((target: string, opts: WorkspaceOpts) => {
+			const result = runCollabReconnect({
+				workspaceRoot: opts.workspace,
+				target: target as "codex" | "claude",
+				now: new Date().toISOString(),
+			});
+			console.log(result.snippet);
 		});
 
 	collab

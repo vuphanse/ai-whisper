@@ -120,7 +120,7 @@ describe("cli edge cases", () => {
 		writeFileSync(getBrokerSqlitePath(workspaceRoot), "not a sqlite file");
 
 		// Broker daemon assess returns ok:true so we reach the SQLite open step which fails
-		const assessHealthy = vi.fn(async () => ({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
+		const assessHealthy = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 		const result = await runCollabStatus({ workspaceRoot, assessBroker: assessHealthy });
 		expect(result.active).toBe(false);
 	});

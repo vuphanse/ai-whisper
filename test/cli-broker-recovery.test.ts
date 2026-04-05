@@ -6,6 +6,7 @@ import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/run
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
 import { assessBrokerDaemon } from "../packages/cli/src/runtime/broker-daemon.ts";
 import { runCollabRecover } from "../packages/cli/src/commands/collab/recover.ts";
+import { runCollabReconnect } from "../packages/cli/src/commands/collab/reconnect.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 
@@ -181,6 +182,124 @@ describe("recover command", () => {
 				spawnBroker: mockSpawnBroker,
 			}),
 		).rejects.toThrow(/no active collab/i);
+	});
+});
+
+describe("reconnect command", () => {
+	async function buildReconnectFixture() {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_reconnect_test";
+		const now = "2026-04-05T17:00:00.000Z";
+
+		// Set up broker state: codex session registered but marked degraded (post-recovery)
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4410 });
+		broker.control.startCollab({
+			collabId,
+			workspaceRoot: dir,
+			displayName: "reconnect test",
+			now,
+		});
+		broker.control.registerSession({
+			sessionId: "session_codex_degraded",
+			collabId,
+			agentType: "codex",
+			capabilities: {
+				supportsDirectPackets: true,
+				supportsNormalization: false,
+				supportsRelayInterception: true,
+				supportsLocalBuffering: true,
+				supportsLaunchHooks: false,
+				extensions: {},
+			},
+			now,
+		});
+		broker.control.setSessionBinding({
+			collabId,
+			agentType: "codex",
+			sessionId: "session_codex_degraded",
+			bindingSource: "attached",
+			now,
+		});
+		// Mark session degraded (simulating post-recovery state)
+		broker.control.prepareCollabRecovery({ collabId, now });
+		await broker.stop();
+
+		// Write state file with recovery.state === "recovered"
+		const runtimeDir = join(dir, ".ai-whisper", "runtime");
+		const statePath = join(runtimeDir, "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId,
+			workspaceRoot: dir,
+			broker: {
+				sqlitePath,
+				host: "127.0.0.1",
+				port: 4410,
+				pid: 99123,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: {
+				state: "recovered",
+				idleAfterRecovery: true,
+				recoveredAt: now,
+			},
+		});
+
+		return { dir, statePath, collabId, sqlitePath, now };
+	}
+
+	it("prints a reconnect snippet for a degraded remembered role", async () => {
+		const { dir, now } = await buildReconnectFixture();
+
+		const result = runCollabReconnect({
+			workspaceRoot: dir,
+			target: "codex",
+			now,
+		});
+
+		expect(result.claim.mode).toBe("reconnect");
+		expect(result.snippet).toContain("attach-session");
+		expect(result.snippet).toContain("codex");
+	});
+
+	it("throws when recovery.state is not 'recovered'", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-notrecov-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_reconnect_notrecov";
+		const now = "2026-04-05T17:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4411 });
+		broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "test", now });
+		await broker.stop();
+
+		const runtimeDir = join(dir, ".ai-whisper", "runtime");
+		const statePath = join(runtimeDir, "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId,
+			workspaceRoot: dir,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4411, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+		});
+
+		expect(() =>
+			runCollabReconnect({ workspaceRoot: dir, target: "codex", now }),
+		).toThrow(/recovered/i);
+	});
+
+	it("throws when the target has no remembered binding", async () => {
+		const { dir, now } = await buildReconnectFixture();
+
+		// claude has no binding, so reconnect for claude should throw
+		expect(() =>
+			runCollabReconnect({ workspaceRoot: dir, target: "claude", now }),
+		).toThrow(/no remembered binding/i);
 	});
 });
 

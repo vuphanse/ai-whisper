@@ -159,3 +159,14 @@ export function readCliCollabState(path: string): CliCollabState | null {
 export function clearCliCollabState(path: string): void {
 	rmSync(path, { force: true });
 }
+
+export function updateCliCollabState(
+	path: string,
+	update: (state: CliCollabState) => CliCollabState,
+): void {
+	const current = readCliCollabState(path);
+	if (!current) {
+		throw new Error(`No collab state found at ${path}`);
+	}
+	writeCliCollabState(path, update(current));
+}
