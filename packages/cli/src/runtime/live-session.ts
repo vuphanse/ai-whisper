@@ -8,6 +8,21 @@ import {
 } from "./relay-directive.js";
 import { createRelayLineBuffer } from "./relay-line-buffer.js";
 
+const ESC = String.fromCharCode(0x1b);
+const BEL = String.fromCharCode(0x07);
+const terminalResponsePatterns = [
+	new RegExp(`${ESC}\\[[0-9;]*R`, "g"),
+	new RegExp(`${ESC}\\[[?>0-9;]*c`, "g"),
+	new RegExp(`${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`, "g"),
+];
+
+function stripTerminalResponses(raw: string): string {
+	return terminalResponsePatterns.reduce(
+		(text, pattern) => text.replace(pattern, ""),
+		raw,
+	);
+}
+
 export function createLiveSessionRuntime(input: {
 	interactiveSession: InteractiveSessionController;
 	stdin: NodeJS.ReadableStream;
@@ -32,7 +47,12 @@ export function createLiveSessionRuntime(input: {
 	});
 
 	async function processChunk(raw: string) {
-		for (const decision of lineBuffer.push(raw)) {
+		const sanitized = stripTerminalResponses(raw);
+		if (sanitized.length === 0) {
+			return;
+		}
+
+		for (const decision of lineBuffer.push(sanitized)) {
 			if (decision.kind === "passthrough") {
 				input.interactiveSession.writeUserInput(decision.data);
 				continue;

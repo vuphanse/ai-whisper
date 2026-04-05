@@ -101,6 +101,36 @@ describe("live session runtime", () => {
 		expect(output.join("")).toContain("Unsupported relay syntax");
 	});
 
+	it("drops terminal response escape sequences instead of forwarding them to the host session", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[1;1R");
+		stdin.write("\u001b[>71;2;4c");
+		stdin.write("\u001b]10;rgb:dcdc/dcdc/dcdc\u001b\\");
+
+		expect(fakePty.writes).toEqual([]);
+	});
+
 	it("enables raw stdin mode while the live session is active", async () => {
 		const stdout = new PassThrough();
 		const rawModeCalls: boolean[] = [];
