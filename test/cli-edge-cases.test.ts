@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
@@ -119,7 +119,9 @@ describe("cli edge cases", () => {
 		// Overwrite sqlite with invalid bytes
 		writeFileSync(getBrokerSqlitePath(workspaceRoot), "not a sqlite file");
 
-		const result = await runCollabStatus({ workspaceRoot });
+		// Broker daemon assess returns ok:true so we reach the SQLite open step which fails
+		const assessHealthy = vi.fn(async () => ({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
+		const result = await runCollabStatus({ workspaceRoot, assessBroker: assessHealthy });
 		expect(result.active).toBe(false);
 	});
 });

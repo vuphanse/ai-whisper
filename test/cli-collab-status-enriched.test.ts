@@ -1,12 +1,14 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+
+const healthyBroker = vi.fn(async () => ({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 
 describe("cli collab status enriched", () => {
 	it("includes activeThread when a thread exists", async () => {
@@ -35,7 +37,7 @@ describe("cli collab status enriched", () => {
 			now: "2026-04-03T00:00:01.000Z",
 		});
 
-		const status = await runCollabStatus({ workspaceRoot });
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
 		expect(status.active).toBe(true);
 		if (status.active) {
 			expect(status.activeThread).toMatchObject({
@@ -62,7 +64,7 @@ describe("cli collab status enriched", () => {
 			spawn: () => {},
 		});
 
-		const status = await runCollabStatus({ workspaceRoot });
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
 		expect(status.active).toBe(true);
 		if (status.active) {
 			expect(status.activeThread).toBeNull();

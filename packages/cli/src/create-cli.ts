@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { Command } from "commander";
 import { runCollabAttach } from "./commands/collab/attach.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
+import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabStart } from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
@@ -160,6 +161,18 @@ export function createCli(): Command {
 				console.log(result.snippet);
 			},
 		);
+
+	collab
+		.command("recover")
+		.description("Recover the current workspace collab after broker loss")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (opts: WorkspaceOpts) => {
+			const result = await runCollabRecover({
+				workspaceRoot: opts.workspace,
+				now: new Date().toISOString(),
+			});
+			console.log(`Collab recovered: ${result.bindings.length} remembered role bindings restored`);
+		});
 
 	collab
 		.command("stop")
