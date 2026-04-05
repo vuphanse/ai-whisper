@@ -8,6 +8,9 @@ import { assessBrokerDaemon } from "../packages/cli/src/runtime/broker-daemon.ts
 import { runCollabRecover } from "../packages/cli/src/commands/collab/recover.ts";
 import { runCollabReconnect } from "../packages/cli/src/commands/collab/reconnect.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
+import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
+import { runCollabAttach } from "../packages/cli/src/commands/collab/attach.ts";
+import { runCollabRebind } from "../packages/cli/src/commands/collab/rebind.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 
 describe("cli recovery state", () => {
@@ -300,6 +303,122 @@ describe("reconnect command", () => {
 		expect(() =>
 			runCollabReconnect({ workspaceRoot: dir, target: "claude", now }),
 		).toThrow(/no remembered binding/i);
+	});
+});
+
+describe("recovery guards", () => {
+	async function buildGuardFixture(recoveryState: "recovery_required" | "recovered") {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-guard-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_guard_test";
+		const now = "2026-04-05T18:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4420 });
+		broker.control.startCollab({
+			collabId,
+			workspaceRoot: dir,
+			displayName: "guard test",
+			now,
+		});
+		broker.control.registerSession({
+			sessionId: "session_codex_guard",
+			collabId,
+			agentType: "codex",
+			capabilities: {
+				supportsDirectPackets: true,
+				supportsNormalization: false,
+				supportsRelayInterception: true,
+				supportsLocalBuffering: true,
+				supportsLaunchHooks: false,
+				extensions: {},
+			},
+			now,
+		});
+		await broker.stop();
+
+		const runtimeDir = join(dir, ".ai-whisper", "runtime");
+		const statePath = join(runtimeDir, "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId,
+			workspaceRoot: dir,
+			broker: {
+				sqlitePath,
+				host: "127.0.0.1",
+				port: 4420,
+				pid: 99123,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: {
+				state: recoveryState,
+				idleAfterRecovery: recoveryState === "recovered",
+				recoveredAt: recoveryState === "recovered" ? now : null,
+			},
+		});
+
+		return { dir, now };
+	}
+
+	it("tells the operator to run recover when tell is attempted against a collab that needs recovery", async () => {
+		const { dir, now } = await buildGuardFixture("recovery_required");
+
+		await expect(
+			runCollabTell({
+				workspaceRoot: dir,
+				target: "codex",
+				instruction: "review this",
+				artifactPaths: [],
+				now,
+			}),
+		).rejects.toThrow(/whisper collab recover/i);
+	});
+
+	it("tells the operator to run reconnect when tell is attempted against a recovered collab", async () => {
+		const { dir, now } = await buildGuardFixture("recovered");
+
+		await expect(
+			runCollabTell({
+				workspaceRoot: dir,
+				target: "codex",
+				instruction: "review this",
+				artifactPaths: [],
+				now,
+			}),
+		).rejects.toThrow(/whisper collab reconnect/i);
+	});
+
+	it("refuses attach when collab recovery is required", async () => {
+		const { dir, now } = await buildGuardFixture("recovery_required");
+
+		expect(() =>
+			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
+		).toThrow(/whisper collab recover/i);
+	});
+
+	it("refuses attach when collab was recovered but not reconnected", async () => {
+		const { dir, now } = await buildGuardFixture("recovered");
+
+		expect(() =>
+			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
+		).toThrow(/whisper collab reconnect/i);
+	});
+
+	it("refuses rebind when collab recovery is required", async () => {
+		const { dir, now } = await buildGuardFixture("recovery_required");
+
+		await expect(
+			runCollabRebind({ workspaceRoot: dir, target: "codex", now, replace: true, isInteractive: false }),
+		).rejects.toThrow(/whisper collab recover/i);
+	});
+
+	it("refuses rebind when collab was recovered but not reconnected", async () => {
+		const { dir, now } = await buildGuardFixture("recovered");
+
+		await expect(
+			runCollabRebind({ workspaceRoot: dir, target: "codex", now, replace: true, isInteractive: false }),
+		).rejects.toThrow(/whisper collab reconnect/i);
 	});
 });
 

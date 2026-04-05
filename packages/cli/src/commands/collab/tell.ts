@@ -3,6 +3,7 @@ import type { CompanionProvider, WorkItem } from "@ai-whisper/shared";
 import { normalizeArtifactPaths } from "../../runtime/artifact-input.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
+import { assertNormalBrokerState } from "../../runtime/recovery-guard.js";
 import { processOneTurn } from "../../runtime/on-demand-processing.js";
 import { enqueueRelayWork } from "../../runtime/relay-service.js";
 import { waitForReply } from "../../runtime/reply-wait.js";
@@ -27,6 +28,8 @@ export async function runCollabTell(input: {
 	if (!state) {
 		throw new Error("No active collab. Run `whisper collab start` first.");
 	}
+
+	assertNormalBrokerState(state);
 
 	const broker = createBrokerRuntime({
 		sqlitePath: getBrokerSqlitePath(input.workspaceRoot),

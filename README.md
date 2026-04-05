@@ -73,6 +73,18 @@ If a role is already bound and you need to replace it:
 whisper collab rebind codex
 ```
 
+### Recovery workflow (Phase 7B)
+
+If the current workspace collab still exists but the broker is gone or unusable:
+
+```bash
+whisper collab recover
+whisper collab reconnect codex
+whisper collab reconnect claude
+```
+
+Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
+
 ## Phase Roadmap
 
 - Phase 1: foundation

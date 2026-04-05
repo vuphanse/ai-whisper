@@ -65,11 +65,13 @@ export async function runCollabStatus(input: {
 		active: true as const,
 		collabId: state.collabId,
 		workspaceRoot: state.workspaceRoot,
+		recovery: state.recovery,
 		brokerHealth,
 		roles: {
 			codex: codexBinding ?? { agentType: "codex" as const, bindingState: "unbound" as const },
 			claude: claudeBinding ?? { agentType: "claude" as const, bindingState: "unbound" as const },
 		},
+		idleAfterRecovery: state.recovery.idleAfterRecovery,
 		activeThread: activeThread
 			? { threadId: activeThread.threadId, title: activeThread.title }
 			: null,
