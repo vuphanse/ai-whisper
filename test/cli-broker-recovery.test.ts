@@ -186,6 +186,74 @@ describe("recover command", () => {
 			}),
 		).rejects.toThrow(/no active collab/i);
 	});
+
+	it("writes normal recovery state when no remembered bindings exist after recovery", async () => {
+		// Set up a workspace with a fresh broker that has no bindings (no sessions ever attached)
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-recover-nobindings-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_recover_nobindings";
+		const now = "2026-04-05T16:30:00.000Z";
+
+		// Create a broker with a collab but no registered sessions and no bindings
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4401 });
+		broker.control.startCollab({
+			collabId,
+			workspaceRoot: dir,
+			displayName: "no bindings test",
+			now,
+		});
+		// Intentionally do NOT register any sessions or set any bindings
+		await broker.stop();
+
+		// Write state file
+		const runtimeDir = join(dir, ".ai-whisper", "runtime");
+		const statePath = join(runtimeDir, "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId,
+			workspaceRoot: dir,
+			broker: {
+				sqlitePath,
+				host: "127.0.0.1",
+				port: 4401,
+				pid: 99123,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: {
+				state: "normal",
+				idleAfterRecovery: false,
+				recoveredAt: null,
+			},
+		});
+
+		const mockAssessBroker = vi.fn(() => Promise.resolve({
+			pidAlive: false as const,
+			httpReachable: false as const,
+			ok: false as const,
+		}));
+		const mockSpawnBroker = vi.fn(() => 99999);
+
+		const result = await runCollabRecover({
+			workspaceRoot: dir,
+			now,
+			assessBroker: mockAssessBroker,
+			spawnBroker: mockSpawnBroker,
+		});
+
+		// When no bindings exist, recovery is complete with no remembered sessions
+		expect(result.recovered).toBe(true);
+		expect(result.idleAfterRecovery).toBe(false);
+		expect(result.bindings).toHaveLength(0);
+
+		// The state file must have recovery.state === "normal" — not "recovered"
+		// so that runCollabAttach is NOT blocked by the recovery guard
+		const updatedState = readCliCollabState(getStateFilePath(dir));
+		expect(updatedState?.recovery.state).toBe("normal");
+		expect(updatedState?.recovery.idleAfterRecovery).toBe(false);
+		expect(updatedState?.recovery.recoveredAt).toBeNull();
+	});
 });
 
 describe("reconnect command", () => {

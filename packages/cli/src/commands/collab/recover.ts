@@ -42,20 +42,28 @@ export async function runCollabRecover(input: {
 	});
 	await broker.stop();
 
+	const hasRememberedBindings = prepared.bindings.some((b) => b.activeSessionId !== null);
+
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
 		...state,
 		version: 3,
 		broker: { ...state.broker, pid: brokerPid },
-		recovery: {
-			state: "recovered",
-			idleAfterRecovery: true,
-			recoveredAt: input.now,
-		},
+		recovery: hasRememberedBindings
+			? {
+					state: "recovered",
+					idleAfterRecovery: true,
+					recoveredAt: input.now,
+			  }
+			: {
+					state: "normal",
+					idleAfterRecovery: false,
+					recoveredAt: null,
+			  },
 	});
 
 	return {
 		recovered: true as const,
-		idleAfterRecovery: true as const,
+		idleAfterRecovery: hasRememberedBindings,
 		roles: {
 			codex: { health: "degraded" as const },
 			claude: { health: "degraded" as const },
