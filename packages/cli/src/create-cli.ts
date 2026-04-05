@@ -1,4 +1,6 @@
 import { Command } from "commander";
+import { runCollabAttach } from "./commands/collab/attach.js";
+import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabStart } from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
@@ -112,6 +114,42 @@ export function createCli(): Command {
 				console.log("No work items to process.");
 			}
 		});
+
+	collab
+		.command("attach")
+		.description("Issue an attach claim for an agent to join the session")
+		.argument("<agent>", "Target agent: codex or claude")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (target: "codex" | "claude", opts: WorkspaceOpts) => {
+			const result = await runCollabAttach({
+				workspaceRoot: opts.workspace,
+				target,
+				now: new Date().toISOString(),
+			});
+			console.log(result.snippet);
+		});
+
+	collab
+		.command("rebind")
+		.description("Replace an existing agent binding with a new attach claim")
+		.argument("<agent>", "Target agent: codex or claude")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.option("--replace", "Replace the existing binding without prompting")
+		.action(
+			async (
+				target: "codex" | "claude",
+				opts: WorkspaceOpts & { replace?: boolean },
+			) => {
+				const result = await runCollabRebind({
+					workspaceRoot: opts.workspace,
+					target,
+					now: new Date().toISOString(),
+					replace: opts.replace,
+					isInteractive: Boolean(process.stdin.isTTY),
+				});
+				console.log(result.snippet);
+			},
+		);
 
 	collab
 		.command("stop")
