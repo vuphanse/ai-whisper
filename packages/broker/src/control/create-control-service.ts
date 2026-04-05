@@ -30,6 +30,7 @@ import {
 } from "../storage/repositories/attach-claim-repository.js";
 import {
 	createCompanionAck,
+	deleteCompanionSessionsForCollab,
 	getCompanionSession,
 	insertCompanionSession,
 	updateCompanionHeartbeat,
@@ -68,6 +69,7 @@ import {
 	markWorkItemCompleted,
 	markWorkItemDelivered,
 	markWorkItemFailed,
+	markWorkItemsRecoveryBlockedForCollab,
 } from "../storage/repositories/work-item-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
@@ -213,7 +215,7 @@ export function createControlService(db: Database.Database) {
 				| "request_clarification";
 			instruction: string;
 			contextPacket: Record<string, unknown>;
-			artifactManifestIds: string[];
+			artifactManifestIds?: string[];
 			now: string;
 		}) {
 			const thread = getThread(db, input.threadId);
@@ -235,7 +237,7 @@ export function createControlService(db: Database.Database) {
 				instruction: input.instruction,
 				contextPacket: input.contextPacket,
 				deliveryState: "queued",
-				artifactManifestIds: input.artifactManifestIds,
+				artifactManifestIds: input.artifactManifestIds ?? [],
 				createdAt: input.now,
 				deliveredAt: null,
 				completedAt: null,
@@ -606,7 +608,7 @@ export function createControlService(db: Database.Database) {
 		issueAttachClaim(input: {
 			collabId: string;
 			agentType: "codex" | "claude";
-			mode: "attach" | "rebind";
+			mode: "attach" | "rebind" | "reconnect";
 			now: string;
 			expiresAt: string;
 		}) {
@@ -784,6 +786,22 @@ export function createControlService(db: Database.Database) {
 					updatedAt: input.now,
 				}),
 			);
+		},
+		prepareCollabRecovery(input: { collabId: string; now: string }) {
+			db.transaction(() => {
+				const bindings = listSessionBindingsForCollab(db, input.collabId);
+				for (const binding of bindings) {
+					if (binding.activeSessionId) {
+						updateSessionHealth(db, binding.activeSessionId, "degraded", input.now);
+					}
+				}
+				deleteCompanionSessionsForCollab(db, input.collabId);
+				markWorkItemsRecoveryBlockedForCollab(db, input.collabId, input.now);
+			})();
+
+			return {
+				bindings: listSessionBindingsForCollab(db, input.collabId),
+			};
 		},
 		assertActiveBinding(input: { collabId: string; sessionId: string }) {
 			const session = getSession(db, input.sessionId);

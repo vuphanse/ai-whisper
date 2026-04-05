@@ -76,6 +76,10 @@ export function updateCompanionHeartbeat(
 	).run(input.healthState, input.sentAt, input.collabId, input.sessionId);
 }
 
+export function deleteCompanionSessionsForCollab(db: Database.Database, collabId: string): void {
+	db.prepare("DELETE FROM companion_session WHERE collab_id = ?").run(collabId);
+}
+
 export function createCompanionAck(input: {
 	collabId: string;
 	sessionId: string;

@@ -26,6 +26,7 @@ export const workItemStates = [
 	"delivered",
 	"completed",
 	"failed",
+	"recovery_blocked",
 ] as const;
 export const requestedActions = [
 	"review_plan",

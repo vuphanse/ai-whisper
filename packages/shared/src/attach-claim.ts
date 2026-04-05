@@ -8,7 +8,7 @@ export const attachClaimSchema = z.object({
 	claimId: z.string().min(1),
 	collabId: collabIdSchema,
 	agentType: z.enum(agentTypes),
-	mode: z.enum(["attach", "rebind"]),
+	mode: z.enum(["attach", "rebind", "reconnect"]),
 	secret: z.string().min(1),
 	status: z.enum(["pending", "consumed", "expired", "replaced"]),
 	createdAt: z.string().datetime({ offset: true }),

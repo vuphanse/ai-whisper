@@ -171,6 +171,18 @@ export function markWorkItemCompleted(
 	).run(completedAt, workItemId);
 }
 
+export function markWorkItemsRecoveryBlockedForCollab(
+	db: Database.Database,
+	collabId: string,
+	completedAt: string,
+): void {
+	db.prepare(
+		`UPDATE work_item
+		 SET delivery_state = 'recovery_blocked', completed_at = COALESCE(completed_at, ?)
+		 WHERE collab_id = ? AND delivery_state IN ('queued', 'delivered')`,
+	).run(completedAt, collabId);
+}
+
 export function markWorkItemFailed(
 	db: Database.Database,
 	workItemId: string,
