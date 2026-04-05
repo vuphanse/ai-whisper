@@ -44,8 +44,8 @@ describe("cli collab status enriched", () => {
 			expect(status.brokerHealth).toEqual({ ok: true });
 			expect(status).not.toHaveProperty("codexSessionId");
 			expect(status).not.toHaveProperty("claudeSessionId");
-			expect(status.roles.codex.bindingState).toBeDefined();
-			expect(status.roles.claude.bindingState).toBeDefined();
+			expect(status.roles.codex.bindingState).toBe("unbound");
+			expect(status.roles.claude.bindingState).toBe("unbound");
 		}
 	});
 
@@ -69,8 +69,8 @@ describe("cli collab status enriched", () => {
 			expect(status.brokerHealth).toEqual({ ok: true });
 			expect(status).not.toHaveProperty("codexSessionId");
 			expect(status).not.toHaveProperty("claudeSessionId");
-			expect(status.roles.codex.bindingState).toBeDefined();
-			expect(status.roles.claude.bindingState).toBeDefined();
+			expect(status.roles.codex.bindingState).toBe("unbound");
+			expect(status.roles.claude.bindingState).toBe("unbound");
 		}
 	});
 });

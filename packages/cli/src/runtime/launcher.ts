@@ -46,7 +46,7 @@ export function detectTmux(): boolean {
 export function chooseLaunchMode(input: {
 	tmuxAvailable: boolean;
 	forceNoTmux: boolean;
-	forceNoLaunch?: boolean;
+	forceNoLaunch: boolean;
 }): LaunchMode {
 	if (input.forceNoLaunch) return "none";
 	if (input.tmuxAvailable && !input.forceNoTmux) return "tmux";
