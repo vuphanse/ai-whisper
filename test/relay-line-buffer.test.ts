@@ -68,4 +68,24 @@ describe("relay line buffer", () => {
 			message: "[ai-whisper] Unsupported relay syntax.",
 		});
 	});
+
+	it("treats carriage return as enter for ordinary input", () => {
+		const buffer = makeBuffer();
+
+		expect(buffer.push("h")).toEqual([{ kind: "passthrough", data: "h" }]);
+		expect(buffer.push("i\r")).toEqual([
+			{ kind: "passthrough", data: "i" },
+			{ kind: "passthrough", data: "\n" },
+		]);
+	});
+
+	it("treats carriage return as enter for relay directives", () => {
+		const buffer = makeBuffer();
+
+		expect(
+			buffer
+				.push("@@claude hello\r")
+				.some((decision) => decision.kind === "relay"),
+		).toBe(true);
+	});
 });

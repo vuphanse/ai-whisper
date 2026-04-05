@@ -14,6 +14,27 @@ export function createRelayLineBuffer(input: {
 }) {
 	let line = "";
 	let relayCandidate = false;
+	let skipNextLineFeed = false;
+
+	function flushLine(results: RelayDecision[]) {
+		const completed = line;
+		line = "";
+		if (relayCandidate) {
+			relayCandidate = false;
+			const error = input.getError(completed);
+			results.push(
+				error
+					? { kind: "error", message: error }
+					: { kind: "relay", line: completed },
+			);
+			return;
+		}
+
+		results.push({
+			kind: "passthrough",
+			data: `${completed}\n`,
+		});
+	}
 
 	return {
 		push(chunk: string): RelayDecision[] {
@@ -21,28 +42,22 @@ export function createRelayLineBuffer(input: {
 
 			for (const char of chunk) {
 				if (char === "\r") {
+					skipNextLineFeed = true;
+					flushLine(results);
 					continue;
 				}
 
 				if (char === "\n") {
-					const completed = line;
-					line = "";
-					if (relayCandidate) {
-						relayCandidate = false;
-						const error = input.getError(completed);
-						results.push(
-							error
-								? { kind: "error", message: error }
-								: { kind: "relay", line: completed },
-						);
-					} else {
-						results.push({
-							kind: "passthrough",
-							data: `${completed}\n`,
-						});
+					if (skipNextLineFeed) {
+						skipNextLineFeed = false;
+						continue;
 					}
+
+					flushLine(results);
 					continue;
 				}
+
+				skipNextLineFeed = false;
 
 				if (isBackspace(char)) {
 					line = line.slice(0, -1);
