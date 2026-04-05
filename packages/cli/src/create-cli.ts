@@ -11,6 +11,7 @@ interface WorkspaceOpts {
 
 interface StartOpts extends WorkspaceOpts {
 	tmux: boolean;
+	launch: boolean;
 }
 
 interface TellOpts extends WorkspaceOpts {
@@ -36,10 +37,12 @@ export function createCli(): Command {
 		.description("Start a new collaboration session")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--no-tmux", "Disable tmux even if available")
+		.option("--no-launch", "Start broker only, do not launch agent terminals")
 		.action(async (opts: StartOpts) => {
 			const launchMode = chooseLaunchMode({
 				tmuxAvailable: detectTmux(),
 				forceNoTmux: !opts.tmux,
+				forceNoLaunch: !opts.launch,
 			});
 			const result = await runCollabStart({
 				workspaceRoot: opts.workspace,
@@ -61,8 +64,8 @@ export function createCli(): Command {
 				console.log(status.message);
 			} else {
 				console.log(`Collab active: ${status.collabId}`);
-				console.log(`  Codex session: ${status.codexSessionId}`);
-				console.log(`  Claude session: ${status.claudeSessionId}`);
+				console.log(`  Codex: ${status.roles.codex.bindingState}`);
+				console.log(`  Claude: ${status.roles.claude.bindingState}`);
 				console.log(
 					`  Broker health: ${status.brokerHealth.ok ? "ok" : "degraded"}`,
 				);

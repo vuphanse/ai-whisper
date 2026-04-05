@@ -39,10 +39,16 @@ export async function runCollabTell(input: {
 		input.artifactPaths,
 	);
 
-	const senderSessionId =
+	const senderSession =
 		input.target === "codex"
-			? state.sessions.claude.sessionId
-			: state.sessions.codex.sessionId;
+			? state.ownedSessions.claude
+			: state.ownedSessions.codex;
+	if (!senderSession) {
+		throw new Error(
+			`No owned session for the sender role. Cannot send a tell from a no-launch collab.`,
+		);
+	}
+	const senderSessionId = senderSession.sessionId;
 
 	const relay = enqueueRelayWork({
 		broker,

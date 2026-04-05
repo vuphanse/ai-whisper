@@ -45,7 +45,7 @@ describe("cli launcher integration", () => {
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));
-		expect(state?.sessions.codex.launchMode).toBe("tmux");
-		expect(state?.sessions.claude.launchMode).toBe("tmux");
+		expect(state?.ownedSessions.codex?.launchMode).toBe("tmux");
+		expect(state?.ownedSessions.claude?.launchMode).toBe("tmux");
 	});
 });

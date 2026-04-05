@@ -79,6 +79,35 @@ export async function runCollabStart(input: {
 		now: input.now,
 	});
 
+	if (input.launchMode === "none") {
+		// No sessions to register — close in-process broker and spawn daemon
+		await broker.stop();
+
+		const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
+		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
+
+		writeCliCollabState(getStateFilePath(input.workspaceRoot), {
+			version: 2,
+			collabId,
+			workspaceRoot: input.workspaceRoot,
+			broker: {
+				sqlitePath,
+				host: brokerHost,
+				port: brokerPort,
+				pid: brokerPid,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: input.now,
+		});
+		return {
+			collabId,
+			launchMode: "none" as const,
+			launched: false as const,
+			brokerPid,
+		};
+	}
+
 	const codexSessionId = createSessionId(
 		createCliSessionId("codex", input.now),
 	);
@@ -123,7 +152,7 @@ export async function runCollabStart(input: {
 	});
 
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-		version: 1,
+		version: 2,
 		collabId,
 		workspaceRoot: input.workspaceRoot,
 		broker: {
@@ -132,10 +161,11 @@ export async function runCollabStart(input: {
 			port: brokerPort,
 			pid: brokerPid,
 		},
-		...(launch.tmuxSession
-			? { launch: { tmuxSession: launch.tmuxSession } }
-			: {}),
-		sessions: {
+		launch: {
+			mode: input.launchMode,
+			...(launch.tmuxSession ? { tmuxSession: launch.tmuxSession } : {}),
+		},
+		ownedSessions: {
 			codex: {
 				sessionId: codexSessionId,
 				providerId: "openai-codex-cli",

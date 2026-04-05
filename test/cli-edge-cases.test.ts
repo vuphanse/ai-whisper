@@ -86,7 +86,7 @@ describe("cli edge cases", () => {
 		);
 
 		writeCliCollabState(getStateFilePath(workspaceRoot), {
-			version: 1,
+			version: 2,
 			collabId: "collab_20260403000000000",
 			workspaceRoot,
 			broker: {
@@ -95,7 +95,8 @@ describe("cli edge cases", () => {
 				port: 4311,
 				pid: 99999,
 			},
-			sessions: {
+			launch: { mode: "terminals" },
+			ownedSessions: {
 				codex: {
 					sessionId: "session_codex_20260403000000000",
 					providerId: "openai-codex-cli",

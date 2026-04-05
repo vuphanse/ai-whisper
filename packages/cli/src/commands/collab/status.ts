@@ -27,16 +27,21 @@ export async function runCollabStatus(input: { workspaceRoot: string }) {
 	const activeThread = threads.find((t) => t.active) ?? null;
 	const brokerHealth = broker.getHealth();
 
+	const bindings = broker.control.listSessionBindings(state.collabId);
+	const codexBinding = bindings.find((b) => b.agentType === "codex");
+	const claudeBinding = bindings.find((b) => b.agentType === "claude");
+
 	await broker.stop();
 
 	return {
 		active: true as const,
 		collabId: state.collabId,
 		workspaceRoot: state.workspaceRoot,
-		codexSessionId: state.sessions.codex.sessionId,
-		claudeSessionId: state.sessions.claude.sessionId,
-		brokerPath: state.broker.sqlitePath,
 		brokerHealth,
+		roles: {
+			codex: codexBinding ?? { agentType: "codex" as const, bindingState: "unbound" as const },
+			claude: claudeBinding ?? { agentType: "claude" as const, bindingState: "unbound" as const },
+		},
 		activeThread: activeThread
 			? { threadId: activeThread.threadId, title: activeThread.title }
 			: null,

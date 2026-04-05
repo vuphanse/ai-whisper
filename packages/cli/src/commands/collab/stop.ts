@@ -40,7 +40,8 @@ export function runCollabStop(input: { workspaceRoot: string }) {
 		}
 	}
 
-	for (const session of [state.sessions.codex, state.sessions.claude]) {
+	for (const session of [state.ownedSessions.codex, state.ownedSessions.claude]) {
+		if (!session) continue;
 		if (session.windowLabel) {
 			try {
 				closeTerminalWindow(session.windowLabel);

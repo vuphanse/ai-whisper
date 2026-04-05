@@ -2,7 +2,7 @@ import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type LaunchMode = "tmux" | "terminals";
+export type LaunchMode = "tmux" | "terminals" | "none";
 
 export type SpawnFn = (command: string) => number | void;
 export type ExecFn = (command: string) => void;
@@ -46,11 +46,10 @@ export function detectTmux(): boolean {
 export function chooseLaunchMode(input: {
 	tmuxAvailable: boolean;
 	forceNoTmux: boolean;
+	forceNoLaunch?: boolean;
 }): LaunchMode {
-	if (input.tmuxAvailable && !input.forceNoTmux) {
-		return "tmux";
-	}
-
+	if (input.forceNoLaunch) return "none";
+	if (input.tmuxAvailable && !input.forceNoTmux) return "tmux";
 	return "terminals";
 }
 

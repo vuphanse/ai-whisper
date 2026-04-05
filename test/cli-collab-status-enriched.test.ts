@@ -42,6 +42,10 @@ describe("cli collab status enriched", () => {
 				title: "Review plan",
 			});
 			expect(status.brokerHealth).toEqual({ ok: true });
+			expect(status).not.toHaveProperty("codexSessionId");
+			expect(status).not.toHaveProperty("claudeSessionId");
+			expect(status.roles.codex.bindingState).toBeDefined();
+			expect(status.roles.claude.bindingState).toBeDefined();
 		}
 	});
 
@@ -63,6 +67,10 @@ describe("cli collab status enriched", () => {
 		if (status.active) {
 			expect(status.activeThread).toBeNull();
 			expect(status.brokerHealth).toEqual({ ok: true });
+			expect(status).not.toHaveProperty("codexSessionId");
+			expect(status).not.toHaveProperty("claudeSessionId");
+			expect(status.roles.codex.bindingState).toBeDefined();
+			expect(status.roles.claude.bindingState).toBeDefined();
 		}
 	});
 });
