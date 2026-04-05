@@ -27,4 +27,50 @@ describe("broker attach claims", () => {
 			now: "2026-04-05T12:02:00.000Z", bindingSource: "attached",
 		})).toThrow(/consumed/i);
 	});
+
+	it("rejects a claim after it has expired", () => {
+		const runtime = createBrokerRuntime({
+			sqlitePath: ":memory:",
+			host: "127.0.0.1",
+			port: 4311,
+		});
+
+		runtime.control.startCollab({
+			collabId: "collab_expired",
+			workspaceRoot: "/tmp/workspace",
+			displayName: "expired",
+			now: "2026-04-05T12:00:00.000Z",
+		});
+
+		const claim = runtime.control.issueAttachClaim({
+			collabId: "collab_expired",
+			agentType: "codex",
+			mode: "attach",
+			now: "2026-04-05T12:00:00.000Z",
+			expiresAt: "2026-04-05T12:05:00.000Z",
+		});
+
+		expect(() =>
+			runtime.control.completeAttachClaim({
+				claimId: claim.claimId,
+				secret: claim.secret,
+				sessionId: "session_codex_late",
+				provider: {
+					providerId: "openai-codex-cli",
+					toolFamily: "codex",
+					providerVersion: "1.0.0",
+				},
+				capabilities: {
+					supportsDirectPackets: true,
+					supportsNormalization: false,
+					supportsRelayInterception: true,
+					supportsLocalBuffering: true,
+					supportsLaunchHooks: false,
+					extensions: {},
+				},
+				now: "2026-04-05T12:10:00.000Z", // after expiresAt
+				bindingSource: "attached",
+			}),
+		).toThrow(/expired/i);
+	});
 });

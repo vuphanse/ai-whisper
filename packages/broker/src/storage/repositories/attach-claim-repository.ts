@@ -86,15 +86,6 @@ export function markAttachClaimConsumed(
 	).run(consumedAt, claimId);
 }
 
-export function markAttachClaimExpired(
-	db: Database.Database,
-	claimId: string,
-): void {
-	db.prepare(
-		"UPDATE attach_claim SET status = 'expired' WHERE claim_id = ?",
-	).run(claimId);
-}
-
 export function markAttachClaimReplaced(
 	db: Database.Database,
 	claimId: string,
