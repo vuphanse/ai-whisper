@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline";
 import { Command } from "commander";
 import { runCollabAttach } from "./commands/collab/attach.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
@@ -146,6 +147,15 @@ export function createCli(): Command {
 					now: new Date().toISOString(),
 					replace: opts.replace,
 					isInteractive: Boolean(process.stdin.isTTY),
+					confirmReplace: async (message: string) => {
+						const rl = createInterface({ input: process.stdin, output: process.stdout });
+						return new Promise<boolean>((resolve) => {
+							rl.question(message, (answer) => {
+								rl.close();
+								resolve(answer.trim().toLowerCase() === "y");
+							});
+						});
+					},
 				});
 				console.log(result.snippet);
 			},

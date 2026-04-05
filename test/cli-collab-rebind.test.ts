@@ -63,4 +63,23 @@ describe("cli collab rebind", () => {
 			"Claude is already bound. Replace it? [y/N] ",
 		]);
 	});
+
+	it("throws when non-interactive and --replace is not set", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-rebind-nointeractive-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-05T13:30:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		await expect(
+			runCollabRebind({
+				workspaceRoot,
+				target: "claude",
+				now: "2026-04-05T13:32:00.000Z",
+				isInteractive: false,
+			}),
+		).rejects.toThrow(/--replace/i);
+	});
 });
