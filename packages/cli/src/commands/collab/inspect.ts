@@ -2,7 +2,7 @@ import { createBrokerRuntime } from "@ai-whisper/broker";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import { buildInspectSnapshot, formatInspectSnapshot } from "../../runtime/operator-inspect.js";
 import { getStateFilePath } from "../../runtime/paths.js";
-import { readCliCollabState } from "../../runtime/state-file.js";
+import { readCliCollabState, writeCliCollabState } from "../../runtime/state-file.js";
 
 export async function runCollabInspect(input: {
 	workspaceRoot: string;
@@ -25,7 +25,17 @@ export async function runCollabInspect(input: {
 			pid: state.broker.pid,
 		});
 
-		if (!health.ok && state.recovery.state === "recovery_required") {
+		if (!health.ok) {
+			if (state.recovery.state === "normal") {
+				writeCliCollabState(getStateFilePath(input.workspaceRoot), {
+					...state,
+					recovery: {
+						state: "recovery_required",
+						idleAfterRecovery: state.recovery.idleAfterRecovery,
+						recoveredAt: state.recovery.recoveredAt,
+					},
+				});
+			}
 			throw new Error("Broker is unavailable for the current collab. Run `whisper collab recover`.");
 		}
 

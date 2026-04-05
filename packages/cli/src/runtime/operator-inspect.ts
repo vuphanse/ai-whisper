@@ -42,8 +42,9 @@ export function buildInspectSnapshot(input: {
 		};
 	}
 
-	const workItems = input.broker.control
-		.listWorkItems(activeThread.threadId)
+	const allWorkItemsRaw = input.broker.control.listWorkItems(activeThread.threadId);
+
+	const workItems = allWorkItemsRaw
 		.slice(-5)
 		.reverse()
 		.map((item) => {
@@ -75,9 +76,15 @@ export function buildInspectSnapshot(input: {
 			};
 		});
 
-	const flaggedItems = workItems.filter(
-		(item) => item.deliveryState === "failed" || item.deliveryState === "recovery_blocked",
-	);
+	const flaggedItems = allWorkItemsRaw
+		.filter((item) => item.deliveryState === "failed" || item.deliveryState === "recovery_blocked")
+		.slice(-5)
+		.reverse()
+		.map((item) => ({
+			workItemId: item.workItemId,
+			deliveryState: item.deliveryState,
+			instructionPreview: truncatePreview(item.instruction, 100),
+		}));
 
 	return {
 		collabId: input.state.collabId,

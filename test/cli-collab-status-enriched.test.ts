@@ -157,6 +157,28 @@ describe("cli collab status enriched", () => {
 		}
 	});
 
+	it("includes healthState: null on broker-down path for bound roles", async () => {
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-status-broker-down-health-"),
+		);
+
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.000Z",
+			launchMode: "terminals",
+			spawnBroker: fakeBrokerSpawn(),
+			spawn: () => {},
+		});
+
+		const downBroker = vi.fn(() => Promise.resolve({ pidAlive: false as const, httpReachable: false as const, ok: false as const }));
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: downBroker });
+		expect(status.active).toBe(true);
+		if (status.active) {
+			expect(status.roles.codex).toHaveProperty("healthState", null);
+			expect(status.roles.claude).toHaveProperty("healthState", null);
+		}
+	});
+
 	it("includes per-role healthState on healthy-broker path", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-status-health-"),

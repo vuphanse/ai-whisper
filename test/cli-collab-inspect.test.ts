@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
-import { formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
-import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
+import { buildInspectSnapshot, formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
+import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 
 describe("collab inspect snapshot", () => {
 	it("renders the active thread snapshot", async () => {
@@ -190,6 +190,127 @@ describe("collab inspect watch mode", () => {
 
 		expect(write).toHaveBeenCalled();
 		expect(write.mock.calls.some(([chunk]) => String(chunk).includes("Live Inspect"))).toBe(true);
+	});
+});
+
+describe("inspect broker-down recovery latch", () => {
+	it("latches recovery_required and throws when broker is down during normal state", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-latch-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const now = "2026-04-06T10:00:00.000Z";
+		const statePath = join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json");
+
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId: "collab_inspect_latch",
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4460, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+		});
+
+		await expect(
+			runCollabInspect({
+				workspaceRoot,
+				now,
+				watch: false,
+				assessBroker: () => Promise.resolve({ pidAlive: false, httpReachable: false, ok: false }),
+			}),
+		).rejects.toThrow("Broker is unavailable");
+
+		const updated = readCliCollabState(statePath);
+		expect(updated?.recovery.state).toBe("recovery_required");
+	});
+});
+
+describe("inspect flagged items outside display window", () => {
+	it("includes flagged work items that fall outside the last-5 display window", () => {
+		const runtime = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4461 });
+		const collabId = "collab_flagged_window";
+		const now = "2026-04-06T09:00:00.000Z";
+
+		runtime.control.startCollab({ collabId, workspaceRoot: "/tmp", displayName: "flagged", now });
+		for (const agentType of ["codex", "claude"] as const) {
+			runtime.control.registerSession({
+				sessionId: `session_${agentType}`,
+				collabId,
+				agentType,
+				capabilities: {
+					supportsDirectPackets: true,
+					supportsNormalization: false,
+					supportsRelayInterception: true,
+					supportsLocalBuffering: true,
+					supportsLaunchHooks: false,
+					extensions: {},
+				},
+				now,
+			});
+		}
+		runtime.control.createThread({
+			threadId: "thread_flagged",
+			collabId,
+			title: "Flag test",
+			createdBySessionId: "session_codex",
+			now,
+		});
+
+		// Enqueue 6 work items; work_1 will be marked failed but falls outside the last-5 display window
+		for (let i = 1; i <= 6; i++) {
+			runtime.control.enqueueWorkItem({
+				workItemId: `work_${i}`,
+				threadId: "thread_flagged",
+				collabId,
+				senderSessionId: "session_codex",
+				targetSessionId: "session_claude",
+				requestedAction: "review_plan",
+				instruction: `instruction ${i}`,
+				contextPacket: {
+					kind: "full",
+					goal: "g",
+					currentState: "s",
+					decisionsMade: [],
+					assumptions: [],
+					relevantArtifacts: [],
+					openQuestions: [],
+					successCriteria: [],
+				},
+				now: `2026-04-06T09:0${i}:00.000Z`,
+			});
+		}
+
+		runtime.control.postReply({
+			replyId: "reply_fail",
+			threadId: "thread_flagged",
+			collabId,
+			workItemId: "work_1",
+			sourceSessionId: "session_claude",
+			kind: "failure",
+			content: "failed",
+			transitionIntent: null,
+			artifactManifestIds: [],
+			now: "2026-04-06T09:01:30.000Z",
+		});
+
+		const snapshot = buildInspectSnapshot({
+			broker: runtime,
+			state: { collabId, recovery: { state: "normal" } } as any,
+			now,
+		});
+
+		// Display window (last 5) excludes work_1
+		expect(snapshot.workItems.map((w) => w.workItemId)).toEqual([
+			"work_6",
+			"work_5",
+			"work_4",
+			"work_3",
+			"work_2",
+		]);
+		// But flaggedItems must still surface work_1
+		expect(snapshot.flaggedItems).toHaveLength(1);
+		expect(snapshot.flaggedItems[0].workItemId).toBe("work_1");
+		expect(snapshot.flaggedItems[0].deliveryState).toBe("failed");
 	});
 });
 

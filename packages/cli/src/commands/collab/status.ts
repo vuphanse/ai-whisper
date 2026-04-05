@@ -23,8 +23,8 @@ export async function runCollabStatus(input: {
 	if (!brokerAssess.ok) {
 		// Read last-known bindings from SQLite (accessible without daemon)
 		let lastKnownRoles: {
-			codex: SessionBinding | { agentType: "codex"; bindingState: "unbound" };
-			claude: SessionBinding | { agentType: "claude"; bindingState: "unbound" };
+			codex: (SessionBinding & { healthState: null }) | { agentType: "codex"; bindingState: "unbound"; healthState: null };
+			claude: (SessionBinding & { healthState: null }) | { agentType: "claude"; bindingState: "unbound"; healthState: null };
 		};
 		try {
 			const offlineBroker = createBrokerRuntime({
@@ -37,13 +37,17 @@ export async function runCollabStatus(input: {
 			const claudeBinding = bindings.find((b) => b.agentType === "claude");
 			void offlineBroker.stop();
 			lastKnownRoles = {
-				codex: codexBinding ?? { agentType: "codex" as const, bindingState: "unbound" as const },
-				claude: claudeBinding ?? { agentType: "claude" as const, bindingState: "unbound" as const },
+				codex: codexBinding
+					? { ...codexBinding, healthState: null }
+					: { agentType: "codex" as const, bindingState: "unbound" as const, healthState: null },
+				claude: claudeBinding
+					? { ...claudeBinding, healthState: null }
+					: { agentType: "claude" as const, bindingState: "unbound" as const, healthState: null },
 			};
 		} catch {
 			lastKnownRoles = {
-				codex: { agentType: "codex" as const, bindingState: "unbound" as const },
-				claude: { agentType: "claude" as const, bindingState: "unbound" as const },
+				codex: { agentType: "codex" as const, bindingState: "unbound" as const, healthState: null },
+				claude: { agentType: "claude" as const, bindingState: "unbound" as const, healthState: null },
 			};
 		}
 		return {
