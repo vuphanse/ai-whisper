@@ -69,8 +69,18 @@ export function createCli(): Command {
 				console.log(status.message);
 			} else {
 				console.log(`Collab active: ${status.collabId}`);
-				console.log(`  Codex: ${status.roles.codex.bindingState}`);
-				console.log(`  Claude: ${status.roles.claude.bindingState}`);
+
+				if (status.recovery.state === "recovery_required") {
+					console.log("  Recovery required: run `whisper collab recover`");
+				} else if (status.recovery.state === "recovered") {
+					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>`");
+				}
+
+				for (const [role, binding] of [["Codex", status.roles.codex], ["Claude", status.roles.claude]] as const) {
+					const health = "healthState" in binding && binding.healthState ? ` (${binding.healthState})` : "";
+					console.log(`  ${role}: ${binding.bindingState}${health}`);
+				}
+
 				console.log(
 					`  Broker health: ${status.brokerHealth.ok ? "ok" : "degraded"}`,
 				);

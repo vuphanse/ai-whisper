@@ -130,4 +130,55 @@ describe("cli collab status enriched", () => {
 			expect(status.idleAfterRecovery).toBe(true);
 		}
 	});
+
+	it("returns last-known bindings on broker-down path instead of hardcoded unbound", async () => {
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-status-broker-down-"),
+		);
+
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.000Z",
+			launchMode: "terminals",
+			spawnBroker: fakeBrokerSpawn(),
+			spawn: () => {},
+		});
+
+		// Verify broker-down path reads last-known bindings from SQLite
+		const downBroker = vi.fn(() => Promise.resolve({ pidAlive: false as const, httpReachable: false as const, ok: false as const }));
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: downBroker });
+		expect(status.active).toBe(true);
+		if (status.active) {
+			// runCollabStart sets up bound bindings; broker-down path should read them
+			expect(status.roles.codex.bindingState).toBe("bound");
+			expect(status.roles.claude.bindingState).toBe("bound");
+			expect(status.brokerHealth).toEqual({ ok: false });
+			expect(status.recovery.state).toBe("recovery_required");
+		}
+	});
+
+	it("includes per-role healthState on healthy-broker path", async () => {
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-status-health-"),
+		);
+
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.000Z",
+			launchMode: "terminals",
+			spawnBroker: fakeBrokerSpawn(),
+			spawn: () => {},
+		});
+
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
+		expect(status.active).toBe(true);
+		if (status.active) {
+			// healthState should be present on bound roles
+			expect(status.roles.codex).toHaveProperty("healthState");
+			expect(status.roles.claude).toHaveProperty("healthState");
+			// After runCollabStart, sessions start healthy
+			expect((status.roles.codex as { healthState: string | null }).healthState).toBe("healthy");
+			expect((status.roles.claude as { healthState: string | null }).healthState).toBe("healthy");
+		}
+	});
 });
