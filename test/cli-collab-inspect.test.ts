@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
 import { formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
@@ -141,6 +141,55 @@ describe("inspect broker data access", () => {
 
 		const workItems = runtime.control.listWorkItems("thread_active");
 		expect(workItems.map((item) => item.workItemId)).toEqual(["work_1"]);
+	});
+});
+
+describe("collab inspect watch mode", () => {
+	it("redraws periodically and stops cleanly on interrupt", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-watch-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const now = "2026-04-06T10:30:00.000Z";
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4451 });
+
+		broker.control.startCollab({
+			collabId: "collab_inspect_watch",
+			workspaceRoot,
+			displayName: "inspect watch",
+			now,
+		});
+		await broker.stop();
+
+		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
+			version: 3,
+			collabId: "collab_inspect_watch",
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4451, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+		});
+
+		const write = vi.fn();
+		const sleep = vi
+			.fn<() => Promise<void>>()
+			.mockResolvedValueOnce(undefined)
+			.mockResolvedValueOnce(undefined)
+			.mockImplementation(() => Promise.reject(new Error("stop-watch")));
+
+		await expect(
+			runCollabInspect({
+				workspaceRoot,
+				now,
+				watch: true,
+				write,
+				sleep,
+				assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+			}),
+		).rejects.toThrow("stop-watch");
+
+		expect(write).toHaveBeenCalled();
+		expect(write.mock.calls.some(([chunk]) => String(chunk).includes("Live Inspect"))).toBe(true);
 	});
 });
 

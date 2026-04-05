@@ -47,10 +47,38 @@ export async function runCollabInspect(input: {
 		}
 	};
 
+	function clearScreen(): string {
+		return "\u001Bc";
+	}
+
+	const write = input.write ?? ((chunk: string) => process.stdout.write(chunk));
+	const sleep =
+		input.sleep ??
+		((ms: number) =>
+			new Promise<void>((resolve) => {
+				setTimeout(resolve, ms);
+			}));
+
 	if (!input.watch) {
 		return renderOnce(input.now);
 	}
 
-	// Watch mode placeholder — implemented in Task 4
-	throw new Error("Watch mode not yet implemented.");
+	let stopped = false;
+	const stop = () => {
+		stopped = true;
+	};
+	process.once("SIGINT", stop);
+	process.once("SIGTERM", stop);
+
+	try {
+		while (!stopped) {
+			const output = await renderOnce(new Date().toISOString());
+			write(`${clearScreen()}${output}`);
+			await sleep(input.watchIntervalMs ?? 1000);
+		}
+		return null;
+	} finally {
+		process.off("SIGINT", stop);
+		process.off("SIGTERM", stop);
+	}
 }
