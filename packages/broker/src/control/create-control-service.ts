@@ -1,22 +1,32 @@
 import {
 	artifactManifestSchema,
+	attachClaimSchema,
 	brokerSchemaVersion,
 	collabSchema,
 	companionRegistrationSchema,
 	providerCapabilitiesSchema,
 	providerIdentitySchema,
 	replySchema,
+	sessionBindingSchema,
 	sessionSchema,
 	threadSchema,
 	workItemSchema,
+	type ProviderCapabilities,
+	type ProviderIdentity,
 } from "@ai-whisper/shared";
 import type Database from "better-sqlite3";
+import { randomBytes } from "node:crypto";
 import { nanoid } from "nanoid";
 import {
 	appendEvent,
 	listEventsForCollab,
 } from "../storage/repositories/event-log-repository.js";
 import { insertArtifactManifest } from "../storage/repositories/artifact-manifest-repository.js";
+import {
+	getAttachClaim,
+	insertAttachClaim,
+	markAttachClaimConsumed,
+} from "../storage/repositories/attach-claim-repository.js";
 import {
 	createCompanionAck,
 	getCompanionSession,
@@ -32,7 +42,13 @@ import {
 	listRepliesForThread,
 } from "../storage/repositories/reply-repository.js";
 import {
+	getSessionBinding,
+	listSessionBindingsForCollab,
+	upsertSessionBinding,
+} from "../storage/repositories/session-binding-repository.js";
+import {
 	insertSession,
+	getSession,
 	listSessionsForCollab as listSessions,
 	updateSessionHealth,
 } from "../storage/repositories/session-repository.js";
@@ -100,7 +116,7 @@ export function createControlService(db: Database.Database) {
 			sessionId: string;
 			collabId: string;
 			agentType: "codex" | "claude";
-			capabilities: Record<string, boolean>;
+			capabilities: Record<string, unknown>;
 			now: string;
 		}) {
 			const collab = getCollab(db, input.collabId);
@@ -580,6 +596,174 @@ export function createControlService(db: Database.Database) {
 		},
 		listEventsForCollab(collabId: string) {
 			return listEventsForCollab(db, collabId);
+		},
+		issueAttachClaim(input: {
+			collabId: string;
+			agentType: "codex" | "claude";
+			mode: "attach" | "rebind";
+			now: string;
+			expiresAt: string;
+		}) {
+			const collab = getCollab(db, input.collabId);
+			if (!collab) {
+				throw new Error(`Unknown collab: ${input.collabId}`);
+			}
+
+			const claimId = `claim_${nanoid(16)}`;
+			const secret = randomBytes(16).toString("hex");
+
+			const claim = attachClaimSchema.parse({
+				version: 1,
+				claimId,
+				collabId: input.collabId,
+				agentType: input.agentType,
+				mode: input.mode,
+				secret,
+				status: "pending",
+				createdAt: input.now,
+				expiresAt: input.expiresAt,
+				consumedAt: null,
+			});
+
+			insertAttachClaim(db, claim);
+
+			// If rebind mode, preserve the existing active session but enter pending_attach state
+			const existing = getSessionBinding(db, input.collabId, input.agentType);
+			const existingSessionId = existing?.activeSessionId ?? null;
+			const existingSource = existing?.bindingSource ?? null;
+
+			upsertSessionBinding(
+				db,
+				sessionBindingSchema.parse({
+					version: 1,
+					collabId: input.collabId,
+					agentType: input.agentType,
+					bindingState: "pending_attach",
+					activeSessionId: existingSessionId,
+					bindingSource: existingSource,
+					pendingClaimId: claimId,
+					pendingClaimExpiresAt: input.expiresAt,
+					updatedAt: input.now,
+				}),
+			);
+
+			return claim;
+		},
+		completeAttachClaim(input: {
+			claimId: string;
+			secret: string;
+			sessionId: string;
+			provider: ProviderIdentity;
+			capabilities: ProviderCapabilities;
+			now: string;
+			bindingSource: "launched" | "attached";
+		}) {
+			const claim = getAttachClaim(db, input.claimId);
+			if (!claim) {
+				throw new Error(`Unknown attach claim: ${input.claimId}`);
+			}
+			if (claim.status !== "pending") {
+				throw new Error(
+					`Attach claim ${input.claimId} has already been consumed (status: ${claim.status})`,
+				);
+			}
+			if (claim.secret !== input.secret) {
+				throw new Error("Invalid attach claim secret");
+			}
+
+			// Register the session if it doesn't exist yet
+			const existing = getSession(db, input.sessionId);
+			if (!existing) {
+				const session = sessionSchema.parse({
+					version: 1,
+					sessionId: input.sessionId,
+					collabId: claim.collabId,
+					agentType: claim.agentType,
+					registrationState: "registered",
+					healthState: "healthy",
+					capabilities: input.capabilities,
+					registeredAt: input.now,
+					lastSeenAt: input.now,
+				});
+				insertSession(db, session);
+			}
+
+			// Update the binding to bound state
+			upsertSessionBinding(
+				db,
+				sessionBindingSchema.parse({
+					version: 1,
+					collabId: claim.collabId,
+					agentType: claim.agentType,
+					bindingState: "bound",
+					activeSessionId: input.sessionId,
+					bindingSource: input.bindingSource,
+					pendingClaimId: null,
+					pendingClaimExpiresAt: null,
+					updatedAt: input.now,
+				}),
+			);
+
+			// Mark the claim consumed
+			markAttachClaimConsumed(db, input.claimId, input.now);
+
+			return {
+				sessionId: input.sessionId,
+				collabId: claim.collabId,
+				agentType: claim.agentType,
+				provider: providerIdentitySchema.parse(input.provider),
+				capabilities: providerCapabilitiesSchema.parse(input.capabilities),
+			};
+		},
+		listSessionBindings(collabId: string) {
+			return listSessionBindingsForCollab(db, collabId);
+		},
+		resolveBoundSession(collabId: string, agentType: "codex" | "claude"): string {
+			const binding = getSessionBinding(db, collabId, agentType);
+			// Accept both 'bound' and 'pending_attach' states if there is an active session.
+			// During a rebind the old session remains authoritative until the claim is completed.
+			if (!binding || !binding.activeSessionId) {
+				throw new Error(
+					`No bound session for collab ${collabId} / agentType ${agentType}`,
+				);
+			}
+			return binding.activeSessionId;
+		},
+		setSessionBinding(input: {
+			collabId: string;
+			agentType: "codex" | "claude";
+			sessionId: string;
+			bindingSource: "launched" | "attached";
+			now: string;
+		}) {
+			upsertSessionBinding(
+				db,
+				sessionBindingSchema.parse({
+					version: 1,
+					collabId: input.collabId,
+					agentType: input.agentType,
+					bindingState: "bound",
+					activeSessionId: input.sessionId,
+					bindingSource: input.bindingSource,
+					pendingClaimId: null,
+					pendingClaimExpiresAt: null,
+					updatedAt: input.now,
+				}),
+			);
+		},
+		assertActiveBinding(input: { collabId: string; sessionId: string }) {
+			// Find a binding for this collab where the active session is the given sessionId
+			const bindings = listSessionBindingsForCollab(db, input.collabId);
+			const match = bindings.find(
+				(b) =>
+					b.bindingState === "bound" &&
+					b.activeSessionId === input.sessionId,
+			);
+			if (!match) {
+				throw new Error(
+					`Session is no longer the active binding for this collab role.`,
+				);
+			}
 		},
 	};
 }

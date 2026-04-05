@@ -115,6 +115,30 @@ CREATE TABLE IF NOT EXISTS event_log (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS attach_claim (
+  claim_id TEXT PRIMARY KEY,
+  collab_id TEXT NOT NULL,
+  agent_type TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  secret TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS session_binding (
+  collab_id TEXT NOT NULL,
+  agent_type TEXT NOT NULL,
+  binding_state TEXT NOT NULL,
+  active_session_id TEXT,
+  binding_source TEXT,
+  pending_claim_id TEXT,
+  pending_claim_expires_at TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (collab_id, agent_type)
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 1, 1)
 ON CONFLICT(id) DO UPDATE SET

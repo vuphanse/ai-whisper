@@ -95,3 +95,5 @@ export {
 	type InteractiveBrokerFrameState,
 } from "./interactive-broker-protocol.js";
 export { ensureNodePtySpawnHelperExecutable } from "./node-pty-support.js";
+export { attachClaimSchema, type AttachClaim } from "./attach-claim.js";
+export { sessionBindingSchema, type SessionBinding } from "./session-binding.js";

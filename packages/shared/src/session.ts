@@ -14,7 +14,7 @@ export const sessionSchema = z.object({
 	agentType: z.enum(agentTypes),
 	registrationState: z.enum(sessionRegistrationStates),
 	healthState: z.enum(brokerHealthStates),
-	capabilities: z.record(z.string(), z.boolean()),
+	capabilities: z.record(z.string(), z.unknown()),
 	registeredAt: z.string().datetime({ offset: true }),
 	lastSeenAt: z.string().datetime({ offset: true }),
 });

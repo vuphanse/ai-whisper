@@ -20,7 +20,7 @@ function mapRowToSession(row: SessionRow): Session {
 		agentType: row.agent_type,
 		registrationState: row.registration_state,
 		healthState: row.health_state,
-		capabilities: JSON.parse(row.capabilities_json) as Record<string, boolean>,
+		capabilities: JSON.parse(row.capabilities_json) as Record<string, unknown>,
 		registeredAt: row.registered_at,
 		lastSeenAt: row.last_seen_at,
 	});
