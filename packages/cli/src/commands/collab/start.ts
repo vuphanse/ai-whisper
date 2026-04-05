@@ -131,6 +131,22 @@ export async function runCollabStart(input: {
 		now: input.now,
 	});
 
+	broker.control.setSessionBinding({
+		collabId,
+		agentType: "codex",
+		sessionId: codexSessionId,
+		bindingSource: "launched",
+		now: input.now,
+	});
+
+	broker.control.setSessionBinding({
+		collabId,
+		agentType: "claude",
+		sessionId: claudeSessionId,
+		bindingSource: "launched",
+		now: input.now,
+	});
+
 	// Close in-process broker so the daemon can claim the SQLite file and port
 	await broker.stop();
 

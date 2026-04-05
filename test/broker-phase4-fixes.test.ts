@@ -44,6 +44,14 @@ function setupCollab(runtime: ReturnType<typeof makeRuntime>) {
 		now: "2026-04-03T00:00:02.000Z",
 	});
 
+	runtime.control.setSessionBinding({
+		collabId: collab.collabId,
+		agentType: "codex",
+		sessionId: "session_codex_1",
+		bindingSource: "launched",
+		now: "2026-04-03T00:00:02.000Z",
+	});
+
 	const thread = runtime.control.createThread({
 		threadId: "thread_fix1",
 		collabId: collab.collabId,

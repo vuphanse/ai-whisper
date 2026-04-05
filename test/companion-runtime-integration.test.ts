@@ -38,6 +38,14 @@ describe("companion runtime integration", () => {
 			now: "2026-04-03T00:00:02.000Z",
 		});
 
+		broker.control.setSessionBinding({
+			collabId: collab.collabId,
+			agentType: "codex",
+			sessionId: "session_codex_1",
+			bindingSource: "launched",
+			now: "2026-04-03T00:00:02.000Z",
+		});
+
 		const thread = broker.control.createThread({
 			threadId: "thread_phase4",
 			collabId: collab.collabId,

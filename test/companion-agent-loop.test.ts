@@ -43,6 +43,13 @@ describe("companion agent loop", () => {
 			capabilities: { supportsDirectPackets: true },
 			now: "2026-04-04T02:00:00.000Z",
 		});
+		broker.control.setSessionBinding({
+			collabId: "collab_phase6",
+			agentType: "codex",
+			sessionId: codexSessionId,
+			bindingSource: "launched",
+			now: "2026-04-04T02:00:00.000Z",
+		});
 
 		const handled: ProviderWorkRequest[] = [];
 		const interactiveSession: InteractiveSessionController = {

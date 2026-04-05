@@ -8,6 +8,7 @@ import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabAttach } from "../packages/cli/src/commands/collab/attach.ts";
+import type { ProviderCapabilities, ProviderIdentity } from "../packages/shared/src/index.ts";
 
 describe("cli collab attach", () => {
 	it("issues a claim and renders a provider-specific snippet", async () => {
@@ -74,5 +75,55 @@ describe("cli collab attach", () => {
 				now: "2026-04-05T13:32:00.000Z",
 			}),
 		).rejects.toThrow(/rebind/i);
+	});
+
+	it("session becomes bound after completeAttachClaim", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-attach-complete-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-05T14:00:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		const result = await runCollabAttach({
+			workspaceRoot,
+			target: "codex",
+			now: "2026-04-05T14:01:00.000Z",
+		});
+
+		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
+		const broker = createBrokerRuntime({
+			sqlitePath: state.broker.sqlitePath,
+			host: state.broker.host,
+			port: state.broker.port,
+		});
+
+		const provider: ProviderIdentity = {
+			providerId: "openai-codex-cli",
+			toolFamily: "codex",
+			providerVersion: "1.0.0",
+		};
+		const capabilities: ProviderCapabilities = {
+			supportsDirectPackets: true,
+			supportsNormalization: false,
+			supportsRelayInterception: true,
+			supportsLocalBuffering: true,
+			supportsLaunchHooks: false,
+			extensions: {},
+		};
+
+		broker.control.completeAttachClaim({
+			claimId: result.claim.claimId,
+			secret: result.claim.secret,
+			sessionId: "session_codex_attached",
+			provider,
+			capabilities,
+			now: "2026-04-05T14:02:00.000Z",
+			bindingSource: "attached",
+		});
+
+		const boundSessionId = broker.control.resolveBoundSession(state.collabId, "codex");
+		expect(boundSessionId).toBe("session_codex_attached");
 	});
 });

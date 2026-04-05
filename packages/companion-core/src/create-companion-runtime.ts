@@ -28,6 +28,11 @@ export function createCompanionRuntime(input: {
 				throw new Error("Companion runtime is not registered");
 			}
 
+			input.broker.control.assertActiveBinding({
+				collabId: input.collabId,
+				sessionId: input.sessionId,
+			});
+
 			input.broker.control.recordCompanionHeartbeat({
 				collabId: input.collabId,
 				sessionId: input.sessionId,

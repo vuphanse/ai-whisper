@@ -52,6 +52,14 @@ describe("companion runtime timestamps", () => {
 			now: "2026-04-05T09:35:07.200Z",
 		});
 
+		broker.control.setSessionBinding({
+			collabId: "collab_companion_time",
+			agentType: "codex",
+			sessionId: codexSessionId,
+			bindingSource: "launched",
+			now: "2026-04-05T09:35:07.200Z",
+		});
+
 		const companion = createCompanionRuntime({
 			broker,
 			collabId: "collab_companion_time",

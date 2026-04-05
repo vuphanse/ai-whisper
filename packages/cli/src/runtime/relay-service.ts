@@ -16,15 +16,10 @@ export function enqueueRelayWork(input: {
 	explicitAction?: WorkItem["requestedAction"] | undefined;
 	threadTitle?: string | undefined;
 }) {
-	const sessions = input.broker.control.listSessions(input.collabId);
-	const targetSession = sessions.find(
-		(session) => session.agentType === input.target,
+	const targetSessionId = input.broker.control.resolveBoundSession(
+		input.collabId,
+		input.target,
 	);
-	if (!targetSession) {
-		throw new Error(
-			`No ${input.target} session is registered for collab ${input.collabId}.`,
-		);
-	}
 
 	const activeThread = input.broker.control
 		.listThreads(input.collabId)
@@ -58,7 +53,7 @@ export function enqueueRelayWork(input: {
 		threadId: thread.threadId,
 		collabId: input.collabId,
 		senderSessionId: input.originSessionId,
-		targetSessionId: targetSession.sessionId,
+		targetSessionId: targetSessionId,
 		requestedAction: action,
 		instruction: input.instruction,
 		contextPacket: {
@@ -81,7 +76,7 @@ export function enqueueRelayWork(input: {
 		action,
 		thread,
 		workItem,
-		targetSessionId: targetSession.sessionId,
+		targetSessionId: targetSessionId,
 		createdNewThread: mustCreateThread,
 	};
 }

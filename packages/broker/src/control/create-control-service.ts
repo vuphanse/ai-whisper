@@ -537,6 +537,11 @@ export function createControlService(db: Database.Database) {
 				throw new Error("Invalid companion session secret");
 			}
 
+			this.assertActiveBinding({
+				collabId: input.collabId,
+				sessionId: input.sessionId,
+			});
+
 			const threadRows = listThreadsForCollab(db, input.collabId);
 
 			for (const thread of threadRows) {
