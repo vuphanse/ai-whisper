@@ -157,7 +157,7 @@ describe("cli collab status enriched", () => {
 		}
 	});
 
-	it("includes healthState: null on broker-down path for bound roles", async () => {
+	it("surfaces last-known session healthState on broker-down path", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-status-broker-down-health-"),
 		);
@@ -174,8 +174,10 @@ describe("cli collab status enriched", () => {
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: downBroker });
 		expect(status.active).toBe(true);
 		if (status.active) {
-			expect(status.roles.codex).toHaveProperty("healthState", null);
-			expect(status.roles.claude).toHaveProperty("healthState", null);
+			// Sessions were registered with healthState: "healthy" — that value must be
+			// surfaced on the offline path, not fabricated as null.
+			expect(status.roles.codex).toHaveProperty("healthState", "healthy");
+			expect(status.roles.claude).toHaveProperty("healthState", "healthy");
 		}
 	});
 
