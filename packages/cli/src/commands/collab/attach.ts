@@ -3,7 +3,7 @@ import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { renderAttachSnippet } from "../../runtime/attach-snippet.js";
 
-export async function runCollabAttach(input: {
+export function runCollabAttach(input: {
 	workspaceRoot: string;
 	target: "codex" | "claude";
 	now: string;

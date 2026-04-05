@@ -10,7 +10,7 @@ describe("broker attach claims", () => {
 
 		expect(claim.agentType).toBe("codex");
 		expect(runtime.control.listSessionBindings("collab_attach")).toContainEqual(
-			expect.objectContaining({ agentType: "codex", bindingState: "pending_attach", pendingClaimId: claim.claimId })
+			expect.objectContaining({ agentType: "codex", bindingState: "pending_attach", pendingClaimId: claim.claimId }),
 		);
 
 		const accepted = runtime.control.completeAttachClaim({

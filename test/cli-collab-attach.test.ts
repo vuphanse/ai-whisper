@@ -20,7 +20,7 @@ describe("cli collab attach", () => {
 			spawnBroker: fakeBrokerSpawn(),
 		});
 
-		const result = await runCollabAttach({
+		const result = runCollabAttach({
 			workspaceRoot,
 			target: "codex",
 			now: "2026-04-05T13:31:00.000Z",
@@ -68,13 +68,13 @@ describe("cli collab attach", () => {
 			now: "2026-04-05T13:31:00.000Z",
 		});
 
-		await expect(
+		expect(() =>
 			runCollabAttach({
 				workspaceRoot,
 				target: "codex",
 				now: "2026-04-05T13:32:00.000Z",
 			}),
-		).rejects.toThrow(/rebind/i);
+		).toThrow(/rebind/i);
 	});
 
 	it("session becomes bound after completeAttachClaim", async () => {
@@ -86,7 +86,7 @@ describe("cli collab attach", () => {
 			spawnBroker: fakeBrokerSpawn(),
 		});
 
-		const result = await runCollabAttach({
+		const result = runCollabAttach({
 			workspaceRoot,
 			target: "codex",
 			now: "2026-04-05T14:01:00.000Z",

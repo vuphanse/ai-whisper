@@ -52,7 +52,7 @@ describe("attach session runtime", () => {
 			createProvider: () => provider as never,
 			createInteractiveSession: () => interactiveSession as never,
 			createLiveSession: () => liveSession as never,
-			runLoop: vi.fn(async () => stopLoop),
+			runLoop: vi.fn(() => Promise.resolve(stopLoop)),
 		});
 
 		await runtime.start();

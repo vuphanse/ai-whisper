@@ -55,6 +55,24 @@ whisper collab status
 whisper collab stop
 ```
 
+### Attach workflow (Phase 7A)
+
+Use `--no-launch` when you want to start the broker without immediately spawning provider sessions, then attach each provider manually:
+
+```bash
+whisper collab start --no-launch
+whisper collab attach codex
+whisper collab attach claude
+```
+
+Each `attach` command prints a snippet to run inside the corresponding live provider session.
+
+If a role is already bound and you need to replace it:
+
+```bash
+whisper collab rebind codex
+```
+
 ## Phase Roadmap
 
 - Phase 1: foundation

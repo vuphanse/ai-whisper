@@ -82,7 +82,7 @@ export function markAttachClaimConsumed(
 	consumedAt: string,
 ): void {
 	db.prepare(
-		`UPDATE attach_claim SET status = 'consumed', consumed_at = ? WHERE claim_id = ?`,
+		"UPDATE attach_claim SET status = 'consumed', consumed_at = ? WHERE claim_id = ?",
 	).run(consumedAt, claimId);
 }
 
@@ -91,7 +91,7 @@ export function markAttachClaimExpired(
 	claimId: string,
 ): void {
 	db.prepare(
-		`UPDATE attach_claim SET status = 'expired' WHERE claim_id = ?`,
+		"UPDATE attach_claim SET status = 'expired' WHERE claim_id = ?",
 	).run(claimId);
 }
 
@@ -100,6 +100,6 @@ export function markAttachClaimReplaced(
 	claimId: string,
 ): void {
 	db.prepare(
-		`UPDATE attach_claim SET status = 'replaced' WHERE claim_id = ?`,
+		"UPDATE attach_claim SET status = 'replaced' WHERE claim_id = ?",
 	).run(claimId);
 }

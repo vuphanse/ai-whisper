@@ -121,8 +121,8 @@ export function createCli(): Command {
 		.description("Issue an attach claim for an agent to join the session")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts) => {
-			const result = await runCollabAttach({
+		.action((target: "codex" | "claude", opts: WorkspaceOpts) => {
+			const result = runCollabAttach({
 				workspaceRoot: opts.workspace,
 				target,
 				now: new Date().toISOString(),
@@ -145,7 +145,7 @@ export function createCli(): Command {
 					workspaceRoot: opts.workspace,
 					target,
 					now: new Date().toISOString(),
-					replace: opts.replace,
+					...(opts.replace !== undefined ? { replace: opts.replace } : {}),
 					isInteractive: Boolean(process.stdin.isTTY),
 					confirmReplace: async (message: string) => {
 						const rl = createInterface({ input: process.stdin, output: process.stdout });

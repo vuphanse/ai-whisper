@@ -36,7 +36,7 @@ export async function runCollabRebind(input: {
 	}
 
 	if (input.isInteractive && !input.replace) {
-		const confirmed = await (input.confirmReplace ?? (async () => false))(
+		const confirmed = await (input.confirmReplace ?? (() => Promise.resolve(false)))(
 			`${label} is already bound. Replace it? [y/N] `,
 		);
 		if (!confirmed) {

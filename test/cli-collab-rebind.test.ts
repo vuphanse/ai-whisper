@@ -53,9 +53,9 @@ describe("cli collab rebind", () => {
 			target: "claude",
 			now: "2026-04-05T13:32:00.000Z",
 			isInteractive: true,
-			confirmReplace: async (message) => {
+			confirmReplace: (message) => {
 				prompts.push(message);
-				return true;
+				return Promise.resolve(true);
 			},
 		});
 
@@ -126,7 +126,7 @@ describe("cli collab rebind", () => {
 			target: "claude",
 			now: "2026-04-05T13:32:00.000Z",
 			isInteractive: true,
-			confirmReplace: async () => true,
+			confirmReplace: () => Promise.resolve(true),
 		});
 
 		// Complete the rebind by consuming the claim with a new session
