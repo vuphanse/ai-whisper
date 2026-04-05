@@ -1,6 +1,76 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
 import { formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
+import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
+
+describe("collab inspect snapshot", () => {
+	it("renders the active thread snapshot", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const now = "2026-04-06T10:00:00.000Z";
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4450 });
+
+		broker.control.startCollab({
+			collabId: "collab_inspect",
+			workspaceRoot,
+			displayName: "inspect",
+			now,
+		});
+		broker.control.registerSession({
+			sessionId: "session_codex",
+			collabId: "collab_inspect",
+			agentType: "codex",
+			capabilities: {
+				supportsDirectPackets: true,
+				supportsNormalization: false,
+				supportsRelayInterception: true,
+				supportsLocalBuffering: true,
+				supportsLaunchHooks: false,
+				extensions: {},
+			},
+			now,
+		});
+		broker.control.setSessionBinding({
+			collabId: "collab_inspect",
+			agentType: "codex",
+			sessionId: "session_codex",
+			bindingSource: "attached",
+			now,
+		});
+		broker.control.createThread({
+			threadId: "thread_active",
+			collabId: "collab_inspect",
+			title: "Review plan",
+			createdBySessionId: "session_codex",
+			now,
+		});
+		await broker.stop();
+
+		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
+			version: 3,
+			collabId: "collab_inspect",
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4450, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+		});
+
+		const output = await runCollabInspect({
+			workspaceRoot,
+			now,
+			watch: false,
+			assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+		});
+		expect(output).toContain("Active Thread: Review plan");
+		expect(output).toContain("Roles:");
+	});
+});
 
 describe("inspect broker data access", () => {
 	it("lists work items for the active thread in chronological order", () => {
