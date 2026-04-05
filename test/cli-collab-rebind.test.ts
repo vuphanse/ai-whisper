@@ -1,13 +1,15 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabRebind } from "../packages/cli/src/commands/collab/rebind.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+
+const assessBroker = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 
 describe("cli collab rebind", () => {
 	it("requires replacement confirmation when stdin is interactive", async () => {
@@ -57,6 +59,7 @@ describe("cli collab rebind", () => {
 				prompts.push(message);
 				return Promise.resolve(true);
 			},
+			assessBroker,
 		});
 
 		expect(prompts).toEqual([
@@ -127,6 +130,7 @@ describe("cli collab rebind", () => {
 			now: "2026-04-05T13:32:00.000Z",
 			isInteractive: true,
 			confirmReplace: () => Promise.resolve(true),
+			assessBroker,
 		});
 
 		// Complete the rebind by consuming the claim with a new session

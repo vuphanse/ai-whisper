@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
@@ -9,6 +9,8 @@ import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabAttach } from "../packages/cli/src/commands/collab/attach.ts";
 import type { ProviderCapabilities, ProviderIdentity } from "../packages/shared/src/index.ts";
+
+const assessBroker = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 
 describe("cli collab attach", () => {
 	it("issues a claim and renders a provider-specific snippet", async () => {
@@ -20,10 +22,11 @@ describe("cli collab attach", () => {
 			spawnBroker: fakeBrokerSpawn(),
 		});
 
-		const result = runCollabAttach({
+		const result = await runCollabAttach({
 			workspaceRoot,
 			target: "codex",
 			now: "2026-04-05T13:31:00.000Z",
+			assessBroker,
 		});
 
 		expect(result.claim.agentType).toBe("codex");
@@ -68,13 +71,14 @@ describe("cli collab attach", () => {
 			now: "2026-04-05T13:31:00.000Z",
 		});
 
-		expect(() =>
+		await expect(
 			runCollabAttach({
 				workspaceRoot,
 				target: "codex",
 				now: "2026-04-05T13:32:00.000Z",
+				assessBroker,
 			}),
-		).toThrow(/rebind/i);
+		).rejects.toThrow(/rebind/i);
 	});
 
 	it("session becomes bound after completeAttachClaim", async () => {
@@ -86,10 +90,11 @@ describe("cli collab attach", () => {
 			spawnBroker: fakeBrokerSpawn(),
 		});
 
-		const result = runCollabAttach({
+		const result = await runCollabAttach({
 			workspaceRoot,
 			target: "codex",
 			now: "2026-04-05T14:01:00.000Z",
+			assessBroker,
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;

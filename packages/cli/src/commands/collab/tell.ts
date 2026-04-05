@@ -3,10 +3,11 @@ import type { CompanionProvider, WorkItem } from "@ai-whisper/shared";
 import { normalizeArtifactPaths } from "../../runtime/artifact-input.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
-import { assertNormalBrokerState } from "../../runtime/recovery-guard.js";
+import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
 import { processOneTurn } from "../../runtime/on-demand-processing.js";
 import { enqueueRelayWork } from "../../runtime/relay-service.js";
 import { waitForReply } from "../../runtime/reply-wait.js";
+import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 
 export async function runCollabTell(input: {
 	workspaceRoot: string;
@@ -17,6 +18,7 @@ export async function runCollabTell(input: {
 	threadTitle?: string;
 	providerOverride?: CompanionProvider;
 	now: string;
+	assessBroker?: typeof assessBrokerDaemon;
 }) {
 	if (input.target !== "codex" && input.target !== "claude") {
 		throw new Error(
@@ -29,7 +31,7 @@ export async function runCollabTell(input: {
 		throw new Error("No active collab. Run `whisper collab start` first.");
 	}
 
-	assertNormalBrokerState(state);
+	await probeAndLatchBrokerState(state, input.workspaceRoot, input.assessBroker);
 
 	const broker = createBrokerRuntime({
 		sqlitePath: getBrokerSqlitePath(input.workspaceRoot),

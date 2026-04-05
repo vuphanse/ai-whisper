@@ -2,7 +2,8 @@ import { createBrokerRuntime } from "@ai-whisper/broker";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { renderAttachSnippet } from "../../runtime/attach-snippet.js";
-import { assertNormalBrokerState } from "../../runtime/recovery-guard.js";
+import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
+import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 
 export async function runCollabRebind(input: {
 	workspaceRoot: string;
@@ -11,6 +12,7 @@ export async function runCollabRebind(input: {
 	replace?: boolean;
 	isInteractive: boolean;
 	confirmReplace?: (message: string) => Promise<boolean>;
+	assessBroker?: typeof assessBrokerDaemon;
 }) {
 	if (!input.replace && !input.isInteractive) {
 		throw new Error("Non-interactive rebind requires --replace.");
@@ -23,7 +25,7 @@ export async function runCollabRebind(input: {
 		throw new Error("No active collab. Run `whisper collab start` first.");
 	}
 
-	assertNormalBrokerState(state);
+	await probeAndLatchBrokerState(state, input.workspaceRoot, input.assessBroker);
 
 	const broker = createBrokerRuntime({
 		sqlitePath: state.broker.sqlitePath,

@@ -38,6 +38,7 @@ describe("cli collab status enriched", () => {
 			threadTitle: "Review plan",
 			providerOverride: createMockProvider(),
 			now: "2026-04-03T00:00:01.000Z",
+			assessBroker: healthyBroker,
 		});
 
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });

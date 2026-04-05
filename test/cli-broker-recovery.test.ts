@@ -392,17 +392,17 @@ describe("recovery guards", () => {
 	it("refuses attach when collab recovery is required", async () => {
 		const { dir, now } = await buildGuardFixture("recovery_required");
 
-		expect(() =>
+		await expect(
 			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
-		).toThrow(/whisper collab recover/i);
+		).rejects.toThrow(/whisper collab recover/i);
 	});
 
 	it("refuses attach when collab was recovered but not reconnected", async () => {
 		const { dir, now } = await buildGuardFixture("recovered");
 
-		expect(() =>
+		await expect(
 			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
-		).toThrow(/whisper collab reconnect/i);
+		).rejects.toThrow(/whisper collab reconnect/i);
 	});
 
 	it("refuses rebind when collab recovery is required", async () => {
@@ -419,6 +419,117 @@ describe("recovery guards", () => {
 		await expect(
 			runCollabRebind({ workspaceRoot: dir, target: "codex", now, replace: true, isInteractive: false }),
 		).rejects.toThrow(/whisper collab reconnect/i);
+	});
+});
+
+describe("broker latch", () => {
+	async function buildNormalStateFixture() {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-latch-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_latch_test";
+		const now = "2026-04-05T19:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4430 });
+		broker.control.startCollab({
+			collabId,
+			workspaceRoot: dir,
+			displayName: "latch test",
+			now,
+		});
+		broker.control.registerSession({
+			sessionId: "session_codex_latch",
+			collabId,
+			agentType: "codex",
+			capabilities: {
+				supportsDirectPackets: true,
+				supportsNormalization: false,
+				supportsRelayInterception: true,
+				supportsLocalBuffering: true,
+				supportsLaunchHooks: false,
+				extensions: {},
+			},
+			now,
+		});
+		broker.control.setSessionBinding({
+			collabId,
+			agentType: "codex",
+			sessionId: "session_codex_latch",
+			bindingSource: "attached",
+			now,
+		});
+		await broker.stop();
+
+		const runtimeDir = join(dir, ".ai-whisper", "runtime");
+		const statePath = join(runtimeDir, "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 3,
+			collabId,
+			workspaceRoot: dir,
+			broker: {
+				sqlitePath,
+				host: "127.0.0.1",
+				port: 4430,
+				pid: 99123,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: {
+				state: "normal",
+				idleAfterRecovery: false,
+				recoveredAt: null,
+			},
+		});
+
+		return { dir, statePath, collabId, sqlitePath, now };
+	}
+
+	it("latches recovery_required into state file when tell is called with a dead broker", async () => {
+		const { dir } = await buildNormalStateFixture();
+		const now = "2026-04-05T19:00:00.000Z";
+
+		const mockAssessBroker = vi.fn(() => Promise.resolve({
+			pidAlive: false as const,
+			httpReachable: false as const,
+			ok: false as const,
+		}));
+
+		await expect(
+			runCollabTell({
+				workspaceRoot: dir,
+				target: "codex",
+				instruction: "review this",
+				artifactPaths: [],
+				now,
+				assessBroker: mockAssessBroker,
+			}),
+		).rejects.toThrow(/whisper collab recover/i);
+
+		const updatedState = readCliCollabState(getStateFilePath(dir));
+		expect(updatedState?.recovery.state).toBe("recovery_required");
+	});
+
+	it("latches recovery_required into state file when attach is called with a dead broker", async () => {
+		const { dir } = await buildNormalStateFixture();
+		const now = "2026-04-05T19:00:00.000Z";
+
+		const mockAssessBroker = vi.fn(() => Promise.resolve({
+			pidAlive: false as const,
+			httpReachable: false as const,
+			ok: false as const,
+		}));
+
+		await expect(
+			runCollabAttach({
+				workspaceRoot: dir,
+				target: "codex",
+				now,
+				assessBroker: mockAssessBroker,
+			}),
+		).rejects.toThrow(/whisper collab recover/i);
+
+		const updatedState = readCliCollabState(getStateFilePath(dir));
+		expect(updatedState?.recovery.state).toBe("recovery_required");
 	});
 });
 

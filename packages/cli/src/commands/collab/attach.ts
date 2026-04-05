@@ -2,19 +2,21 @@ import { createBrokerRuntime } from "@ai-whisper/broker";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { renderAttachSnippet } from "../../runtime/attach-snippet.js";
-import { assertNormalBrokerState } from "../../runtime/recovery-guard.js";
+import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
+import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 
-export function runCollabAttach(input: {
+export async function runCollabAttach(input: {
 	workspaceRoot: string;
 	target: "codex" | "claude";
 	now: string;
+	assessBroker?: typeof assessBrokerDaemon;
 }) {
 	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
 	if (!state) {
 		throw new Error("No active collab. Run `whisper collab start` first.");
 	}
 
-	assertNormalBrokerState(state);
+	await probeAndLatchBrokerState(state, input.workspaceRoot, input.assessBroker);
 
 	const broker = createBrokerRuntime({
 		sqlitePath: state.broker.sqlitePath,

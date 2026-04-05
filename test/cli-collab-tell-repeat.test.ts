@@ -1,11 +1,13 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+
+const assessBroker = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
 
 describe("cli collab tell repeat", () => {
 	it("allows a second tell without crashing on companion re-registration", async () => {
@@ -32,6 +34,7 @@ describe("cli collab tell repeat", () => {
 			threadTitle: "Review plan",
 			providerOverride: createMockProvider(),
 			now: "2026-04-03T00:00:01.000Z",
+			assessBroker,
 		});
 
 		// Second tell on the same collab should not crash
@@ -44,6 +47,7 @@ describe("cli collab tell repeat", () => {
 				artifactPaths: [planPath],
 				providerOverride: createMockProvider(),
 				now: "2026-04-03T00:00:02.000Z",
+				assessBroker,
 			}),
 		).resolves.toMatchObject({
 			kind: "answer",
