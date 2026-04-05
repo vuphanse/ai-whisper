@@ -16,7 +16,7 @@ export function createRelayLineBuffer(input: {
 	let relayCandidate = false;
 	let skipNextLineFeed = false;
 
-	function flushLine(results: RelayDecision[]) {
+	function flushLine(results: RelayDecision[], terminator: "\r" | "\n") {
 		const completed = line;
 		line = "";
 		if (relayCandidate) {
@@ -32,7 +32,7 @@ export function createRelayLineBuffer(input: {
 
 		results.push({
 			kind: "passthrough",
-			data: `${completed}\n`,
+			data: `${completed}${terminator}`,
 		});
 	}
 
@@ -43,7 +43,7 @@ export function createRelayLineBuffer(input: {
 			for (const char of chunk) {
 				if (char === "\r") {
 					skipNextLineFeed = true;
-					flushLine(results);
+					flushLine(results, "\r");
 					continue;
 				}
 
@@ -53,7 +53,7 @@ export function createRelayLineBuffer(input: {
 						continue;
 					}
 
-					flushLine(results);
+					flushLine(results, "\n");
 					continue;
 				}
 

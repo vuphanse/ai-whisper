@@ -105,11 +105,13 @@ describe("launcher real behavior", () => {
 
 			expect(result.launched).toBe(true);
 			expect(result.launchMode).toBe("tmux");
-			expect(execed).toHaveLength(2);
+			expect(execed).toHaveLength(3);
 			expect(execed[0]).toContain("tmux new-session");
 			expect(execed[1]).toContain("tmux split-window");
 			expect(execed[1]).toContain(":0");
 			expect(execed[1]).not.toContain(":codex");
+			expect(execed[2]).toContain("tmux set-option");
+			expect(execed[2]).toContain("mouse on");
 		});
 
 		it("returns tmux session name and executes tmux commands", () => {
@@ -131,6 +133,7 @@ describe("launcher real behavior", () => {
 			expect(result.tmuxSession).toMatch(/whisper-/);
 			expect(execed.some((c) => c.includes("tmux new-session"))).toBe(true);
 			expect(execed.some((c) => c.includes("tmux split-window"))).toBe(true);
+			expect(execed.some((c) => c.includes("tmux set-option"))).toBe(true);
 		});
 	});
 });

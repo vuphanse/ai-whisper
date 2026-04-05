@@ -158,6 +158,9 @@ export function launchSessions(input: {
 		exec(
 			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -h sh -lc ${shellQuote(claudeCmd)}`,
 		);
+		exec(
+			`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`,
+		);
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;
 		base.runtime.claudeWindowLabel = claudeWindowLabel;

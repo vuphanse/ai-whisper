@@ -75,7 +75,7 @@ describe("relay line buffer", () => {
 		expect(buffer.push("h")).toEqual([{ kind: "passthrough", data: "h" }]);
 		expect(buffer.push("i\r")).toEqual([
 			{ kind: "passthrough", data: "i" },
-			{ kind: "passthrough", data: "\n" },
+			{ kind: "passthrough", data: "\r" },
 		]);
 	});
 
