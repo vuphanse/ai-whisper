@@ -23,5 +23,7 @@ describe("README", () => {
 		expect(readme).toContain("@@codex");
 		expect(readme).toContain("@@claude");
 		expect(readme).toContain("node-pty");
+		expect(readme).toContain("whisper collab inspect");
+		expect(readme).toContain("whisper collab inspect --watch");
 	});
 });

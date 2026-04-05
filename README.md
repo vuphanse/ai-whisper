@@ -85,6 +85,28 @@ whisper collab reconnect claude
 
 Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
 
+### Operator monitoring workflow (Phase 7C1)
+
+Use the quick snapshot first:
+
+```bash
+whisper collab status
+```
+
+Inspect the active thread in more detail:
+
+```bash
+whisper collab inspect
+```
+
+Use live monitoring when a collab is active:
+
+```bash
+whisper collab inspect --watch
+```
+
+`inspect` is read-only. It shows the active thread, recent work items, recent replies, and recent failed or `recovery_blocked` activity with truncated previews by default.
+
 ## Phase Roadmap
 
 - Phase 1: foundation
