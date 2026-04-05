@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+import { fileURLToPath } from "node:url";
+import { createBrokerRuntime, type BrokerRuntime } from "@ai-whisper/broker";
+import { createLiveSessionRuntime } from "../runtime/live-session.js";
+import { runCompanionAgentLoop } from "../runtime/companion-agent-loop.js";
+import {
+	createAttachedInteractiveSessionForTarget,
+	createProviderForTarget,
+} from "../runtime/providers.js";
+import {
+	enqueueRelayWork,
+	formatRelayAcknowledgement,
+	formatRelayReplySummary,
+} from "../runtime/relay-service.js";
+import { waitForReply } from "../runtime/reply-wait.js";
+import { createCliSessionId } from "../runtime/id-factory.js";
+import { readCliCollabState } from "../runtime/state-file.js";
+import { getStateFilePath } from "../runtime/paths.js";
+
+export function createAttachSessionRuntime(input: {
+	target: "codex" | "claude";
+	workspaceRoot: string;
+	claimId: string;
+	secret: string;
+	broker: BrokerRuntime;
+	createProvider?: typeof createProviderForTarget;
+	createInteractiveSession?: typeof createAttachedInteractiveSessionForTarget;
+	createLiveSession?: typeof createLiveSessionRuntime;
+	runLoop?: typeof runCompanionAgentLoop;
+}) {
+	return {
+		async start() {
+			const sessionId = createCliSessionId(input.target, new Date().toISOString());
+			const provider = (input.createProvider ?? createProviderForTarget)(input.target);
+			const interactiveSession = (input.createInteractiveSession ?? createAttachedInteractiveSessionForTarget)({
+				target: input.target,
+				stdin: process.stdin,
+				stdout: process.stdout,
+				cwd: process.cwd(),
+			});
+
+			const accepted = input.broker.control.completeAttachClaim({
+				claimId: input.claimId,
+				secret: input.secret,
+				sessionId,
+				provider: provider.getIdentity(),
+				capabilities: provider.getCapabilities(),
+				now: new Date().toISOString(),
+				bindingSource: "attached",
+			});
+
+			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
+				interactiveSession,
+				stdin: process.stdin,
+				stdout: process.stdout,
+				onRelay: async (directive, sendNow) => {
+					const relay = enqueueRelayWork({
+						broker: input.broker,
+						collabId: accepted.collabId,
+						originSessionId: accepted.sessionId,
+						target: directive.target,
+						instruction: directive.instruction,
+						artifactPaths: [],
+						forceNewThread: directive.forceNewThread,
+						now: new Date().toISOString(),
+					});
+
+					sendNow(
+						`${formatRelayAcknowledgement({
+							target: directive.target,
+							createdNewThread: relay.createdNewThread,
+						})}\n`,
+					);
+
+					const reply = await waitForReply({
+						broker: input.broker,
+						threadId: relay.thread.threadId,
+						workItemId: relay.workItem.workItemId,
+					});
+
+					return `${formatRelayReplySummary({
+						target: directive.target,
+						replyKind: reply.kind,
+						content: reply.content,
+					})}\n`;
+				},
+			});
+
+			let stopLoop = async () => {};
+			let stopping = false;
+			const onSignal = async () => {
+				if (stopping) return;
+				stopping = true;
+				await stopLoop();
+				await liveSession.stop();
+				await input.broker.stop();
+				process.exit(0);
+			};
+
+			process.on("SIGINT", () => void onSignal());
+			process.on("SIGTERM", () => void onSignal());
+
+			await liveSession.start();
+			stopLoop = await (input.runLoop ?? runCompanionAgentLoop)({
+				broker: input.broker,
+				collabId: accepted.collabId,
+				sessionId: accepted.sessionId,
+				provider,
+				interactiveSession,
+			});
+		},
+	};
+}
+
+// CLI entry point — only runs when invoked directly
+const isEntryPoint = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isEntryPoint) {
+	const args = process.argv.slice(2);
+	const target = args[0] as "codex" | "claude";
+	const workspaceArgIdx = args.indexOf("--workspace");
+	const claimIdArgIdx = args.indexOf("--claim-id");
+	const secretArgIdx = args.indexOf("--secret");
+	const workspaceRoot = workspaceArgIdx !== -1 ? args[workspaceArgIdx + 1] : undefined;
+	const claimId = claimIdArgIdx !== -1 ? args[claimIdArgIdx + 1] : undefined;
+	const secret = secretArgIdx !== -1 ? args[secretArgIdx + 1] : undefined;
+
+	if (!target || !workspaceRoot || !claimId || !secret) {
+		console.error("Usage: attach-session <codex|claude> --workspace <path> --claim-id <id> --secret <secret>");
+		process.exit(1);
+	}
+
+	const state = readCliCollabState(getStateFilePath(workspaceRoot));
+	if (!state) {
+		console.error("No active collab found at the workspace root.");
+		process.exit(1);
+	}
+
+	const broker = createBrokerRuntime({
+		sqlitePath: state.broker.sqlitePath,
+		host: state.broker.host,
+		port: state.broker.port,
+	});
+
+	createAttachSessionRuntime({
+		target,
+		workspaceRoot,
+		claimId,
+		secret,
+		broker,
+	}).start().catch((err: unknown) => {
+		console.error(err);
+		process.exit(1);
+	});
+}

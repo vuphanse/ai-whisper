@@ -1,8 +1,10 @@
 import {
+	createClaudeAttachedSession,
 	createClaudeLiveSession,
 	createClaudeProvider,
 } from "@ai-whisper/adapter-claude";
 import {
+	createCodexAttachedSession,
 	createCodexLiveSession,
 	createCodexProvider,
 } from "@ai-whisper/adapter-codex";
@@ -74,5 +76,26 @@ export function createInteractiveSessionForTarget(input: {
 		...(input.replyTimeoutMs !== undefined
 			? { replyTimeoutMs: input.replyTimeoutMs }
 			: {}),
+	});
+}
+
+export function createAttachedInteractiveSessionForTarget(input: {
+	target: "codex" | "claude";
+	stdin: NodeJS.ReadableStream;
+	stdout: NodeJS.WritableStream;
+	cwd: string;
+}): InteractiveSessionController {
+	if (input.target === "codex") {
+		return createCodexAttachedSession({
+			stdin: input.stdin,
+			stdout: input.stdout,
+			cwd: input.cwd,
+		});
+	}
+
+	return createClaudeAttachedSession({
+		stdin: input.stdin,
+		stdout: input.stdout,
+		cwd: input.cwd,
 	});
 }
