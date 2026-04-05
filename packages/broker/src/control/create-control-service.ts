@@ -689,8 +689,13 @@ export function createControlService(db: Database.Database) {
 				throw new Error("Invalid attach claim secret");
 			}
 
+			// Validate provider payload before mutating any state (finding 3 fix).
+			const validatedProvider = providerIdentitySchema.parse(input.provider);
+			const validatedCapabilities = providerCapabilitiesSchema.parse(input.capabilities);
+
 			const txn = db.transaction(() => {
-				// Register the session if it doesn't exist yet
+				// Register the session if it doesn't exist yet, or verify it belongs
+				// to the same collab and agent role (finding 2 fix).
 				const existing = getSession(db, input.sessionId);
 				if (!existing) {
 					const session = sessionSchema.parse({
@@ -705,6 +710,13 @@ export function createControlService(db: Database.Database) {
 						lastSeenAt: input.now,
 					});
 					insertSession(db, session);
+				} else {
+					if (existing.collabId !== claim.collabId || existing.agentType !== claim.agentType) {
+						throw new Error(
+							`Session ${input.sessionId} belongs to collab ${existing.collabId} / ${existing.agentType}, ` +
+							`not collab ${claim.collabId} / ${claim.agentType}.`,
+						);
+					}
 				}
 
 				// Update the binding to bound state
@@ -733,8 +745,8 @@ export function createControlService(db: Database.Database) {
 				sessionId: input.sessionId,
 				collabId: claim.collabId,
 				agentType: claim.agentType,
-				provider: providerIdentitySchema.parse(input.provider),
-				capabilities: providerCapabilitiesSchema.parse(input.capabilities),
+				provider: validatedProvider,
+				capabilities: validatedCapabilities,
 			};
 		},
 		listSessionBindings(collabId: string) {
