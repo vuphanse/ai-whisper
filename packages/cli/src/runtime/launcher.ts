@@ -127,6 +127,10 @@ export function launchSessions(input: {
 	spawn?: SpawnFn;
 	exec?: ExecFn;
 }): LaunchResult {
+	if (input.launchMode === "none") {
+		throw new Error("launchSessions must not be called with launchMode 'none'");
+	}
+
 	const run = input.spawn ?? defaultSpawn;
 	const exec = input.exec ?? defaultExec;
 
