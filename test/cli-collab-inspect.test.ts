@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
 import { buildInspectSnapshot, formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
+import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 
 describe("collab inspect snapshot", () => {
@@ -293,9 +294,29 @@ describe("inspect flagged items outside display window", () => {
 			now: "2026-04-06T09:01:30.000Z",
 		});
 
+		const state: CliCollabState = {
+			version: 3,
+			collabId,
+			workspaceRoot: "/tmp",
+			broker: {
+				sqlitePath: ":memory:",
+				host: "127.0.0.1",
+				port: 4461,
+				pid: 1,
+			},
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: {
+				state: "normal",
+				idleAfterRecovery: false,
+				recoveredAt: null,
+			},
+		};
+
 		const snapshot = buildInspectSnapshot({
 			broker: runtime,
-			state: { collabId, recovery: { state: "normal" } } as any,
+			state,
 			now,
 		});
 
