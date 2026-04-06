@@ -238,4 +238,94 @@ describe("context injector", () => {
 		expect(result.payload).toBe("do something");
 		expect(result.summary).toBeNull();
 	});
+
+	it("omits User instruction footer when userInput is empty", () => {
+		const { broker, codexSession, claudeSession, thread } = setupBrokerWithThread();
+
+		broker.control.enqueueWorkItem({
+			workItemId: "work_empty",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			senderSessionId: claudeSession,
+			targetSessionId: codexSession,
+			requestedAction: "answer_question",
+			instruction: "test",
+			contextPacket: { kind: "full", goal: "test", currentState: "Context available", decisionsMade: [], assumptions: [], relevantArtifacts: [], openQuestions: [], successCriteria: [] },
+			now: "2026-04-06T00:01:00.000Z",
+		});
+
+		broker.control.postReply({
+			replyId: "reply_empty",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			workItemId: "work_empty",
+			sourceSessionId: codexSession,
+			kind: "answer",
+			content: "Here is the answer",
+			transitionIntent: "completed",
+			artifactManifestIds: [],
+			now: "2026-04-06T00:02:00.000Z",
+		});
+
+		const injector = createContextInjector({
+			broker, collabId: "collab_1", sessionId: claudeSession,
+		});
+
+		const result = injector.injectContext({
+			userInput: "",
+			activeThreadId: thread.threadId,
+		});
+
+		expect(result.injected).toBe(true);
+		expect(result.payload).toContain("[Context from recent relay exchange]");
+		expect(result.payload).not.toContain("User instruction:");
+	});
+
+	it("enriches context packet with unconsumed replies", () => {
+		const { broker, codexSession, claudeSession, thread } = setupBrokerWithThread();
+
+		broker.control.enqueueWorkItem({
+			workItemId: "work_enrich",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			senderSessionId: claudeSession,
+			targetSessionId: codexSession,
+			requestedAction: "review_diff",
+			instruction: "review",
+			contextPacket: { kind: "full", goal: "review", currentState: "Context available", decisionsMade: [], assumptions: [], relevantArtifacts: [], openQuestions: [], successCriteria: [] },
+			now: "2026-04-06T00:01:00.000Z",
+		});
+
+		broker.control.postReply({
+			replyId: "reply_enrich",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			workItemId: "work_enrich",
+			sourceSessionId: codexSession,
+			kind: "review",
+			content: "Found issues",
+			transitionIntent: "completed",
+			artifactManifestIds: [],
+			now: "2026-04-06T00:02:00.000Z",
+		});
+
+		const injector = createContextInjector({
+			broker, collabId: "collab_1", sessionId: claudeSession,
+		});
+
+		const enriched = injector.enrichContextPacket({
+			activeThreadId: thread.threadId,
+			basePacket: { kind: "full", goal: "fix issues", currentState: "Continuing active thread", decisionsMade: [], assumptions: [], relevantArtifacts: [], openQuestions: [], successCriteria: [] },
+		});
+
+		expect(enriched.currentState).toContain("Found issues");
+		expect(enriched.currentState).toContain("Continuing active thread");
+
+		// Should be consumed — second call returns base packet unchanged
+		const second = injector.enrichContextPacket({
+			activeThreadId: thread.threadId,
+			basePacket: { kind: "full", goal: "fix", currentState: "Still here", decisionsMade: [], assumptions: [], relevantArtifacts: [], openQuestions: [], successCriteria: [] },
+		});
+		expect(second.currentState).toBe("Still here");
+	});
 });
