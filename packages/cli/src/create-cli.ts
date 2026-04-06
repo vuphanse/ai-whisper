@@ -232,12 +232,12 @@ export function createCli(): Command {
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
 		.option("--tty <path>", "Adopt an explicit local tty path")
-		.action((target: string, opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
+		.action(async (target: string, opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
 			if (opts.adoptCurrentTty && opts.tty) {
 				throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
 			}
 			const targetMode = resolveReconnectTargetMode(opts);
-			const result = runCollabReconnect({
+			const result = await runCollabReconnect({
 				workspaceRoot: opts.workspace,
 				target: target as "codex" | "claude",
 				now: new Date().toISOString(),
@@ -246,7 +246,7 @@ export function createCli(): Command {
 			});
 			if (result.mode === "snippet") {
 				console.log(result.snippet);
-			} else {
+			} else if (result.mode === "adopted") {
 				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
 			}
 		});

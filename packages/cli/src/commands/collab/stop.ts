@@ -69,6 +69,16 @@ export function runCollabStop(input: { workspaceRoot: string }) {
 		}
 	}
 
+	// Kill any running mounted-session foreground runtimes
+	for (const session of [state.mountedSessions.codex, state.mountedSessions.claude]) {
+		if (!session) continue;
+		try {
+			process.kill(session.sessionPid, "SIGTERM");
+		} catch {
+			// Session may already be gone.
+		}
+	}
+
 	// Kill the broker daemon if still running
 	if (state.broker.pid) {
 		try {

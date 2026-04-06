@@ -1,4 +1,4 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
+import { createBrokerRuntime, type BrokerRuntime } from "@ai-whisper/broker";
 import { renderAttachSnippet } from "../../runtime/attach-snippet.js";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
@@ -7,12 +7,13 @@ import {
 	validateExplicitTty as defaultValidateExplicitTty,
 } from "../../runtime/adopted-session-target.js";
 import { startAdoptionDaemon as defaultStartAdoptionDaemon } from "../../runtime/adopted-session-daemon.js";
+import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
 
-export function runCollabReconnect(input: {
+export async function runCollabReconnect(input: {
 	workspaceRoot: string;
 	target: "codex" | "claude";
 	now: string;
-	targetMode?: "snippet_shell" | "adopt_current_tty" | "explicit_tty";
+	targetMode?: "snippet_shell" | "adopt_current_tty" | "explicit_tty" | "mount_current_tty";
 	explicitTtyPath?: string;
 	resolveCurrentTty?: () => string;
 	validateExplicitTty?: (ttyPath: string) => string;
@@ -23,6 +24,14 @@ export function runCollabReconnect(input: {
 		claimId: string;
 		secret: string;
 	}) => number;
+	startMountedSession?: (input: {
+		target: "codex" | "claude";
+		workspaceRoot: string;
+		ttyPath: string;
+		claimId: string;
+		secret: string;
+		broker: BrokerRuntime;
+	}) => Promise<void>;
 }) {
 	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
 	if (!state) {
@@ -59,12 +68,15 @@ export function runCollabReconnect(input: {
 	}
 
 	// When no explicit targetMode is provided, default based on how the role was previously bound.
-	// A session that was adopted should reconnect via adoption, not a paste snippet.
-	const defaultMode: "snippet_shell" | "adopt_current_tty" =
-		current.bindingSource === "adopted" ? "adopt_current_tty" : "snippet_shell";
+	const defaultMode: "snippet_shell" | "adopt_current_tty" | "mount_current_tty" =
+		current.bindingSource === "mounted"
+			? "mount_current_tty"
+			: current.bindingSource === "adopted"
+				? "adopt_current_tty"
+				: "snippet_shell";
 	const targetMode = input.targetMode ?? defaultMode;
 	const ttyPath =
-		targetMode === "adopt_current_tty"
+		targetMode === "mount_current_tty" || targetMode === "adopt_current_tty"
 			? (input.resolveCurrentTty ?? defaultResolveCurrentTty)()
 			: targetMode === "explicit_tty"
 				? (input.validateExplicitTty ?? defaultValidateExplicitTty)(
@@ -82,9 +94,8 @@ export function runCollabReconnect(input: {
 		expiresAt: new Date(Date.parse(input.now) + 5 * 60_000).toISOString(),
 	});
 
-	void broker.stop();
-
 	if (targetMode === "snippet_shell") {
+		void broker.stop();
 		return {
 			mode: "snippet" as const,
 			claim,
@@ -97,6 +108,27 @@ export function runCollabReconnect(input: {
 		};
 	}
 
+	if (targetMode === "mount_current_tty") {
+		await (input.startMountedSession ??
+			(async (mountedInput) => {
+				const runtime = createMountSessionRuntime(mountedInput);
+				await runtime.start();
+			}))({
+			target: input.target,
+			workspaceRoot: input.workspaceRoot,
+			ttyPath: ttyPath!,
+			claimId: claim.claimId,
+			secret: claim.secret,
+			broker,
+		});
+
+		return {
+			mode: "mounted" as const,
+			claim,
+			ttyPath: ttyPath!,
+		};
+	}
+
 	const daemonPid = (input.startAdoptionDaemon ?? defaultStartAdoptionDaemon)({
 		target: input.target,
 		workspaceRoot: input.workspaceRoot,
@@ -104,6 +136,8 @@ export function runCollabReconnect(input: {
 		claimId: claim.claimId,
 		secret: claim.secret,
 	});
+
+	void broker.stop();
 
 	return {
 		mode: "adopted" as const,

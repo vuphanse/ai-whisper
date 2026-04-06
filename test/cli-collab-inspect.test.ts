@@ -473,3 +473,31 @@ describe("operator inspect renderer", () => {
 		expect(output).toContain("Recent Replies");
 	});
 });
+
+describe("mounted operator visibility", () => {
+	it("renders mounted binding source and tty path in inspect output", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_mount",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [
+				{
+					agentType: "codex",
+					bindingState: "bound",
+					healthState: "healthy",
+					bindingSource: "mounted",
+					targetTtyPath: "/dev/ttys031",
+				},
+			],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-06T09:00:00.000Z",
+		});
+
+		expect(output).toContain("[mounted]");
+		expect(output).toContain("tty=/dev/ttys031");
+	});
+});
