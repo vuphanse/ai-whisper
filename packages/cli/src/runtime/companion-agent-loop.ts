@@ -6,7 +6,7 @@ import type {
 } from "@ai-whisper/shared";
 import { createBrokerArtifactService } from "./broker-artifact-service.js";
 import { createLiveSessionBrokerExecutor } from "./live-session-broker-executor.js";
-import { formatRelayReplySummary } from "./relay-service.js";
+import type { createRelayPaneWriter } from "./relay-pane-writer.js";
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,6 +18,7 @@ export function runCompanionAgentLoop(input: {
 	sessionId: string;
 	provider: CompanionProvider;
 	interactiveSession: InteractiveSessionController;
+	relayPaneWriter: ReturnType<typeof createRelayPaneWriter>;
 	pollIntervalMs?: number;
 }): Promise<() => Promise<void>> {
 	input.provider.attachInteractiveSession?.(input.interactiveSession);
@@ -34,17 +35,17 @@ export function runCompanionAgentLoop(input: {
 		sessionId: input.sessionId,
 	});
 	const executor = async (request: Parameters<typeof baseExecutor>[0]) => {
-		input.interactiveSession.sendLocalMessage(
-			`[ai-whisper] Received broker work for ${sessionRole}.\n`,
-		);
+		input.relayPaneWriter.status({
+			content: `Received broker work for ${sessionRole}.`,
+			now: new Date().toISOString(),
+		});
 		const reply = await baseExecutor(request);
-		input.interactiveSession.sendLocalMessage(
-			`${formatRelayReplySummary({
-				target: sessionRole,
-				replyKind: reply.kind,
-				content: reply.content,
-			})}\n`,
-		);
+		input.relayPaneWriter.relayResponse({
+			senderAgent: sessionRole,
+			receiverAgent: sessionRole,
+			content: reply.content,
+			now: new Date().toISOString(),
+		});
 		return reply;
 	};
 

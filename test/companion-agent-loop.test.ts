@@ -52,14 +52,18 @@ describe("companion agent loop", () => {
 		});
 
 		const handled: ProviderWorkRequest[] = [];
-		const localMessages: string[] = [];
+		const relayEvents: Array<{ type: string; [key: string]: unknown }> = [];
+		const relayPaneWriter = {
+			relayDirective(event: Record<string, unknown>) { relayEvents.push({ type: "directive", ...event }); },
+			relayResponse(event: Record<string, unknown>) { relayEvents.push({ type: "response", ...event }); },
+			status(event: Record<string, unknown>) { relayEvents.push({ type: "status", ...event }); },
+			cancellation(event: Record<string, unknown>) { relayEvents.push({ type: "cancellation", ...event }); },
+		};
 		const interactiveSession: InteractiveSessionController = {
 			start: () => Promise.resolve(),
 			stop: () => Promise.resolve(),
 			writeUserInput() {},
-			sendLocalMessage(message: string) {
-				localMessages.push(message);
-			},
+			sendLocalMessage() {},
 			onExit() {},
 		};
 
@@ -105,6 +109,7 @@ describe("companion agent loop", () => {
 			sessionId: codexSessionId,
 			provider,
 			interactiveSession,
+			relayPaneWriter,
 			pollIntervalMs: 5,
 		});
 
@@ -146,8 +151,8 @@ describe("companion agent loop", () => {
 				.listReplies(thread.threadId)
 				.some((reply) => reply.workItemId === workItem.workItemId),
 		).toBe(true);
-		expect(localMessages.some((message) => message.includes("Received broker work"))).toBe(true);
-		expect(localMessages.some((message) => message.includes("[ai-whisper][codex] answer: handled status?"))).toBe(true);
+		expect(relayEvents.some((e) => e.type === "status" && String(e.content).includes("Received broker work"))).toBe(true);
+		expect(relayEvents.some((e) => e.type === "response" && String(e.content).includes("handled status?"))).toBe(true);
 
 		await stop();
 	});

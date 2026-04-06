@@ -9,9 +9,9 @@ import {
 import {
 	enqueueRelayWork,
 	formatRelayAcknowledgement,
-	formatRelayReplySummary,
 } from "../runtime/relay-service.js";
 import { waitForReply } from "../runtime/reply-wait.js";
+import { createRelayPaneWriter } from "../runtime/relay-pane-writer.js";
 
 function requireEnv(name: string): string {
 	const value = process.env[name];
@@ -46,11 +46,20 @@ async function main(): Promise<void> {
 		cwd: process.cwd(),
 		stdout: process.stdout,
 	});
+	const relayPaneWriter = createRelayPaneWriter({ broker, collabId });
 	const liveSession = createLiveSessionRuntime({
 		interactiveSession,
 		stdin: process.stdin,
 		stdout: process.stdout,
+		relayPaneWriter,
 		onRelay: async (directive, sendNow) => {
+			relayPaneWriter.relayDirective({
+				senderAgent: agentArg,
+				receiverAgent: directive.target,
+				instruction: directive.instruction,
+				now: new Date().toISOString(),
+			});
+
 			const relay = enqueueRelayWork({
 				broker,
 				collabId,
@@ -63,10 +72,10 @@ async function main(): Promise<void> {
 			});
 
 			sendNow(
-				`${formatRelayAcknowledgement({
+				formatRelayAcknowledgement({
 					target: directive.target,
 					createdNewThread: relay.createdNewThread,
-				})}\n`,
+				}),
 			);
 
 			const reply = await waitForReply({
@@ -75,11 +84,14 @@ async function main(): Promise<void> {
 				workItemId: relay.workItem.workItemId,
 			});
 
-			return `${formatRelayReplySummary({
-				target: directive.target,
-				replyKind: reply.kind,
+			relayPaneWriter.relayResponse({
+				senderAgent: directive.target,
+				receiverAgent: agentArg,
 				content: reply.content,
-			})}\n`;
+				now: new Date().toISOString(),
+			});
+
+			return null;
 		},
 	});
 
@@ -109,6 +121,7 @@ async function main(): Promise<void> {
 			sessionId,
 			provider,
 			interactiveSession,
+			relayPaneWriter,
 		});
 		await exitRequested;
 	} finally {

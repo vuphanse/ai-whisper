@@ -8,6 +8,7 @@ import {
 	parseRelayDirective,
 } from "./relay-directive.js";
 import { createRelayLineBuffer } from "./relay-line-buffer.js";
+import type { createRelayPaneWriter } from "./relay-pane-writer.js";
 
 const ESC = String.fromCharCode(0x1b);
 const BEL = String.fromCharCode(0x07);
@@ -150,6 +151,7 @@ export function createLiveSessionRuntime(input: {
 		directive: RelayDirective,
 		sendNow: (message: string) => void,
 	) => Promise<string | null>;
+	relayPaneWriter?: ReturnType<typeof createRelayPaneWriter>;
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
 		isTTY?: boolean;
@@ -264,10 +266,20 @@ export function createLiveSessionRuntime(input: {
 		try {
 			const message = await input.onRelay(
 				directive,
-				(msg) => input.interactiveSession.sendLocalMessage(msg),
+				(msg) => {
+					if (input.relayPaneWriter) {
+						input.relayPaneWriter.status({ content: msg, now: new Date().toISOString() });
+					} else {
+						input.interactiveSession.sendLocalMessage(msg);
+					}
+				},
 			);
 			if (message) {
-				input.interactiveSession.sendLocalMessage(message);
+				if (input.relayPaneWriter) {
+					input.relayPaneWriter.status({ content: message, now: new Date().toISOString() });
+				} else {
+					input.interactiveSession.sendLocalMessage(message);
+				}
 			}
 		} catch (error) {
 			const message =

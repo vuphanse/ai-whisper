@@ -8,12 +8,12 @@ import {
 import {
 	enqueueRelayWork,
 	formatRelayAcknowledgement,
-	formatRelayReplySummary,
 } from "./relay-service.js";
 import { waitForReply } from "./reply-wait.js";
 import { createCliSessionId } from "./id-factory.js";
 import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
+import { createRelayPaneWriter } from "./relay-pane-writer.js";
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -41,6 +41,8 @@ export function createMountSessionRuntime(input: {
 			// Deferred claim — set after liveSession.start() proves the provider launched cleanly.
 			// onRelay guards against null so there is no race between relay arrival and claim completion.
 			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
+			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
+			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
 
 			// Mounted sessions own the terminal; process.stdin is the real tty read side.
 			// The live-session runtime intercepts inline @@ relay directives from stdin.
@@ -48,10 +50,23 @@ export function createMountSessionRuntime(input: {
 				interactiveSession,
 				stdin: process.stdin,
 				stdout: process.stdout,
+				get relayPaneWriter() {
+					return relayPaneWriter ?? undefined;
+				},
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
 						throw new Error("Relay not available: session claim not yet completed");
 					}
+
+					const writer = relayPaneWriter!;
+
+					writer.relayDirective({
+						senderAgent: input.target,
+						receiverAgent: directive.target,
+						instruction: directive.instruction,
+						now: new Date().toISOString(),
+					});
+
 					const relay = enqueueRelayWork({
 						broker: input.broker,
 						collabId: resolvedClaim.collabId,
@@ -64,10 +79,10 @@ export function createMountSessionRuntime(input: {
 					});
 
 					sendNow(
-						`${formatRelayAcknowledgement({
+						formatRelayAcknowledgement({
 							target: directive.target,
 							createdNewThread: relay.createdNewThread,
-						})}\n`,
+						}),
 					);
 
 					const reply = await waitForReply({
@@ -76,11 +91,14 @@ export function createMountSessionRuntime(input: {
 						workItemId: relay.workItem.workItemId,
 					});
 
-					return `${formatRelayReplySummary({
-						target: directive.target,
-						replyKind: reply.kind,
+					writer.relayResponse({
+						senderAgent: directive.target,
+						receiverAgent: input.target,
 						content: reply.content,
-					})}\n`;
+						now: new Date().toISOString(),
+					});
+
+					return null;
 				},
 			});
 
@@ -147,6 +165,12 @@ export function createMountSessionRuntime(input: {
 					bindingSource: "mounted",
 				});
 
+				// Initialize the relay pane writer now that collabId is available.
+				relayPaneWriter = createRelayPaneWriter({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+				});
+
 				// Update state file: record mounted session metadata + clear recovery state.
 				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
 					let next = {
@@ -190,6 +214,7 @@ export function createMountSessionRuntime(input: {
 					sessionId: resolvedClaim.sessionId,
 					provider,
 					interactiveSession,
+					relayPaneWriter: relayPaneWriter!,
 				});
 			} catch (err) {
 				await stopLoop();
