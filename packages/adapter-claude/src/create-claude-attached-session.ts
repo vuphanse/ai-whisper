@@ -14,5 +14,8 @@ export function createClaudeAttachedSession(input: {
 		sendLocalMessage(message: string) {
 			input.stdout.write(message);
 		},
+		onExit() {
+			// Attached sessions have no child process to monitor.
+		},
 	};
 }

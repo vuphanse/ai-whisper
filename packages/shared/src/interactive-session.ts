@@ -7,4 +7,5 @@ export interface InteractiveSessionController {
 	stop(): Promise<void>;
 	writeUserInput(data: string): void;
 	sendLocalMessage(message: string): void;
+	onExit(handler: () => void): void;
 }

@@ -19,6 +19,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -51,6 +52,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -87,6 +89,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -122,6 +125,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -157,6 +161,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -186,6 +191,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -218,6 +224,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,
@@ -260,6 +267,7 @@ describe("live session runtime", () => {
 				sendLocalMessage(message: string) {
 					stdout.write(message);
 				},
+					onExit() {},
 			},
 			stdin,
 			stdout,

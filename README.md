@@ -114,9 +114,9 @@ whisper collab inspect --watch
 The preferred workflow for inline `@@` relay support. `whisper collab mount` claims the current iTerm shell as the managed session surface and launches the provider automatically:
 
 1. `whisper collab start --no-launch`
-2. in a normal iTerm tab, run `whisper collab mount codex`
-3. confirm Codex starts automatically in that same tab
-4. type `@@claude <instruction>` to relay to Claude with inline acknowledgement and reply
+2. in one iTerm tab, run `whisper collab mount codex`
+3. in a second iTerm tab, run `whisper collab mount claude`
+4. from the Codex tab, type `@@claude <instruction>` to relay to Claude with inline acknowledgement and reply
 
 Mounted sessions keep `ai-whisper` as the terminal owner, so the live-session relay parser can intercept `@@...` input. Recovery and reconnect default to the mounted path when the previous binding was mounted.
 

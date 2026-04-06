@@ -90,6 +90,7 @@ function buildMockInteractiveSession() {
 		stop: vi.fn(async () => {}),
 		writeUserInput: vi.fn(),
 		sendLocalMessage: vi.fn(),
+		onExit: vi.fn(),
 	};
 }
 

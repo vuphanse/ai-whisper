@@ -45,5 +45,8 @@ export function createAdoptedInteractiveSession(input: {
 		sendLocalMessage(message: string) {
 			handle?.write(message);
 		},
+		onExit() {
+			// Adopted sessions are write-only tty handles with no child process to monitor.
+		},
 	};
 }

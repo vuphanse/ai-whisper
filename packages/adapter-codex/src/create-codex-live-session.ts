@@ -11,6 +11,7 @@ const nodePtyUnixTerminalPath = require.resolve("node-pty/lib/unixTerminal.js");
 
 type PtyLike = {
 	onData(handler: (data: string) => void): unknown;
+	onExit(handler: (e: { exitCode: number }) => void): unknown;
 	write(data: string): void;
 	kill(): void;
 };
@@ -38,6 +39,7 @@ export function createCodexLiveSession(input: {
 	createPty?: (input: { config: CodexCommandConfig; cwd: string }) => PtyLike;
 }): InteractiveSessionController {
 	let pty: PtyLike | null = null;
+	let exitHandler: (() => void) | null = null;
 
 	function handleData(data: string) {
 		input.stdout.write(data);
@@ -50,6 +52,9 @@ export function createCodexLiveSession(input: {
 				cwd: input.cwd,
 			});
 			pty.onData(handleData);
+			pty.onExit(() => {
+				exitHandler?.();
+			});
 			return Promise.resolve();
 		},
 		stop() {
@@ -64,6 +69,9 @@ export function createCodexLiveSession(input: {
 		},
 		sendLocalMessage(message: string) {
 			input.stdout.write(message);
+		},
+		onExit(handler: () => void) {
+			exitHandler = handler;
 		},
 	};
 }

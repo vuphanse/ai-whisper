@@ -60,6 +60,7 @@ describe("companion agent loop", () => {
 			sendLocalMessage(message: string) {
 				localMessages.push(message);
 			},
+			onExit() {},
 		};
 
 		const provider: CompanionProvider = {

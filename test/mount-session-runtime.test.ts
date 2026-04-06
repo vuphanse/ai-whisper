@@ -49,6 +49,7 @@ describe("mount session runtime", () => {
 				stop: () => Promise.resolve(),
 				writeUserInput() {},
 				sendLocalMessage() {},
+				onExit() {},
 			}),
 			createLiveSession: () => liveSession as never,
 			createProvider: () => ({

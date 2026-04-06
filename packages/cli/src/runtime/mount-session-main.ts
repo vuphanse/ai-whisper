@@ -34,7 +34,7 @@ export function createMountSessionRuntime(input: {
 			const provider = (input.createProvider ?? createProviderForTarget)(input.target);
 			const interactiveSession = (input.createInteractiveSession ?? createInteractiveSessionForTarget)({
 				target: input.target,
-				cwd: process.cwd(),
+				cwd: input.workspaceRoot,
 				stdout: process.stdout,
 			});
 
@@ -119,6 +119,10 @@ export function createMountSessionRuntime(input: {
 				// If this fails, the claim stays unconsumed and the binding remains in pending_attach.
 				await liveSession.start();
 				liveSessionStarted = true;
+
+				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
+				// or provider crashes). stop() is idempotent via the `stopping` guard.
+				interactiveSession.onExit(() => void stop().then(() => process.exit(0)));
 
 				// Only now consume the claim and flip the binding to "bound".
 				resolvedClaim = input.broker.control.completeAttachClaim({
