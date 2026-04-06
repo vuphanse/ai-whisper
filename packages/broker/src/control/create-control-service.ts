@@ -813,6 +813,9 @@ export function createControlService(db: Database.Database) {
 				bindings: listSessionBindingsForCollab(db, input.collabId),
 			};
 		},
+		markSessionDegraded(input: { sessionId: string; now: string }) {
+			updateSessionHealth(db, input.sessionId, "degraded", input.now);
+		},
 		assertActiveBinding(input: { collabId: string; sessionId: string }) {
 			const session = getSession(db, input.sessionId);
 			if (!session || session.collabId !== input.collabId) {

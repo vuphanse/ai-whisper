@@ -96,6 +96,18 @@ export function createMountSessionRuntime(input: {
 				if (liveSessionStarted) {
 					await liveSession.stop();
 				}
+				// Mark the session degraded before stopping the broker so status/inspect
+				// correctly reflect that the mounted provider is no longer running.
+				if (resolvedClaim) {
+					try {
+						input.broker.control.markSessionDegraded({
+							sessionId: resolvedClaim.sessionId,
+							now: new Date().toISOString(),
+						});
+					} catch {
+						// Best-effort; broker may already be unreachable.
+					}
+				}
 				try {
 					(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
 						const nextMountedSessions = { ...current.mountedSessions };
