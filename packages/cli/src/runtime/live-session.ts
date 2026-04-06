@@ -234,10 +234,10 @@ export function createLiveSessionRuntime(input: {
 		if (busyIndicator.isBusy()) {
 			// Only allow Ctrl+C (0x03) to trigger cancellation
 			if (sanitized.includes("\x03")) {
-				busyIndicator.hide();
 				if (input.onRelayCancel) {
 					input.onRelayCancel();
 				}
+				busyIndicator.hide();
 				if (input.relayPaneWriter) {
 					input.relayPaneWriter.cancellation({
 						agent: "user",
