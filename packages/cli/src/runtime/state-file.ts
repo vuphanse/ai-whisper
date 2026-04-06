@@ -71,7 +71,7 @@ const recoveryStateSchema = z.object({
 	recoveredAt: z.string().datetime({ offset: true }).nullable(),
 });
 
-export const cliCollabStateSchema = z.object({
+const cliCollabStateV3Schema = z.object({
 	version: z.literal(3),
 	collabId: z.string(),
 	workspaceRoot: z.string(),
@@ -97,28 +97,54 @@ export const cliCollabStateSchema = z.object({
 	recovery: recoveryStateSchema,
 });
 
+const adoptedSessionStateSchema = z.object({
+	agentType: z.enum(["codex", "claude"]),
+	ttyPath: z.string(),
+	daemonPid: z.number().int().positive(),
+});
+
+export const cliCollabStateSchema = cliCollabStateV3Schema.extend({
+	version: z.literal(4),
+	adoptedSessions: z
+		.object({
+			codex: adoptedSessionStateSchema.optional(),
+			claude: adoptedSessionStateSchema.optional(),
+		})
+		.default({}),
+});
+
 export type CliCollabState = z.infer<typeof cliCollabStateSchema>;
 
 function normalizeCliCollabState(raw: unknown): CliCollabState {
-	const v3 = cliCollabStateSchema.safeParse(raw);
-	if (v3.success) return v3.data;
+	const v4 = cliCollabStateSchema.safeParse(raw);
+	if (v4.success) return v4.data;
+
+	const v3 = cliCollabStateV3Schema.safeParse(raw);
+	if (v3.success) {
+		return {
+			...v3.data,
+			version: 4,
+			adoptedSessions: {},
+		};
+	}
 
 	const v2 = cliCollabStateV2Schema.safeParse(raw);
 	if (v2.success) {
 		return {
 			...v2.data,
-			version: 3,
+			version: 4,
 			recovery: {
 				state: "normal",
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		};
 	}
 
 	const v1 = cliCollabStateV1Schema.parse(raw);
-	const normalized = {
-		version: 2 as const,
+	return {
+		version: 4,
 		collabId: v1.collabId,
 		workspaceRoot: v1.workspaceRoot,
 		broker: v1.broker,
@@ -131,15 +157,12 @@ function normalizeCliCollabState(raw: unknown): CliCollabState {
 			claude: v1.sessions.claude,
 		},
 		startedAt: v1.startedAt,
-	};
-	return {
-		...normalized,
-		version: 3,
 		recovery: {
 			state: "normal",
 			idleAfterRecovery: false,
 			recoveredAt: null,
 		},
+		adoptedSessions: {},
 	};
 }
 

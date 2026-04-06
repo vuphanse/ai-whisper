@@ -54,3 +54,9 @@ export const artifactCategories = [
 	"design_doc",
 	"plan_doc",
 ] as const;
+export const bindingSources = ["launched", "attached", "adopted"] as const;
+export const attachTargetModes = [
+	"snippet_shell",
+	"adopt_current_tty",
+	"explicit_tty",
+] as const;

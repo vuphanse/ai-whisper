@@ -23,6 +23,8 @@ export {
 export {
 	agentTypes,
 	artifactCategories,
+	attachTargetModes,
+	bindingSources,
 	brokerHealthStates,
 	collabStates,
 	eventTypes,
