@@ -74,6 +74,7 @@ export function getReply(db: Database.Database, replyId: string): Reply | null {
 	});
 }
 
+// Returns up to the last 3 unconsumed replies (oldest-first) to avoid overwhelming context injection
 export function listUnconsumedRepliesForSession(
 	db: Database.Database,
 	input: { collabId: string; threadId: string; forSessionId: string },
@@ -83,16 +84,22 @@ export function listUnconsumedRepliesForSession(
 			`SELECT reply_id, thread_id, collab_id, work_item_id, source_session_id,
 			        turn_index, kind, content, transition_intent,
 			        artifact_manifest_ids_json, created_at
-			 FROM reply
-			 WHERE collab_id = ?
-			   AND thread_id = ?
-			   AND source_session_id != ?
-			   AND NOT EXISTS (
-			     SELECT 1 FROM json_each(consumed_by_json)
-			     WHERE json_each.value = ?
-			   )
-			 ORDER BY created_at ASC
-			 LIMIT 3`,
+			 FROM (
+			   SELECT reply_id, thread_id, collab_id, work_item_id, source_session_id,
+			          turn_index, kind, content, transition_intent,
+			          artifact_manifest_ids_json, created_at
+			   FROM reply
+			   WHERE collab_id = ?
+			     AND thread_id = ?
+			     AND source_session_id != ?
+			     AND NOT EXISTS (
+			       SELECT 1 FROM json_each(consumed_by_json)
+			       WHERE json_each.value = ?
+			     )
+			   ORDER BY created_at DESC
+			   LIMIT 3
+			 )
+			 ORDER BY created_at ASC`,
 		)
 		.all(
 			input.collabId,
