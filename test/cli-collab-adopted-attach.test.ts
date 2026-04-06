@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	sessionBindingSchema,
 	attachClaimSchema,
@@ -7,9 +7,16 @@ import {
 	readCliCollabState,
 	writeCliCollabState,
 } from "../packages/cli/src/runtime/state-file.ts";
+import { runCollabAttach } from "../packages/cli/src/commands/collab/attach.ts";
+import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
+import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const assessBroker = vi.fn(() =>
+	Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }),
+);
 
 describe("adopted session schemas", () => {
 	it("accepts adopted binding metadata", () => {
@@ -85,5 +92,61 @@ describe("cli state adopted sessions", () => {
 		const state = readCliCollabState(path);
 		expect(state?.adoptedSessions.codex?.ttyPath).toBe("/dev/ttys012");
 		expect(state?.adoptedSessions.codex?.daemonPid).toBe(99234);
+	});
+});
+
+describe("collab attach adopted current tty", () => {
+	it("starts a detached adoption daemon and returns without printing a foreground snippet", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-adopt-current-tty-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-06T16:30:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		const startDaemon = vi.fn(() => 99234);
+
+		const result = await runCollabAttach({
+			workspaceRoot,
+			target: "codex",
+			now: "2026-04-06T16:31:00.000Z",
+			targetMode: "adopt_current_tty",
+			resolveCurrentTty: () => "/dev/ttys012",
+			startAdoptionDaemon: startDaemon,
+			assessBroker,
+		});
+
+		expect(result.mode).toBe("adopted");
+		if (result.mode !== "adopted") throw new Error("unreachable");
+		expect(result.ttyPath).toBe("/dev/ttys012");
+		expect(result.daemonPid).toBe(99234);
+
+		expect(startDaemon).toHaveBeenCalledWith(
+			expect.objectContaining({
+				target: "codex",
+				workspaceRoot,
+				ttyPath: "/dev/ttys012",
+			}),
+		);
+	});
+
+	it("falls back to snippet mode when no targetMode is specified", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-adopt-fallback-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-06T16:30:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		const result = await runCollabAttach({
+			workspaceRoot,
+			target: "codex",
+			now: "2026-04-06T16:31:00.000Z",
+			assessBroker,
+		});
+
+		expect(result.mode).toBe("snippet");
 	});
 });

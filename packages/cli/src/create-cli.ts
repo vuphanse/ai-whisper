@@ -131,16 +131,25 @@ export function createCli(): Command {
 
 	collab
 		.command("attach")
-		.description("Issue an attach claim for an agent to join the session")
+		.description("Attach or adopt an agent session into the collab")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts) => {
+		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
+		.option("--tty <path>", "Adopt an explicit local tty path")
+		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
+			const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
 			const result = await runCollabAttach({
 				workspaceRoot: opts.workspace,
 				target,
 				now: new Date().toISOString(),
+				targetMode,
+				...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
 			});
-			console.log(result.snippet);
+			if (result.mode === "snippet") {
+				console.log(result.snippet);
+			} else {
+				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
+			}
 		});
 
 	collab
