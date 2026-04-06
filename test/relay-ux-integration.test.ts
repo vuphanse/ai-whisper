@@ -1,17 +1,31 @@
 // test/relay-ux-integration.test.ts
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { createSessionId } from "../packages/shared/src/index.ts";
 import { createRelayPaneWriter } from "../packages/cli/src/runtime/relay-pane-writer.ts";
 import { createContextInjector } from "../packages/cli/src/runtime/context-injector.ts";
 
 describe("relay UX integration", () => {
-	it("full flow: directive → busy → response → context injection", () => {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-relay-ux-"));
-		const broker = createBrokerRuntime({
+	let dir: string | undefined;
+	let broker: ReturnType<typeof createBrokerRuntime> | undefined;
+
+	afterEach(async () => {
+		if (broker) {
+			await broker.stop();
+			broker = undefined;
+		}
+		if (dir) {
+			rmSync(dir, { recursive: true, force: true });
+			dir = undefined;
+		}
+	});
+
+	it("full flow: directive → busy → response → context injection", async () => {
+		dir = mkdtempSync(join(tmpdir(), "ai-whisper-relay-ux-"));
+		broker = createBrokerRuntime({
 			sqlitePath: join(dir, "broker.sqlite"),
 			host: "127.0.0.1",
 			port: 4311,
@@ -87,11 +101,13 @@ describe("relay UX integration", () => {
 			now: "2026-04-06T00:02:00.000Z",
 		});
 
-		// 4. Verify relay pane events
+		// 4. Verify relay pane events — filter by type to avoid fragility from extra broker events
 		const events = broker.control.pollRelayEvents("collab_1", 0);
-		expect(events).toHaveLength(2);
-		expect(events[0].eventType).toBe("relay_directive");
-		expect(events[1].eventType).toBe("relay_response");
+		const directives = events.filter((e) => e.eventType === "relay_directive");
+		const responses = events.filter((e) => e.eventType === "relay_response");
+		expect(directives).toHaveLength(1);
+		expect(responses).toHaveLength(1);
+		expect(events.indexOf(directives[0])).toBeLessThan(events.indexOf(responses[0]));
 
 		// 5. Context injection — claude asks to fix findings
 		const injector = createContextInjector({
@@ -106,14 +122,17 @@ describe("relay UX integration", () => {
 		});
 
 		expect(result.injected).toBe(true);
+		expect(result.payload).toContain("[Context from recent relay exchange]");
 		expect(result.payload).toContain("Found 3 issues");
 		expect(result.payload).toContain("Fix the findings from codex review");
 
-		// 6. Second injection should have nothing
+		// 6. Second injection should have nothing — replies already consumed
 		const result2 = injector.injectContext({
 			userInput: "anything else",
 			activeThreadId: thread.threadId,
 		});
 		expect(result2.injected).toBe(false);
+		expect(result2.payload).toBe("anything else");
+		expect(result2.summary).toBeNull();
 	});
 });
