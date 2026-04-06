@@ -31,12 +31,17 @@ export async function runCollabRelayMonitor(input: {
 		stdout: process.stdout,
 	});
 
-	process.on("SIGINT", async () => {
-		await monitor.stop();
-		await broker.stop();
-		process.exit(0);
+	process.on("SIGINT", () => {
+		monitor.stop()
+			.then(() => broker.stop())
+			.then(() => { process.exit(0); })
+			.catch((err: unknown) => {
+				console.error(err);
+				process.exit(1);
+			});
 	});
 
 	await monitor.start();
 	await monitor.waitUntilStopped();
+	await broker.stop();
 }

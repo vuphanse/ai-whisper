@@ -864,6 +864,8 @@ export function createControlService(db: Database.Database) {
 			monitorId: string;
 			now: string;
 		}) {
+			const collab = getCollab(db, input.collabId);
+			if (!collab) throw new Error(`Unknown collab: ${input.collabId}`);
 			insertRelayMonitor(db, input);
 		},
 		heartbeatRelayMonitor(input: {
@@ -871,7 +873,10 @@ export function createControlService(db: Database.Database) {
 			monitorId: string;
 			now: string;
 		}) {
-			updateRelayMonitorHeartbeat(db, input);
+			const collab = getCollab(db, input.collabId);
+			if (!collab) throw new Error(`Unknown collab: ${input.collabId}`);
+			const changes = updateRelayMonitorHeartbeat(db, input);
+			if (changes === 0) throw new Error(`Unknown relay monitor: ${input.monitorId}`);
 		},
 		isRelayMonitorConnected(collabId: string, now?: string): boolean {
 			return queryIsRelayMonitorConnected(db, collabId, now);

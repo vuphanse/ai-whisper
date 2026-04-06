@@ -5,7 +5,8 @@
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"bin": {
-		"whisper": "./dist/bin/whisper.js"
+		"whisper": "./dist/bin/whisper.js",
+		"whisper-relay-monitor": "./dist/bin/relay-monitor.js"
 	},
 	"exports": {
 		".": {

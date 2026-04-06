@@ -13,10 +13,11 @@ export function insertRelayMonitor(
 export function updateRelayMonitorHeartbeat(
 	db: Database.Database,
 	input: { collabId: string; monitorId: string; now: string },
-): void {
-	db.prepare(
+): number {
+	const result = db.prepare(
 		`UPDATE relay_monitor SET last_heartbeat_at = ? WHERE collab_id = ? AND monitor_id = ?`,
 	).run(input.now, input.collabId, input.monitorId);
+	return result.changes;
 }
 
 const HEARTBEAT_TIMEOUT_MS = 60_000;
