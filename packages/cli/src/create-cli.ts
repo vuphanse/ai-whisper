@@ -6,6 +6,7 @@ import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabReconnect } from "./commands/collab/reconnect.js";
+import { runCollabRelayMonitor } from "./commands/collab/relay-monitor.js";
 import { runCollabStart } from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
@@ -282,6 +283,14 @@ export function createCli(): Command {
 			if (output) {
 				process.stdout.write(output);
 			}
+		});
+
+	collab
+		.command("relay-monitor")
+		.description("Run the relay monitor in the current terminal (renders the relay conversation stream)")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (opts: WorkspaceOpts) => {
+			await runCollabRelayMonitor({ workspaceRoot: opts.workspace });
 		});
 
 	collab
