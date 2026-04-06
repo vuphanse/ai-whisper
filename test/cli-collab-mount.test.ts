@@ -1,9 +1,81 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { attachClaimSchema, sessionBindingSchema } from "../packages/shared/src/index.ts";
 import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
+import { runCollabMount } from "../packages/cli/src/commands/collab/mount.ts";
+import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
+import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+
+const assessBroker = vi.fn(() =>
+	Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }),
+);
+
+describe("mount gate — relay monitor check", () => {
+	it("rejects mount when no relay monitor is connected", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-gate-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-06T10:00:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		await expect(
+			runCollabMount({
+				workspaceRoot,
+				target: "codex",
+				now: "2026-04-06T10:01:00.000Z",
+				resolveCurrentTty: () => "/dev/ttys031",
+				assessBroker,
+			}),
+		).rejects.toThrow("Relay monitor not connected");
+	});
+
+	it("proceeds past relay monitor check when monitor is registered", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-connected-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-06T10:00:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+		});
+
+		// Register a fresh relay monitor so isRelayMonitorConnected returns true
+		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
+		const broker = createBrokerRuntime({
+			sqlitePath: state.broker.sqlitePath,
+			host: state.broker.host,
+			port: state.broker.port,
+		});
+		broker.control.registerRelayMonitor({
+			collabId: state.collabId,
+			monitorId: "monitor_test_1",
+			now: new Date().toISOString(),
+		});
+		await broker.stop();
+
+		// Provide a fake runtime so the session doesn't actually start
+		const fakeRuntime = {
+			start: () => Promise.resolve(),
+		};
+
+		// Should not throw "Relay monitor not connected"
+		await expect(
+			runCollabMount({
+				workspaceRoot,
+				target: "codex",
+				now: "2026-04-06T10:01:00.000Z",
+				resolveCurrentTty: () => "/dev/ttys031",
+				assessBroker,
+				createRuntime: () => fakeRuntime as never,
+			}),
+		).resolves.toBeUndefined();
+	});
+});
 
 describe("mounted shared state", () => {
 	it("accepts mounted binding sources and mount_current_tty claims", () => {

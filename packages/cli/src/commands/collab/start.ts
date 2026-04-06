@@ -108,6 +108,9 @@ export async function runCollabStart(input: {
 			adoptedSessions: {},
 			mountedSessions: {},
 		});
+		console.log(
+			`Collab started (no-launch mode).\nNext: run 'whisper collab relay-monitor' in a separate terminal before mounting providers.`,
+		);
 		return {
 			collabId,
 			launchMode: "none" as const,

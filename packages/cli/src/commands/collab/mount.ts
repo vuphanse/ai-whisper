@@ -28,6 +28,12 @@ export async function runCollabMount(input: {
 	});
 	let brokerHandedOff = false;
 	try {
+		if (!broker.control.isRelayMonitorConnected(state.collabId)) {
+			throw new Error(
+				"Relay monitor not connected. Run `whisper collab relay-monitor` in a separate terminal first.",
+			);
+		}
+
 		const current = broker.control
 			.listSessionBindings(state.collabId)
 			.find((binding) => binding.agentType === input.target);
