@@ -182,7 +182,7 @@ export function launchSessions(input: {
 		);
 		const relayMonitorCmd = `AI_WHISPER_WORKSPACE_ROOT=${shellQuote(input.workspaceRoot)} ${shellQuote(process.execPath)} ${shellQuote(relayMonitorBinPath)}`;
 		exec(
-			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -v -l 30% sh -lc ${shellQuote(relayMonitorCmd)}`,
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -fv -l 30% sh -lc ${shellQuote(relayMonitorCmd)}`,
 		);
 		exec(
 			`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`,

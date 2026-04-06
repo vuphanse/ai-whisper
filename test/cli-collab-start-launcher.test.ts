@@ -63,9 +63,10 @@ describe("cli collab start launcher integration", () => {
 		const relayPaneCmds = executedCommands.filter((cmd) => cmd.includes("relay-monitor"));
 		expect(relayPaneCmds).toHaveLength(1);
 
-		// Relay pane should be vertical split at bottom
+		// Relay pane should be full-width vertical split at bottom
 		expect(relayPaneCmd).toContain("split-window");
-		expect(relayPaneCmd).toContain("-v");
+		expect(relayPaneCmd).toContain("-fv");
 		expect(relayPaneCmd).toContain("-l 30%");
+		expect(relayPaneCmd).toContain("AI_WHISPER_WORKSPACE_ROOT=");
 	});
 });
