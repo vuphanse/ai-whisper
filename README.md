@@ -65,7 +65,9 @@ whisper collab attach codex
 whisper collab attach claude
 ```
 
-Each `attach` command prints a snippet to run from the corresponding provider terminal. In Phase 7A, that snippet starts the local `attach-session` bridge process from that terminal; it does not hook into or recover the provider's internal conversation state.
+Each `attach` command prints a snippet to run from a shell prompt in the terminal you want to dedicate to that role. In Phase 7A, that snippet starts the local `attach-session` bridge process and takes over that terminal as the `ai-whisper` live-session surface; it does not hook into or recover the provider's internal conversation state.
+
+This means Phase 7A does not yet support pasting the snippet into an already-running Codex or Claude interactive prompt. If you do that, the provider will treat it as normal prompt text. The current supported attach flow is to start with `whisper collab start --no-launch`, then run the printed snippet from a normal shell prompt in a terminal that will become the attached session surface.
 
 If a role is already bound and you need to replace it:
 
@@ -83,7 +85,7 @@ whisper collab reconnect codex
 whisper collab reconnect claude
 ```
 
-Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
+Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Each reconnect command prints the same kind of shell snippet described above: run it from a shell prompt in the terminal you want to dedicate to that role, not inside an already-running provider prompt. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
 
 ### Operator monitoring workflow (Phase 7C1)
 
