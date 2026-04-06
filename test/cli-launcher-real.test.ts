@@ -133,13 +133,15 @@ describe("launcher real behavior", () => {
 
 			expect(result.launched).toBe(true);
 			expect(result.launchMode).toBe("tmux");
-			expect(execed).toHaveLength(3);
+			expect(execed).toHaveLength(4);
 			expect(execed[0]).toContain("tmux new-session");
 			expect(execed[1]).toContain("tmux split-window");
 			expect(execed[1]).toContain(":0");
 			expect(execed[1]).not.toContain(":codex");
-			expect(execed[2]).toContain("tmux set-option");
-			expect(execed[2]).toContain("mouse on");
+			expect(execed[2]).toContain("tmux split-window");
+			expect(execed[2]).toContain("relay-monitor");
+			expect(execed[3]).toContain("tmux set-option");
+			expect(execed[3]).toContain("mouse on");
 		});
 
 		it("can append a tmux attach command for interactive start flows", () => {
@@ -158,9 +160,9 @@ describe("launcher real behavior", () => {
 
 			expect(result.launched).toBe(true);
 			expect(result.tmuxSession).toMatch(/whisper-/);
-			expect(execed).toHaveLength(4);
-			expect(execed[3]).toContain("tmux attach -t");
-			expect(execed[3]).toContain(result.tmuxSession!);
+			expect(execed).toHaveLength(5);
+			expect(execed[4]).toContain("tmux attach -t");
+			expect(execed[4]).toContain(result.tmuxSession!);
 		});
 
 		it("returns tmux session name and executes tmux commands", () => {

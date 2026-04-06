@@ -9,6 +9,7 @@ export type ExecFn = (command: string) => void;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const companionAgentPath = resolve(__dirname, "../bin/companion-agent.js");
+const relayMonitorBinPath = resolve(__dirname, "../bin/relay-monitor.js");
 
 function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, "'\\''")}'`;
@@ -178,6 +179,10 @@ export function launchSessions(input: {
 		);
 		exec(
 			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -h sh -lc ${shellQuote(claudeCmd)}`,
+		);
+		const relayMonitorCmd = `AI_WHISPER_WORKSPACE_ROOT=${shellQuote(input.workspaceRoot)} ${shellQuote(process.execPath)} ${shellQuote(relayMonitorBinPath)}`;
+		exec(
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -v -l 30% sh -lc ${shellQuote(relayMonitorCmd)}`,
 		);
 		exec(
 			`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`,
