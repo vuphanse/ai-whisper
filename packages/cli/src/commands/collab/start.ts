@@ -46,6 +46,7 @@ export async function runCollabStart(input: {
 	workspaceRoot: string;
 	now: string;
 	launchMode: LaunchMode;
+	attachTmux?: boolean;
 	spawn?: SpawnFn;
 	exec?: ExecFn;
 	spawnBroker?: (sqlitePath: string, host: string, port: number) => number;
@@ -163,6 +164,7 @@ export async function runCollabStart(input: {
 
 	const launch = launchSessions({
 		launchMode: input.launchMode,
+		...(input.attachTmux !== undefined ? { attachTmux: input.attachTmux } : {}),
 		collabId,
 		workspaceRoot: input.workspaceRoot,
 		brokerSqlitePath: sqlitePath,

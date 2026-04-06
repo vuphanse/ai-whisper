@@ -142,6 +142,27 @@ describe("launcher real behavior", () => {
 			expect(execed[2]).toContain("mouse on");
 		});
 
+		it("can append a tmux attach command for interactive start flows", () => {
+			const execed: string[] = [];
+
+			const result = launchSessions({
+				launchMode: "tmux",
+				...baseLaunchInput,
+				brokerSqlitePath:
+					"/tmp/test-workspace/.ai-whisper/runtime/broker.sqlite",
+				exec: (command) => {
+					execed.push(command);
+				},
+				attachTmux: true,
+			});
+
+			expect(result.launched).toBe(true);
+			expect(result.tmuxSession).toMatch(/whisper-/);
+			expect(execed).toHaveLength(4);
+			expect(execed[3]).toContain("tmux attach -t");
+			expect(execed[3]).toContain(result.tmuxSession!);
+		});
+
 		it("returns tmux session name and executes tmux commands", () => {
 			const execed: string[] = [];
 			const fakeExec = (command: string) => {

@@ -16,6 +16,9 @@ describe("README", () => {
 		expect(readme).toContain("packages/shared");
 		expect(readme).toContain("packages/broker");
 		expect(readme).toContain("whisper collab start");
+		expect(readme).toContain("split panes");
+		expect(readme).toContain("--no-tmux");
+		expect(readme).toContain("--no-launch");
 		expect(readme).toContain("whisper collab status");
 		expect(readme).toContain("whisper collab tell");
 		expect(readme).toContain("whisper collab stop");

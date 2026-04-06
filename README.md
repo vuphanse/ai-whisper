@@ -37,6 +37,8 @@ pnpm format
 whisper collab start
 ```
 
+By default, `collab start` prefers `tmux` and attaches your current terminal into the collab session with split panes when `tmux` is available. Use `--no-tmux` to launch separate terminal windows instead. Use `--no-launch` when you only want the broker and plan to `mount` or legacy-`attach` providers manually.
+
 Then inside a live session:
 
 ```text

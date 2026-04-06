@@ -103,7 +103,7 @@ function defaultSpawn(command: string): number | undefined {
 }
 
 function defaultExec(command: string): void {
-	execSync(command, { stdio: "ignore" });
+	execSync(command, { stdio: "inherit" });
 }
 
 function wrapForTerminalWindow(agentCommand: string, label: string): string {
@@ -117,6 +117,7 @@ function wrapForTerminalWindow(agentCommand: string, label: string): string {
 
 export function launchSessions(input: {
 	launchMode: LaunchMode;
+	attachTmux?: boolean;
 	collabId: string;
 	workspaceRoot: string;
 	brokerSqlitePath: string;
@@ -181,6 +182,9 @@ export function launchSessions(input: {
 		exec(
 			`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`,
 		);
+		if (input.attachTmux) {
+			exec(`tmux attach -t ${shellQuote(tmuxSession)}`);
+		}
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;
 		base.runtime.claudeWindowLabel = claudeWindowLabel;

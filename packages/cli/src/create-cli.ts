@@ -68,6 +68,10 @@ export function createCli(): Command {
 				workspaceRoot: opts.workspace,
 				now: new Date().toISOString(),
 				launchMode,
+				attachTmux:
+					launchMode === "tmux" &&
+					Boolean(process.stdin.isTTY) &&
+					Boolean(process.stdout.isTTY),
 			});
 			console.log(
 				`Collab started: ${result.collabId} (launch: ${result.launchMode})`,
