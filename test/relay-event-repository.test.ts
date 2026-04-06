@@ -44,14 +44,14 @@ describe("relay event repository", () => {
 		// Poll from beginning
 		const all = broker.control.pollRelayEvents("collab_1", 0);
 		expect(all).toHaveLength(2);
-		expect(all[0].eventType).toBe("relay_directive");
-		expect(all[0].content).toBe("review the implementation");
-		expect(all[1].eventType).toBe("relay_response");
+		expect(all[0]!.eventType).toBe("relay_directive");
+		expect(all[0]!.content).toBe("review the implementation");
+		expect(all[1]!.eventType).toBe("relay_response");
 
 		// Poll from after first event
-		const afterFirst = broker.control.pollRelayEvents("collab_1", all[0].id);
+		const afterFirst = broker.control.pollRelayEvents("collab_1", all[0]!.id);
 		expect(afterFirst).toHaveLength(1);
-		expect(afterFirst[0].content).toBe("Found 3 issues");
+		expect(afterFirst[0]!.content).toBe("Found 3 issues");
 	});
 
 	it("appends status events", () => {
@@ -74,7 +74,7 @@ describe("relay event repository", () => {
 
 		const events = broker.control.pollRelayEvents("collab_1", 0);
 		expect(events).toHaveLength(1);
-		expect(events[0].eventType).toBe("status");
-		expect(events[0].senderAgent).toBeNull();
+		expect(events[0]!.eventType).toBe("status");
+		expect(events[0]!.senderAgent).toBeNull();
 	});
 });

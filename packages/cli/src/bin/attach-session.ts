@@ -17,6 +17,7 @@ import { waitForReply } from "../runtime/reply-wait.js";
 import { createCliSessionId } from "../runtime/id-factory.js";
 import { readCliCollabState, updateCliCollabState } from "../runtime/state-file.js";
 import { getStateFilePath } from "../runtime/paths.js";
+import { createRelayPaneWriter } from "../runtime/relay-pane-writer.js";
 
 export function createAttachSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -77,10 +78,14 @@ export function createAttachSessionRuntime(input: {
 				// State file may not exist in test environments — not fatal
 			}
 
+			const relayPaneWriter = createRelayPaneWriter({ broker: input.broker, collabId: accepted.collabId });
+			const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
 			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
 				interactiveSession,
 				stdin: process.stdin,
 				stdout: process.stdout,
+				relayPaneWriter,
+				onRelayCancel: () => { relayCancelHandle.cancel?.(); },
 				onRelay: async (directive, sendNow) => {
 					if (directive.target === "pull") {
 						const injector = createContextInjector({ broker: input.broker, collabId: accepted.collabId, sessionId: accepted.sessionId });
@@ -159,6 +164,8 @@ export function createAttachSessionRuntime(input: {
 					sessionId: accepted.sessionId,
 					provider,
 					interactiveSession,
+					relayPaneWriter,
+					relayCancelHandle,
 				});
 			} catch (err) {
 				await stopLoop();

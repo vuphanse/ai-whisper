@@ -16,6 +16,7 @@ import { waitForReply } from "./reply-wait.js";
 import { createCliSessionId } from "./id-factory.js";
 import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
+import { createRelayPaneWriter } from "./relay-pane-writer.js";
 
 export function createAdoptSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -49,11 +50,18 @@ export function createAdoptSessionRuntime(input: {
 
 			// Deferred claim — set after liveSession.start() proves the tty is accessible.
 			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
+			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
+			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
+			const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
 
 			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
 				interactiveSession,
 				stdin: adoptedStdin,
 				stdout: process.stdout,
+				get relayPaneWriter() {
+					return relayPaneWriter ?? undefined;
+				},
+				onRelayCancel: () => { relayCancelHandle.cancel?.(); },
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
 						throw new Error("Relay not available: session claim not yet completed");
@@ -158,6 +166,12 @@ export function createAdoptSessionRuntime(input: {
 					bindingSource: "adopted",
 				});
 
+				// Initialize the relay pane writer now that collabId is available.
+				relayPaneWriter = createRelayPaneWriter({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+				});
+
 				// Update state file: record adopted session metadata + clear recovery state
 				try {
 					(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
@@ -205,6 +219,8 @@ export function createAdoptSessionRuntime(input: {
 					sessionId: resolvedClaim.sessionId,
 					provider,
 					interactiveSession,
+					relayPaneWriter: relayPaneWriter!,
+					relayCancelHandle,
 				});
 			} catch (err) {
 				await stopLoop();

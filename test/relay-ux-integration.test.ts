@@ -107,7 +107,7 @@ describe("relay UX integration", () => {
 		const responses = events.filter((e) => e.eventType === "relay_response");
 		expect(directives).toHaveLength(1);
 		expect(responses).toHaveLength(1);
-		expect(events.indexOf(directives[0])).toBeLessThan(events.indexOf(responses[0]));
+		expect(events.indexOf(directives[0]!)).toBeLessThan(events.indexOf(responses[0]!));
 
 		// 5. Context injection — claude asks to fix findings
 		const injector = createContextInjector({

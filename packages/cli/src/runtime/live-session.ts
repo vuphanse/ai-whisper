@@ -153,7 +153,7 @@ export function createLiveSessionRuntime(input: {
 		sendNow: (message: string) => void,
 	) => Promise<string | null>;
 	onRelayCancel?: () => void;
-	relayPaneWriter?: ReturnType<typeof createRelayPaneWriter>;
+	relayPaneWriter?: ReturnType<typeof createRelayPaneWriter> | undefined;
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
 		isTTY?: boolean;

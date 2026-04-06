@@ -35,10 +35,10 @@ describe("relay pane writer", () => {
 
 		const events = broker.control.pollRelayEvents("collab_1", 0);
 		expect(events).toHaveLength(1);
-		expect(events[0].eventType).toBe("relay_directive");
-		expect(events[0].senderAgent).toBe("claude");
-		expect(events[0].receiverAgent).toBe("codex");
-		expect(events[0].content).toBe("review the implementation");
+		expect(events[0]!.eventType).toBe("relay_directive");
+		expect(events[0]!.senderAgent).toBe("claude");
+		expect(events[0]!.receiverAgent).toBe("codex");
+		expect(events[0]!.content).toBe("review the implementation");
 	});
 
 	it("writes relay response event to broker", () => {
@@ -54,10 +54,10 @@ describe("relay pane writer", () => {
 
 		const events = broker.control.pollRelayEvents("collab_1", 0);
 		expect(events).toHaveLength(1);
-		expect(events[0].eventType).toBe("relay_response");
-		expect(events[0].senderAgent).toBe("codex");
-		expect(events[0].receiverAgent).toBe("claude");
-		expect(events[0].content).toBe("Found 3 issues");
+		expect(events[0]!.eventType).toBe("relay_response");
+		expect(events[0]!.senderAgent).toBe("codex");
+		expect(events[0]!.receiverAgent).toBe("claude");
+		expect(events[0]!.content).toBe("Found 3 issues");
 	});
 
 	it("writes status event to broker", () => {
@@ -68,8 +68,8 @@ describe("relay pane writer", () => {
 
 		const events = broker.control.pollRelayEvents("collab_1", 0);
 		expect(events).toHaveLength(1);
-		expect(events[0].eventType).toBe("status");
-		expect(events[0].content).toBe("Collab started, sessions bound");
+		expect(events[0]!.eventType).toBe("status");
+		expect(events[0]!.content).toBe("Collab started, sessions bound");
 	});
 
 	it("writes cancellation event to broker", () => {
@@ -84,7 +84,7 @@ describe("relay pane writer", () => {
 
 		const events = broker.control.pollRelayEvents("collab_1", 0);
 		expect(events).toHaveLength(1);
-		expect(events[0].eventType).toBe("cancellation");
-		expect(events[0].senderAgent).toBe("codex");
+		expect(events[0]!.eventType).toBe("cancellation");
+		expect(events[0]!.senderAgent).toBe("codex");
 	});
 });

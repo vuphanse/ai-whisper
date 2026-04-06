@@ -31,7 +31,9 @@ export async function runCollabRelayMonitor(input: {
 		stdout: process.stdout,
 	});
 
+	let stoppedBySigint = false;
 	process.on("SIGINT", () => {
+		stoppedBySigint = true;
 		monitor.stop()
 			.then(() => broker.stop())
 			.then(() => { process.exit(0); })
@@ -43,5 +45,7 @@ export async function runCollabRelayMonitor(input: {
 
 	await monitor.start();
 	await monitor.waitUntilStopped();
-	await broker.stop();
+	if (!stoppedBySigint) {
+		await broker.stop();
+	}
 }

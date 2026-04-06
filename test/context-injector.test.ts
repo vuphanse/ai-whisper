@@ -101,7 +101,7 @@ describe("reply consumed tracking", () => {
 			forSessionId: claudeSession,
 		});
 		expect(unconsumed).toHaveLength(1);
-		expect(unconsumed[0].content).toBe("Found 3 issues");
+		expect(unconsumed[0]!.content).toBe("Found 3 issues");
 
 		// Mark as consumed
 		broker.control.markRepliesConsumed({

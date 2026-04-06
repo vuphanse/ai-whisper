@@ -121,7 +121,7 @@ export function createRelayMonitorRuntime(input: {
 
 	function render(events: RelayEventItem[]) {
 		for (let i = 0; i < events.length; i++) {
-			const event = events[i];
+			const event = events[i]!;
 			const isLatest = i === events.length - 1;
 			const line = formatRelayConversationLine({
 				eventType: event.eventType,
@@ -157,7 +157,7 @@ export function createRelayMonitorRuntime(input: {
 					);
 
 					if (events.length > 0) {
-						cursor = events[events.length - 1].id;
+						cursor = events[events.length - 1]!.id;
 						render(events);
 					}
 
