@@ -78,13 +78,22 @@ export function createAttachSessionRuntime(input: {
 			}
 
 			const relayPaneWriter = createRelayPaneWriter({ broker: input.broker, collabId: accepted.collabId });
-			const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
+			let activeRelayWorkItemId: string | null = null;
 			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
 				interactiveSession,
 				stdin: process.stdin,
 				stdout: process.stdout,
 				relayPaneWriter,
-				onRelayCancel: () => { relayCancelHandle.cancel?.(); },
+				onRelayCancel: () => {
+					if (!activeRelayWorkItemId) {
+						return;
+					}
+
+					input.broker.control.requestWorkItemCancellation({
+						workItemId: activeRelayWorkItemId,
+						requestedAt: new Date().toISOString(),
+					});
+				},
 				onRelay: async (directive, sendNow) => {
 					if (directive.target === "pull") {
 						const injector = createContextInjector({ broker: input.broker, collabId: accepted.collabId, sessionId: accepted.sessionId });
@@ -123,26 +132,31 @@ export function createAttachSessionRuntime(input: {
 						now: new Date().toISOString(),
 						contextInjector,
 					});
+					activeRelayWorkItemId = relay.workItem.workItemId;
 
-					sendNow(
-						`${formatRelayAcknowledgement({
-							target: directive.target,
-							createdNewThread: relay.createdNewThread,
-						})}\n`,
-					);
+					try {
+						sendNow(
+							`${formatRelayAcknowledgement({
+								target: directive.target,
+								createdNewThread: relay.createdNewThread,
+							})}\n`,
+						);
 
-					const reply = await waitForReply({
-						broker: input.broker,
-						threadId: relay.thread.threadId,
-						workItemId: relay.workItem.workItemId,
-					});
+						const reply = await waitForReply({
+							broker: input.broker,
+							threadId: relay.thread.threadId,
+							workItemId: relay.workItem.workItemId,
+						});
 
-					relayPaneWriter.relayResponse({
-						senderAgent: directive.target,
-						receiverAgent: accepted.agentType,
-						content: reply.content,
-						now: new Date().toISOString(),
-					});
+						relayPaneWriter.relayResponse({
+							senderAgent: directive.target,
+							receiverAgent: accepted.agentType,
+							content: reply.content,
+							now: new Date().toISOString(),
+						});
+					} finally {
+						activeRelayWorkItemId = null;
+					}
 
 					return null;
 				},
@@ -175,7 +189,6 @@ export function createAttachSessionRuntime(input: {
 					provider,
 					interactiveSession,
 					relayPaneWriter,
-					relayCancelHandle,
 				});
 			} catch (err) {
 				await stopLoop();

@@ -136,7 +136,7 @@ export function createRelayMonitorRuntime(input: {
 	}
 
 	return {
-		async start() {
+		start() {
 			input.broker.control.registerRelayMonitor({
 				collabId: input.collabId,
 				monitorId: input.monitorId,

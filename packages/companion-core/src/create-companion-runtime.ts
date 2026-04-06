@@ -94,6 +94,13 @@ export function createCompanionRuntime(input: {
 
 			const replyNow = new Date().toISOString();
 			const replyId = `reply_${workItem.workItemId}_${replyNow.replace(/[^0-9]/g, "")}`;
+			const existingReply = input.broker.control
+				.listReplies(workItem.threadId)
+				.find((candidate) => candidate.workItemId === workItem.workItemId);
+
+			if (existingReply) {
+				return existingReply;
+			}
 
 			return input.broker.control.postReply({
 				replyId,

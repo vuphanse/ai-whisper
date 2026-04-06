@@ -43,7 +43,7 @@ export async function runCollabRelayMonitor(input: {
 			});
 	});
 
-	await monitor.start();
+	monitor.start();
 	await monitor.waitUntilStopped();
 	if (!stoppedBySigint) {
 		await broker.stop();

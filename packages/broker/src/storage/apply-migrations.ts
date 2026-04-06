@@ -157,6 +157,11 @@ CREATE TABLE IF NOT EXISTS relay_event (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS work_item_cancellation (
+  work_item_id TEXT PRIMARY KEY,
+  requested_at TEXT NOT NULL
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 1, 1)
 ON CONFLICT(id) DO UPDATE SET
@@ -190,6 +195,20 @@ export function applyMigrations(db: Database.Database): void {
 	if (!replyColumns.some((column) => column.name === "consumed_by_json")) {
 		db.exec(
 			"ALTER TABLE reply ADD COLUMN consumed_by_json TEXT NOT NULL DEFAULT '[]'",
+		);
+	}
+
+	const tables = db
+		.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_item_cancellation'",
+		)
+		.all() as Array<{ name: string }>;
+	if (tables.length === 0) {
+		db.exec(
+			`CREATE TABLE work_item_cancellation (
+				work_item_id TEXT PRIMARY KEY,
+				requested_at TEXT NOT NULL
+			)`,
 		);
 	}
 }

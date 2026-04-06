@@ -19,7 +19,6 @@ export function runCompanionAgentLoop(input: {
 	provider: CompanionProvider;
 	interactiveSession: InteractiveSessionController;
 	relayPaneWriter: ReturnType<typeof createRelayPaneWriter>;
-	relayCancelHandle?: { cancel: (() => void) | null };
 	pollIntervalMs?: number;
 }): Promise<() => Promise<void>> {
 	input.provider.attachInteractiveSession?.(input.interactiveSession);
@@ -36,12 +35,6 @@ export function runCompanionAgentLoop(input: {
 		sessionId: input.sessionId,
 	});
 	const executor = async (request: Parameters<typeof baseExecutor>[0]) => {
-		let cancelled = false;
-
-		if (input.relayCancelHandle) {
-			input.relayCancelHandle.cancel = () => { cancelled = true; };
-		}
-
 		input.relayPaneWriter.status({
 			content: `Received broker work for ${sessionRole}.`,
 			now: new Date().toISOString(),
@@ -49,11 +42,7 @@ export function runCompanionAgentLoop(input: {
 
 		const reply = await baseExecutor(request);
 
-		if (input.relayCancelHandle) {
-			input.relayCancelHandle.cancel = null;
-		}
-
-		if (cancelled) {
+		if (input.broker.control.isWorkItemCancellationRequested(request.workItemId)) {
 			input.relayPaneWriter.cancellation({
 				agent: sessionRole,
 				content: "relay work cancelled by user",

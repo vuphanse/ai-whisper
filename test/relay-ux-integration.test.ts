@@ -23,7 +23,7 @@ describe("relay UX integration", () => {
 		}
 	});
 
-	it("full flow: directive → busy → response → context injection", async () => {
+	it("full flow: directive → busy → response → context injection", () => {
 		dir = mkdtempSync(join(tmpdir(), "ai-whisper-relay-ux-"));
 		broker = createBrokerRuntime({
 			sqlitePath: join(dir, "broker.sqlite"),

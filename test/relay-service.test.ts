@@ -243,4 +243,66 @@ describe("relay service", () => {
 			}),
 		).toThrow(/active binding/i);
 	});
+
+	it("cancels queued relay work before delivery with a failure reply", () => {
+		const broker = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4311 });
+
+		broker.control.startCollab({
+			collabId: "collab_cancel_queued",
+			workspaceRoot: "/tmp/workspace",
+			displayName: "cancel queued",
+			now: "2026-04-06T03:00:00.000Z",
+		});
+		broker.control.registerSession({
+			sessionId: "session_codex_cancel_queued",
+			collabId: "collab_cancel_queued",
+			agentType: "codex",
+			capabilities: { supportsDirectPackets: true, supportsNormalization: false, supportsRelayInterception: true, supportsLocalBuffering: true, supportsLaunchHooks: false, extensions: {} },
+			now: "2026-04-06T03:00:00.000Z",
+		});
+		broker.control.registerSession({
+			sessionId: "session_claude_cancel_queued",
+			collabId: "collab_cancel_queued",
+			agentType: "claude",
+			capabilities: { supportsDirectPackets: true, supportsNormalization: false, supportsRelayInterception: true, supportsLocalBuffering: true, supportsLaunchHooks: false, extensions: {} },
+			now: "2026-04-06T03:00:00.000Z",
+		});
+		broker.control.setSessionBinding({
+			collabId: "collab_cancel_queued",
+			agentType: "codex",
+			sessionId: "session_codex_cancel_queued",
+			bindingSource: "launched",
+			now: "2026-04-06T03:00:00.000Z",
+		});
+		broker.control.setSessionBinding({
+			collabId: "collab_cancel_queued",
+			agentType: "claude",
+			sessionId: "session_claude_cancel_queued",
+			bindingSource: "launched",
+			now: "2026-04-06T03:00:00.000Z",
+		});
+
+		const relay = enqueueRelayWork({
+			broker,
+			collabId: "collab_cancel_queued",
+			originSessionId: "session_codex_cancel_queued",
+			target: "claude",
+			instruction: "please answer later",
+			artifactPaths: [],
+			forceNewThread: false,
+			now: "2026-04-06T03:00:01.000Z",
+		});
+
+		broker.control.requestWorkItemCancellation({
+			workItemId: relay.workItem.workItemId,
+			requestedAt: "2026-04-06T03:00:02.000Z",
+		});
+
+		expect(broker.control.getWorkItem(relay.workItem.workItemId)?.deliveryState).toBe("failed");
+		expect(
+			broker.control
+				.listReplies(relay.thread.threadId)
+				.find((reply) => reply.workItemId === relay.workItem.workItemId)?.content,
+		).toBe("Relay work cancelled by user");
+	});
 });

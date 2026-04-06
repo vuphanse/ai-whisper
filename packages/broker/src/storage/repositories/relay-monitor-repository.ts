@@ -15,7 +15,7 @@ export function updateRelayMonitorHeartbeat(
 	input: { collabId: string; monitorId: string; now: string },
 ): number {
 	const result = db.prepare(
-		`UPDATE relay_monitor SET last_heartbeat_at = ? WHERE collab_id = ? AND monitor_id = ?`,
+		"UPDATE relay_monitor SET last_heartbeat_at = ? WHERE collab_id = ? AND monitor_id = ?",
 	).run(input.now, input.collabId, input.monitorId);
 	return result.changes;
 }
@@ -33,7 +33,7 @@ export function isRelayMonitorConnected(
 
 	const row = db
 		.prepare(
-			`SELECT 1 FROM relay_monitor WHERE collab_id = ? AND last_heartbeat_at > ? LIMIT 1`,
+			"SELECT 1 FROM relay_monitor WHERE collab_id = ? AND last_heartbeat_at > ? LIMIT 1",
 		)
 		.get(collabId, cutoff) as { 1: number } | undefined;
 

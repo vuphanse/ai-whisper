@@ -71,7 +71,10 @@ export function createContextInjector(input: {
 				consumedBySessionId: input.sessionId,
 			});
 
-			const existingState = String(params.basePacket.currentState ?? "");
+			const existingState =
+				typeof params.basePacket.currentState === "string"
+					? params.basePacket.currentState
+					: "";
 			return {
 				...params.basePacket,
 				currentState: existingState

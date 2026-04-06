@@ -156,4 +156,158 @@ describe("companion agent loop", () => {
 
 		await stop();
 	});
+
+	it("turns a broker cancellation request into a failure reply after delivery", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-phase6-loop-cancel-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const broker = createBrokerRuntime({
+			sqlitePath,
+			host: "127.0.0.1",
+			port: 4311,
+		});
+
+		broker.control.startCollab({
+			collabId: "collab_phase6_cancel",
+			workspaceRoot,
+			displayName: "phase6 cancel",
+			now: "2026-04-06T02:00:00.000Z",
+		});
+		const codexSessionId = createSessionId("session_codex_phase6_cancel");
+		const claudeSessionId = createSessionId("session_claude_phase6_cancel");
+		broker.control.registerSession({
+			sessionId: codexSessionId,
+			collabId: "collab_phase6_cancel",
+			agentType: "codex",
+			capabilities: { supportsDirectPackets: true },
+			now: "2026-04-06T02:00:00.000Z",
+		});
+		broker.control.registerSession({
+			sessionId: claudeSessionId,
+			collabId: "collab_phase6_cancel",
+			agentType: "claude",
+			capabilities: { supportsDirectPackets: true },
+			now: "2026-04-06T02:00:00.000Z",
+		});
+		broker.control.setSessionBinding({
+			collabId: "collab_phase6_cancel",
+			agentType: "codex",
+			sessionId: codexSessionId,
+			bindingSource: "launched",
+			now: "2026-04-06T02:00:00.000Z",
+		});
+
+		const relayEvents: Array<{ type: string; [key: string]: unknown }> = [];
+		const relayPaneWriter = {
+			relayDirective(event: Record<string, unknown>) { relayEvents.push({ type: "directive", ...event }); },
+			relayResponse(event: Record<string, unknown>) { relayEvents.push({ type: "response", ...event }); },
+			status(event: Record<string, unknown>) { relayEvents.push({ type: "status", ...event }); },
+			cancellation(event: Record<string, unknown>) { relayEvents.push({ type: "cancellation", ...event }); },
+		};
+		const interactiveSession: InteractiveSessionController = {
+			start: () => Promise.resolve(),
+			stop: () => Promise.resolve(),
+			writeUserInput() {},
+			sendLocalMessage() {},
+			onExit() {},
+		};
+
+		let resolveWork!: () => void;
+		let workStarted = false;
+		const provider: CompanionProvider = {
+			getIdentity() {
+				return {
+					providerId: "test-provider",
+					toolFamily: "codex",
+					providerVersion: "1.0.0",
+				};
+			},
+			getCapabilities() {
+				return {
+					supportsDirectPackets: true,
+					supportsNormalization: true,
+					supportsRelayInterception: true,
+					supportsLocalBuffering: false,
+					supportsLaunchHooks: true,
+					extensions: {},
+				};
+			},
+			getHealthState() {
+				return "healthy";
+			},
+			handleWork() {
+				workStarted = true;
+				return new Promise((resolve) => {
+					resolveWork = () => {
+						resolve({
+							kind: "answer" as const,
+							content: "handled after cancel",
+							transitionIntent: "completed" as const,
+						});
+					};
+				});
+			},
+		};
+
+		const stop = await runCompanionAgentLoop({
+			broker,
+			collabId: "collab_phase6_cancel",
+			sessionId: codexSessionId,
+			provider,
+			interactiveSession,
+			relayPaneWriter,
+			pollIntervalMs: 5,
+		});
+
+		const thread = broker.control.createThread({
+			threadId: "thread_phase6_cancel",
+			collabId: "collab_phase6_cancel",
+			title: "Thread",
+			createdBySessionId: claudeSessionId,
+			now: "2026-04-06T02:00:01.000Z",
+		});
+		const workItem = broker.control.enqueueWorkItem({
+			workItemId: "work_phase6_cancel",
+			threadId: thread.threadId,
+			collabId: "collab_phase6_cancel",
+			senderSessionId: claudeSessionId,
+			targetSessionId: codexSessionId,
+			requestedAction: "answer_question",
+			instruction: "status?",
+			contextPacket: {
+				kind: "full",
+				goal: "status?",
+				currentState: "New thread",
+				decisionsMade: [],
+				assumptions: [],
+				relevantArtifacts: [],
+				openQuestions: [],
+				successCriteria: [],
+			},
+			artifactManifestIds: [],
+			now: "2026-04-06T02:00:01.000Z",
+		});
+
+		for (let attempts = 0; attempts < 20 && !workStarted; attempts += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		expect(workStarted).toBe(true);
+
+		broker.control.requestWorkItemCancellation({
+			workItemId: workItem.workItemId,
+			requestedAt: "2026-04-06T02:00:02.000Z",
+		});
+		resolveWork();
+
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		const replies = broker.control
+			.listReplies(thread.threadId)
+			.filter((reply) => reply.workItemId === workItem.workItemId);
+		expect(replies).toHaveLength(1);
+		expect(replies[0]?.kind).toBe("failure");
+		expect(replies[0]?.content).toBe("Relay work cancelled by user");
+		expect(relayEvents.some((e) => e.type === "cancellation")).toBe(true);
+
+		await stop();
+	});
 });

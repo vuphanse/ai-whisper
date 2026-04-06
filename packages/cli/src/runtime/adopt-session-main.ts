@@ -51,7 +51,7 @@ export function createAdoptSessionRuntime(input: {
 			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
 			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
 			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
-			const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
+			let activeRelayWorkItemId: string | null = null;
 
 			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
 				interactiveSession,
@@ -60,7 +60,16 @@ export function createAdoptSessionRuntime(input: {
 				get relayPaneWriter() {
 					return relayPaneWriter ?? undefined;
 				},
-				onRelayCancel: () => { relayCancelHandle.cancel?.(); },
+				onRelayCancel: () => {
+					if (!activeRelayWorkItemId) {
+						return;
+					}
+
+					input.broker.control.requestWorkItemCancellation({
+						workItemId: activeRelayWorkItemId,
+						requestedAt: new Date().toISOString(),
+					});
+				},
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
 						throw new Error("Relay not available: session claim not yet completed");
@@ -103,26 +112,31 @@ export function createAdoptSessionRuntime(input: {
 						now: new Date().toISOString(),
 						contextInjector,
 					});
+					activeRelayWorkItemId = relay.workItem.workItemId;
 
-					sendNow(
-						`${formatRelayAcknowledgement({
-							target: directive.target,
-							createdNewThread: relay.createdNewThread,
-						})}\n`,
-					);
+					try {
+						sendNow(
+							`${formatRelayAcknowledgement({
+								target: directive.target,
+								createdNewThread: relay.createdNewThread,
+							})}\n`,
+						);
 
-					const reply = await waitForReply({
-						broker: input.broker,
-						threadId: relay.thread.threadId,
-						workItemId: relay.workItem.workItemId,
-					});
+						const reply = await waitForReply({
+							broker: input.broker,
+							threadId: relay.thread.threadId,
+							workItemId: relay.workItem.workItemId,
+						});
 
-					relayPaneWriter!.relayResponse({
-						senderAgent: directive.target,
-						receiverAgent: resolvedClaim.agentType,
-						content: reply.content,
-						now: new Date().toISOString(),
-					});
+						relayPaneWriter!.relayResponse({
+							senderAgent: directive.target,
+							receiverAgent: resolvedClaim.agentType,
+							content: reply.content,
+							now: new Date().toISOString(),
+						});
+					} finally {
+						activeRelayWorkItemId = null;
+					}
 
 					return null;
 				},
@@ -229,8 +243,7 @@ export function createAdoptSessionRuntime(input: {
 					sessionId: resolvedClaim.sessionId,
 					provider,
 					interactiveSession,
-					relayPaneWriter: relayPaneWriter!,
-					relayCancelHandle,
+					relayPaneWriter,
 				});
 			} catch (err) {
 				await stopLoop();

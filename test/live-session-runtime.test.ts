@@ -681,15 +681,15 @@ describe("live session runtime", () => {
 			interactiveSession,
 			stdin: createMockStdin(),
 			stdout: process.stdout,
-			onRelay: async (directive, sendNow) => {
+			onRelay: (directive, sendNow) => {
 				if (directive.target === "pull") {
 					interactiveSession.writeUserInput(
 						"[Context from recent relay exchange]\ncodex reviewed:\n\"Found issues\"\n\n",
 					);
 					sendNow("\u001b[2m↳ relay context attached (codex review: 3 findings)\u001b[0m\n");
-					return null;
+					return Promise.resolve(null);
 				}
-				return null;
+				return Promise.resolve(null);
 			},
 		});
 

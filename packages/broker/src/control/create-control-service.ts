@@ -74,6 +74,10 @@ import {
 	markWorkItemsRecoveryBlockedForCollab,
 } from "../storage/repositories/work-item-repository.js";
 import {
+	getWorkItemCancellationRequestedAt,
+	insertWorkItemCancellation,
+} from "../storage/repositories/work-item-cancellation-repository.js";
+import {
 	insertRelayMonitor,
 	updateRelayMonitorHeartbeat,
 	isRelayMonitorConnected as queryIsRelayMonitorConnected,
@@ -318,6 +322,87 @@ export function createControlService(db: Database.Database) {
 				timestamp: input.deliveredAt,
 				payload: { status: "delivered" },
 			});
+		},
+		requestWorkItemCancellation(input: {
+			workItemId: string;
+			requestedAt: string;
+		}) {
+			const workItem = getWorkItem(db, input.workItemId);
+
+			if (!workItem) {
+				throw new Error(`Unknown work item: ${input.workItemId}`);
+			}
+
+			if (
+				workItem.deliveryState === "completed" ||
+				workItem.deliveryState === "failed" ||
+				workItem.deliveryState === "recovery_blocked"
+			) {
+				return;
+			}
+
+			insertWorkItemCancellation(db, input);
+
+			if (workItem.deliveryState !== "queued") {
+				return;
+			}
+
+			const thread = getThread(db, workItem.threadId);
+			if (!thread) {
+				throw new Error(`Unknown thread: ${workItem.threadId}`);
+			}
+
+			const collab = getCollab(db, workItem.collabId);
+			if (!collab) {
+				throw new Error(`Unknown collab: ${workItem.collabId}`);
+			}
+
+			const existingReply = listRepliesForThread(db, workItem.threadId).find(
+				(reply) => reply.workItemId === workItem.workItemId,
+			);
+			if (existingReply) {
+				return;
+			}
+
+			const reply = replySchema.parse({
+				version: 1,
+				replyId: `reply_cancel_${workItem.workItemId}_${normalizeTimestampForEventId(input.requestedAt)}`,
+				threadId: workItem.threadId,
+				collabId: workItem.collabId,
+				workItemId: workItem.workItemId,
+				sourceSessionId: workItem.targetSessionId,
+				turnIndex: thread.currentTurnIndex,
+				kind: "failure",
+				content: "Relay work cancelled by user",
+				transitionIntent: "failed",
+				artifactManifestIds: [],
+				createdAt: input.requestedAt,
+			});
+
+			insertReply(db, reply);
+			markWorkItemFailed(db, input.workItemId, input.requestedAt);
+			updateThreadState(db, workItem.threadId, "failed", input.requestedAt);
+			appendEvent(db, {
+				version: brokerSchemaVersion,
+				eventId: buildEventId("thread_transition", reply.replyId, input.requestedAt),
+				eventType: "thread.transitioned",
+				collabId: workItem.collabId,
+				workspaceRoot: collab.workspaceRoot,
+				timestamp: input.requestedAt,
+				payload: { status: "failed" },
+			});
+			appendEvent(db, {
+				version: brokerSchemaVersion,
+				eventId: buildEventId("reply_posted", reply.replyId, input.requestedAt),
+				eventType: "reply.posted",
+				collabId: workItem.collabId,
+				workspaceRoot: collab.workspaceRoot,
+				timestamp: input.requestedAt,
+				payload: { status: "failure" },
+			});
+		},
+		isWorkItemCancellationRequested(workItemId: string) {
+			return getWorkItemCancellationRequestedAt(db, workItemId) !== null;
 		},
 		postReply(input: {
 			replyId: string;

@@ -48,13 +48,22 @@ async function main(): Promise<void> {
 		stdout: process.stdout,
 	});
 	const relayPaneWriter = createRelayPaneWriter({ broker, collabId });
-	const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
+	let activeRelayWorkItemId: string | null = null;
 	const liveSession = createLiveSessionRuntime({
 		interactiveSession,
 		stdin: process.stdin,
 		stdout: process.stdout,
 		relayPaneWriter,
-		onRelayCancel: () => { relayCancelHandle.cancel?.(); },
+		onRelayCancel: () => {
+			if (!activeRelayWorkItemId) {
+				return;
+			}
+
+			broker.control.requestWorkItemCancellation({
+				workItemId: activeRelayWorkItemId,
+				requestedAt: new Date().toISOString(),
+			});
+		},
 		onRelay: async (directive, sendNow) => {
 			if (directive.target === "pull") {
 				const injector = createContextInjector({ broker, collabId, sessionId });
@@ -93,26 +102,31 @@ async function main(): Promise<void> {
 				now: new Date().toISOString(),
 				contextInjector,
 			});
+			activeRelayWorkItemId = relay.workItem.workItemId;
 
-			sendNow(
-				formatRelayAcknowledgement({
-					target: directive.target,
-					createdNewThread: relay.createdNewThread,
-				}),
-			);
+			try {
+				sendNow(
+					formatRelayAcknowledgement({
+						target: directive.target,
+						createdNewThread: relay.createdNewThread,
+					}),
+				);
 
-			const reply = await waitForReply({
-				broker,
-				threadId: relay.thread.threadId,
-				workItemId: relay.workItem.workItemId,
-			});
+				const reply = await waitForReply({
+					broker,
+					threadId: relay.thread.threadId,
+					workItemId: relay.workItem.workItemId,
+				});
 
-			relayPaneWriter.relayResponse({
-				senderAgent: directive.target,
-				receiverAgent: agentArg,
-				content: reply.content,
-				now: new Date().toISOString(),
-			});
+				relayPaneWriter.relayResponse({
+					senderAgent: directive.target,
+					receiverAgent: agentArg,
+					content: reply.content,
+					now: new Date().toISOString(),
+				});
+			} finally {
+				activeRelayWorkItemId = null;
+			}
 
 			return null;
 		},
@@ -145,7 +159,6 @@ async function main(): Promise<void> {
 			provider,
 			interactiveSession,
 			relayPaneWriter,
-			relayCancelHandle,
 		});
 		await exitRequested;
 	} finally {

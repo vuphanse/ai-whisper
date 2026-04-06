@@ -157,7 +157,7 @@ export function markWorkItemDelivered(
 	deliveredAt: string,
 ): void {
 	db.prepare(
-		"UPDATE work_item SET delivery_state = 'delivered', delivered_at = ? WHERE work_item_id = ?",
+		"UPDATE work_item SET delivery_state = 'delivered', delivered_at = ? WHERE work_item_id = ? AND delivery_state = 'queued'",
 	).run(deliveredAt, workItemId);
 }
 
