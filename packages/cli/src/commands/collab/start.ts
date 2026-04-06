@@ -87,7 +87,7 @@ export async function runCollabStart(input: {
 		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
 
 		writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-			version: 4,
+			version: 5,
 			collabId,
 			workspaceRoot: input.workspaceRoot,
 			broker: {
@@ -105,6 +105,7 @@ export async function runCollabStart(input: {
 				recoveredAt: null,
 			},
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 		return {
 			collabId,
@@ -174,7 +175,7 @@ export async function runCollabStart(input: {
 	});
 
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-		version: 4,
+		version: 5,
 		collabId,
 		workspaceRoot: input.workspaceRoot,
 		broker: {
@@ -214,6 +215,7 @@ export async function runCollabStart(input: {
 			recoveredAt: null,
 		},
 		adoptedSessions: {},
+		mountedSessions: {},
 	});
 
 	return {

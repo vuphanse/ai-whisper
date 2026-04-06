@@ -52,7 +52,7 @@ describe("collab inspect snapshot", () => {
 		await broker.stop();
 
 		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 4,
+			version: 5,
 			collabId: "collab_inspect",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4450, pid: 99123 },
@@ -61,6 +61,7 @@ describe("collab inspect snapshot", () => {
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 
 		const output = await runCollabInspect({
@@ -162,7 +163,7 @@ describe("collab inspect watch mode", () => {
 		await broker.stop();
 
 		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 4,
+			version: 5,
 			collabId: "collab_inspect_watch",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4451, pid: 99123 },
@@ -171,6 +172,7 @@ describe("collab inspect watch mode", () => {
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 
 		const write = vi.fn();
@@ -204,7 +206,7 @@ describe("inspect broker-down recovery latch", () => {
 		const statePath = join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json");
 
 		writeCliCollabState(statePath, {
-			version: 4,
+			version: 5,
 			collabId: "collab_inspect_latch",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4460, pid: 99123 },
@@ -213,6 +215,7 @@ describe("inspect broker-down recovery latch", () => {
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 
 		await expect(
@@ -298,7 +301,7 @@ describe("inspect flagged items outside display window", () => {
 		});
 
 		const state: CliCollabState = {
-			version: 4,
+			version: 5,
 			collabId,
 			workspaceRoot: "/tmp",
 			broker: {
@@ -316,6 +319,7 @@ describe("inspect flagged items outside display window", () => {
 				recoveredAt: null,
 			},
 			adoptedSessions: {},
+			mountedSessions: {},
 		};
 
 		const snapshot = buildInspectSnapshot({
@@ -398,7 +402,7 @@ describe("adopted operator visibility", () => {
 		const snapshot = buildInspectSnapshot({
 			broker: runtime,
 			state: {
-				version: 4,
+				version: 5,
 				collabId: "collab_adopt_snap",
 				workspaceRoot: "/tmp",
 				broker: { sqlitePath: ":memory:", host: "127.0.0.1", port: 4470, pid: 1 },
@@ -407,6 +411,7 @@ describe("adopted operator visibility", () => {
 				startedAt: now,
 				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
 				adoptedSessions: {},
+				mountedSessions: {},
 			},
 			now,
 		});

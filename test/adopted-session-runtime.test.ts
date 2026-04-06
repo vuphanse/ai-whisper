@@ -244,7 +244,7 @@ describe("adopt session runtime — recovery state clearing", () => {
 		// Write state file with recovered state
 		const statePath = join(dir, ".ai-whisper", "runtime", "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 4,
+			version: 5,
 			collabId,
 			workspaceRoot: dir,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4480, pid: 99123 },
@@ -253,6 +253,7 @@ describe("adopt session runtime — recovery state clearing", () => {
 			startedAt: now,
 			recovery: { state: "recovered", idleAfterRecovery: true, recoveredAt: now },
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 
 		// Get claim ID

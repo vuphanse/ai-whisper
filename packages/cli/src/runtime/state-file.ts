@@ -103,7 +103,13 @@ const adoptedSessionStateSchema = z.object({
 	daemonPid: z.number().int().positive(),
 });
 
-export const cliCollabStateSchema = cliCollabStateV3Schema.extend({
+const mountedSessionStateSchema = z.object({
+	agentType: z.enum(["codex", "claude"]),
+	ttyPath: z.string(),
+	sessionPid: z.number().int().positive(),
+});
+
+const cliCollabStateV4Schema = cliCollabStateV3Schema.extend({
 	version: z.literal(4),
 	adoptedSessions: z
 		.object({
@@ -113,18 +119,44 @@ export const cliCollabStateSchema = cliCollabStateV3Schema.extend({
 		.default({}),
 });
 
+export const cliCollabStateSchema = cliCollabStateV4Schema.extend({
+	version: z.literal(5),
+	adoptedSessions: z
+		.object({
+			codex: adoptedSessionStateSchema.optional(),
+			claude: adoptedSessionStateSchema.optional(),
+		})
+		.default({}),
+	mountedSessions: z
+		.object({
+			codex: mountedSessionStateSchema.optional(),
+			claude: mountedSessionStateSchema.optional(),
+		})
+		.default({}),
+});
+
 export type CliCollabState = z.infer<typeof cliCollabStateSchema>;
 
 function normalizeCliCollabState(raw: unknown): CliCollabState {
-	const v4 = cliCollabStateSchema.safeParse(raw);
-	if (v4.success) return v4.data;
+	const v5 = cliCollabStateSchema.safeParse(raw);
+	if (v5.success) return v5.data;
+
+	const v4 = cliCollabStateV4Schema.safeParse(raw);
+	if (v4.success) {
+		return {
+			...v4.data,
+			version: 5,
+			mountedSessions: {},
+		};
+	}
 
 	const v3 = cliCollabStateV3Schema.safeParse(raw);
 	if (v3.success) {
 		return {
 			...v3.data,
-			version: 4,
+			version: 5,
 			adoptedSessions: {},
+			mountedSessions: {},
 		};
 	}
 
@@ -132,19 +164,20 @@ function normalizeCliCollabState(raw: unknown): CliCollabState {
 	if (v2.success) {
 		return {
 			...v2.data,
-			version: 4,
+			version: 5,
 			recovery: {
 				state: "normal",
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
 			adoptedSessions: {},
+			mountedSessions: {},
 		};
 	}
 
 	const v1 = cliCollabStateV1Schema.parse(raw);
 	return {
-		version: 4,
+		version: 5,
 		collabId: v1.collabId,
 		workspaceRoot: v1.workspaceRoot,
 		broker: v1.broker,
@@ -163,6 +196,7 @@ function normalizeCliCollabState(raw: unknown): CliCollabState {
 			recoveredAt: null,
 		},
 		adoptedSessions: {},
+		mountedSessions: {},
 	};
 }
 

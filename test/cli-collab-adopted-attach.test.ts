@@ -63,7 +63,7 @@ describe("cli state adopted sessions", () => {
 		const path = join(dir, "current-collab.json");
 
 		writeCliCollabState(path, {
-			version: 4,
+			version: 5,
 			collabId: "collab_adopted",
 			workspaceRoot: dir,
 			broker: {
@@ -87,6 +87,7 @@ describe("cli state adopted sessions", () => {
 					agentType: "codex",
 				},
 			},
+			mountedSessions: {},
 		});
 
 		const state = readCliCollabState(path);

@@ -115,7 +115,7 @@ describe("attach session runtime", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 4,
+			version: 5,
 			collabId,
 			workspaceRoot: dir,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4420, pid: 99123 },
@@ -124,6 +124,7 @@ describe("attach session runtime", () => {
 			startedAt: now,
 			recovery: { state: "recovered", idleAfterRecovery: true, recoveredAt: now },
 			adoptedSessions: {},
+			mountedSessions: {},
 		});
 
 		// Get the claim ID that was issued
