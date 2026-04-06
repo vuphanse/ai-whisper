@@ -66,12 +66,6 @@ export function runCompanionAgentLoop(input: {
 			};
 		}
 
-		input.relayPaneWriter.relayResponse({
-			senderAgent: sessionRole,
-			receiverAgent: sessionRole === "codex" ? "claude" : "codex",
-			content: reply.content,
-			now: new Date().toISOString(),
-		});
 		return reply;
 	};
 

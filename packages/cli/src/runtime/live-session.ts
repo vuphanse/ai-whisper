@@ -238,13 +238,6 @@ export function createLiveSessionRuntime(input: {
 					input.onRelayCancel();
 				}
 				busyIndicator.hide();
-				if (input.relayPaneWriter) {
-					input.relayPaneWriter.cancellation({
-						agent: "user",
-						content: "relay work cancelled by user",
-						now: new Date().toISOString(),
-					});
-				}
 			}
 			return;
 		}

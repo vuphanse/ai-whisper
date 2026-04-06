@@ -152,7 +152,7 @@ describe("companion agent loop", () => {
 				.some((reply) => reply.workItemId === workItem.workItemId),
 		).toBe(true);
 		expect(relayEvents.some((e) => e.type === "status" && String(e.content).includes("Received broker work"))).toBe(true);
-		expect(relayEvents.some((e) => e.type === "response" && String(e.content).includes("handled status?"))).toBe(true);
+		// relay_response is emitted by the origin side (waitForReply caller), not the loop
 
 		await stop();
 	});

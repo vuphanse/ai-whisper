@@ -10,7 +10,6 @@ import {
 import {
 	enqueueRelayWork,
 	formatRelayAcknowledgement,
-	formatRelayReplySummary,
 } from "../runtime/relay-service.js";
 import { createContextInjector } from "../runtime/context-injector.js";
 import { waitForReply } from "../runtime/reply-wait.js";
@@ -105,6 +104,14 @@ export function createAttachSessionRuntime(input: {
 					}
 
 					const contextInjector = createContextInjector({ broker: input.broker, collabId: accepted.collabId, sessionId: accepted.sessionId });
+
+					relayPaneWriter.relayDirective({
+						senderAgent: accepted.agentType,
+						receiverAgent: directive.target,
+						instruction: directive.instruction,
+						now: new Date().toISOString(),
+					});
+
 					const relay = enqueueRelayWork({
 						broker: input.broker,
 						collabId: accepted.collabId,
@@ -130,11 +137,14 @@ export function createAttachSessionRuntime(input: {
 						workItemId: relay.workItem.workItemId,
 					});
 
-					return `${formatRelayReplySummary({
-						target: directive.target,
-						replyKind: reply.kind,
+					relayPaneWriter.relayResponse({
+						senderAgent: directive.target,
+						receiverAgent: accepted.agentType,
 						content: reply.content,
-					})}\n`;
+						now: new Date().toISOString(),
+					});
+
+					return null;
 				},
 			});
 
