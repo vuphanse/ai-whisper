@@ -23,7 +23,7 @@ describe("relay monitor repository", () => {
 			now: "2026-04-06T00:00:00.000Z",
 		});
 
-		expect(broker.control.isRelayMonitorConnected("collab_1")).toBe(false);
+		expect(broker.control.isRelayMonitorConnected("collab_1", "2026-04-06T00:00:00.000Z")).toBe(false);
 
 		broker.control.registerRelayMonitor({
 			collabId: "collab_1",
@@ -31,7 +31,7 @@ describe("relay monitor repository", () => {
 			now: "2026-04-06T00:00:00.000Z",
 		});
 
-		expect(broker.control.isRelayMonitorConnected("collab_1")).toBe(true);
+		expect(broker.control.isRelayMonitorConnected("collab_1", "2026-04-06T00:00:05.000Z")).toBe(true);
 	});
 
 	it("detects stale relay monitor after heartbeat timeout", () => {

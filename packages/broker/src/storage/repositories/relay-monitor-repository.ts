@@ -26,15 +26,9 @@ export function isRelayMonitorConnected(
 	collabId: string,
 	now?: string,
 ): boolean {
-	if (now === undefined) {
-		// No reference time — check existence only (monitor is connected if any row exists)
-		const row = db
-			.prepare(`SELECT 1 FROM relay_monitor WHERE collab_id = ? LIMIT 1`)
-			.get(collabId) as { 1: number } | undefined;
-		return row !== undefined;
-	}
-
-	const cutoff = new Date(Date.parse(now) - HEARTBEAT_TIMEOUT_MS).toISOString();
+	const cutoff = new Date(
+		(now ? Date.parse(now) : Date.now()) - HEARTBEAT_TIMEOUT_MS,
+	).toISOString();
 
 	const row = db
 		.prepare(
