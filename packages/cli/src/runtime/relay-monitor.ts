@@ -7,8 +7,12 @@ const ORANGE = "\u001b[38;5;215m";
 const BLUE = "\u001b[38;5;75m";
 const GREEN = "\u001b[38;5;114m";
 const RED = "\u001b[38;5;203m";
+const GRAY = "\u001b[38;5;244m";
+const SAVE_CURSOR = "\u001b7";
+const RESTORE_CURSOR = "\u001b8";
+const CLEAR_LINE = "\r\u001b[2K";
 
-interface RelayEventItem {
+export interface RelayEventItem {
 	id: number;
 	eventType: string;
 	senderAgent: string | null;
@@ -42,7 +46,7 @@ export function formatRelayConversationLine(input: {
 	const latestBadge = input.isLatest ? ` ${ORANGE}${BOLD}LATEST${RESET}` : "";
 
 	if (input.eventType === "status") {
-		return `${DIM}${time}  ${input.content}${RESET}`;
+		return `${GRAY}${DIM}${time}  ${input.content}${RESET}`;
 	}
 
 	if (input.eventType === "cancellation") {
@@ -59,6 +63,54 @@ export function formatRelayConversationLine(input: {
 		.join("\n");
 
 	return `${header}\n${bodyLines}`;
+}
+
+function countRenderedLines(text: string): number {
+	return text.split("\n").length;
+}
+
+export function formatLatestBadgeClearSequence(event: RelayEventItem): string {
+	const rendered = formatRelayConversationLine({
+		eventType: event.eventType,
+		senderAgent: event.senderAgent,
+		receiverAgent: event.receiverAgent,
+		content: event.content,
+		createdAt: event.createdAt,
+		isLatest: false,
+	});
+	const header = rendered.split("\n")[0] ?? "";
+	const lines = countRenderedLines(rendered);
+	return `${SAVE_CURSOR}\u001b[${lines}A${CLEAR_LINE}${header}${RESTORE_CURSOR}`;
+}
+
+export function renderRelayConversationBatch(input: {
+	previousLatestEvent: RelayEventItem | null;
+	events: RelayEventItem[];
+}): string {
+	let output = "";
+
+	if (input.previousLatestEvent && input.events.length > 0) {
+		output += formatLatestBadgeClearSequence(input.previousLatestEvent);
+	}
+
+	const renderedEvents: string[] = [];
+
+	for (let i = 0; i < input.events.length; i++) {
+		const event = input.events[i]!;
+		const isLatest = i === input.events.length - 1;
+		renderedEvents.push(formatRelayConversationLine({
+			eventType: event.eventType,
+			senderAgent: event.senderAgent,
+			receiverAgent: event.receiverAgent,
+			content: event.content,
+			createdAt: event.createdAt,
+			isLatest,
+		}));
+	}
+
+	output += `${renderedEvents.join("\n")}\n`;
+
+	return output;
 }
 
 export function formatStatusPanel(input: {
@@ -110,6 +162,7 @@ export function createRelayMonitorRuntime(input: {
 }) {
 	let cursor = 0;
 	let stopping = false;
+	let previousLatestEvent: RelayEventItem | null = null;
 	let loopResolve!: () => void;
 	const loopDone = new Promise<void>((r) => {
 		loopResolve = r;
@@ -120,19 +173,17 @@ export function createRelayMonitorRuntime(input: {
 	}
 
 	function render(events: RelayEventItem[]) {
-		for (let i = 0; i < events.length; i++) {
-			const event = events[i]!;
-			const isLatest = i === events.length - 1;
-			const line = formatRelayConversationLine({
-				eventType: event.eventType,
-				senderAgent: event.senderAgent,
-				receiverAgent: event.receiverAgent,
-				content: event.content,
-				createdAt: event.createdAt,
-				isLatest,
-			});
-			input.stdout.write(`${line}\n\n`);
+		if (events.length === 0) {
+			return;
 		}
+
+		input.stdout.write(
+			renderRelayConversationBatch({
+				previousLatestEvent,
+				events,
+			}),
+		);
+		previousLatestEvent = events[events.length - 1] ?? previousLatestEvent;
 	}
 
 	return {
