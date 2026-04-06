@@ -62,6 +62,27 @@ describe("busy indicator", () => {
 		vi.useRealTimers();
 	});
 
+	it("repaints the busy indicator in place on a single line", () => {
+		vi.useFakeTimers();
+		const written: string[] = [];
+		const indicator = createBusyIndicator({
+			write: (data: string) => { written.push(data); },
+		});
+
+		indicator.show({
+			senderAgent: "claude",
+			instruction: "tell me a joke",
+		});
+		vi.advanceTimersByTime(1000);
+
+		expect(written[0]).toContain("0s");
+		expect(written[written.length - 1]).toContain("1s");
+		expect(written.every((entry) => !entry.includes("\n"))).toBe(true);
+
+		indicator.hide();
+		vi.useRealTimers();
+	});
+
 	it("hide is idempotent", () => {
 		const written: string[] = [];
 		const indicator = createBusyIndicator({

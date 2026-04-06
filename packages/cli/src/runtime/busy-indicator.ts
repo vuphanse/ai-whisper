@@ -1,6 +1,5 @@
 const CLEAR_LINE = "\r\u001b[2K";
 const ORANGE = "\u001b[38;5;215m";
-const DIM = "\u001b[2m";
 const RESET = "\u001b[0m";
 
 export function createBusyIndicator(input: {
@@ -19,7 +18,7 @@ export function createBusyIndicator(input: {
 				? `${currentInstruction.slice(0, 47)}...`
 				: currentInstruction;
 		input.write(
-			`${CLEAR_LINE}${ORANGE}⟳ Processing request from ${currentSender}: "${truncated}" (${elapsed}s)${RESET}\n${DIM}  Press Ctrl+C to cancel${RESET}`,
+			`${CLEAR_LINE}${ORANGE}⟳ Processing request from ${currentSender}: "${truncated}" (${elapsed}s)${RESET}`,
 		);
 	}
 
