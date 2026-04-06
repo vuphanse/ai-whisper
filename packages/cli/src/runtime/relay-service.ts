@@ -3,6 +3,7 @@ import type { WorkItem } from "@ai-whisper/shared";
 import { inferRequestedAction } from "./action-inference.js";
 import { requiresExplicitArtifacts } from "./context-policy.js";
 import { createCliThreadId, createCliWorkItemId } from "./id-factory.js";
+import type { createContextInjector } from "./context-injector.js";
 
 export function enqueueRelayWork(input: {
 	broker: BrokerRuntime;
@@ -15,6 +16,7 @@ export function enqueueRelayWork(input: {
 	now: string;
 	explicitAction?: WorkItem["requestedAction"] | undefined;
 	threadTitle?: string | undefined;
+	contextInjector?: ReturnType<typeof createContextInjector> | undefined;
 }) {
 	const targetSessionId = input.broker.control.resolveBoundSession(
 		input.collabId,
@@ -48,6 +50,26 @@ export function enqueueRelayWork(input: {
 				now: input.now,
 			});
 
+	const basePacket = {
+		kind: "full" as const,
+		goal: input.instruction,
+		currentState: mustCreateThread
+			? "New thread"
+			: "Continuing active thread",
+		decisionsMade: [],
+		assumptions: [],
+		relevantArtifacts: input.artifactPaths,
+		openQuestions: [],
+		successCriteria: [],
+	};
+
+	const contextPacket = input.contextInjector
+		? input.contextInjector.enrichContextPacket({
+				activeThreadId: thread.threadId,
+				basePacket,
+			})
+		: basePacket;
+
 	const workItem = input.broker.control.enqueueWorkItem({
 		workItemId: createCliWorkItemId(input.now),
 		threadId: thread.threadId,
@@ -56,18 +78,7 @@ export function enqueueRelayWork(input: {
 		targetSessionId: targetSessionId,
 		requestedAction: action,
 		instruction: input.instruction,
-		contextPacket: {
-			kind: "full",
-			goal: input.instruction,
-			currentState: mustCreateThread
-				? "New thread"
-				: "Continuing active thread",
-			decisionsMade: [],
-			assumptions: [],
-			relevantArtifacts: input.artifactPaths,
-			openQuestions: [],
-			successCriteria: [],
-		},
+		contextPacket,
 		artifactManifestIds: [],
 		now: input.now,
 	});

@@ -169,7 +169,7 @@ export function createLiveSessionRuntime(input: {
 		getError: getRelayDirectiveError,
 		isRelayDirective: (line) => parseRelayDirective(line) !== null,
 		isRelayPrefix: (line) =>
-			["@@codex", "@@claude"].some(
+			["@@codex", "@@claude", "@@pull"].some(
 				(target) => target.startsWith(line) || line.startsWith(target),
 			),
 	});

@@ -4,15 +4,28 @@ import {
 } from "@ai-whisper/shared";
 
 const relayPattern =
-	/^@@(?<target>codex|claude)(?<force>\[new\])?\s+(?<instruction>.+)$/;
-const unsupportedRelayPrefix = /^@@(?<target>codex|claude)\[/;
+	/^@@(?<target>codex|claude|pull)(?<force>\[new\])?\s*(?<instruction>.*)$/;
+const unsupportedRelayPrefix = /^@@(?:codex|claude|pull)\[(?!new\])/;
 
 export function parseRelayDirective(raw: string): RelayDirective | null {
 	const trimmed = raw.trim();
+
+	// Reject unsupported bracket syntax before attempting full parse
+	if (unsupportedRelayPrefix.test(trimmed)) {
+		return null;
+	}
+
 	const match = relayPattern.exec(trimmed);
 
 	const groups = match?.groups;
-	if (!groups?.target || !groups.instruction) {
+	if (!groups?.target) {
+		return null;
+	}
+
+	const instruction = (groups.instruction ?? "").trim();
+
+	// codex and claude require a non-empty instruction; pull does not
+	if (groups.target !== "pull" && instruction.length === 0) {
 		return null;
 	}
 
@@ -20,7 +33,7 @@ export function parseRelayDirective(raw: string): RelayDirective | null {
 		raw: trimmed,
 		target: groups.target,
 		forceNewThread: Boolean(groups.force),
-		instruction: groups.instruction.trim(),
+		instruction,
 	});
 }
 

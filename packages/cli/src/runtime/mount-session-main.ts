@@ -9,6 +9,7 @@ import {
 	enqueueRelayWork,
 	formatRelayAcknowledgement,
 } from "./relay-service.js";
+import { createContextInjector } from "./context-injector.js";
 import { waitForReply } from "./reply-wait.js";
 import { createCliSessionId } from "./id-factory.js";
 import { updateCliCollabState } from "./state-file.js";
@@ -60,6 +61,24 @@ export function createMountSessionRuntime(input: {
 						throw new Error("Relay not available: session claim not yet completed");
 					}
 
+					if (directive.target === "pull") {
+						const injector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
+						const activeThread = input.broker.control.listThreads(resolvedClaim.collabId).find((t) => t.active);
+						if (!activeThread) {
+							sendNow("[ai-whisper] No active thread to pull context from.\n");
+							return null;
+						}
+						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
+						if (result.injected) {
+							interactiveSession.writeUserInput(result.payload);
+							sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
+						} else {
+							sendNow("[ai-whisper] No pending relay context to inject.\n");
+						}
+						return null;
+					}
+
+					const contextInjector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
 					const writer = relayPaneWriter!;
 
 					writer.relayDirective({
@@ -78,6 +97,7 @@ export function createMountSessionRuntime(input: {
 						artifactPaths: [],
 						forceNewThread: directive.forceNewThread,
 						now: new Date().toISOString(),
+						contextInjector,
 					});
 
 					sendNow(

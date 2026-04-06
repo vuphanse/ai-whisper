@@ -10,6 +10,7 @@ import {
 	enqueueRelayWork,
 	formatRelayAcknowledgement,
 } from "../runtime/relay-service.js";
+import { createContextInjector } from "../runtime/context-injector.js";
 import { waitForReply } from "../runtime/reply-wait.js";
 import { createRelayPaneWriter } from "../runtime/relay-pane-writer.js";
 
@@ -55,6 +56,25 @@ async function main(): Promise<void> {
 		relayPaneWriter,
 		onRelayCancel: () => { relayCancelHandle.cancel?.(); },
 		onRelay: async (directive, sendNow) => {
+			if (directive.target === "pull") {
+				const injector = createContextInjector({ broker, collabId, sessionId });
+				const activeThread = broker.control.listThreads(collabId).find((t) => t.active);
+				if (!activeThread) {
+					sendNow("[ai-whisper] No active thread to pull context from.\n");
+					return null;
+				}
+				const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
+				if (result.injected) {
+					interactiveSession.writeUserInput(result.payload);
+					sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
+				} else {
+					sendNow("[ai-whisper] No pending relay context to inject.\n");
+				}
+				return null;
+			}
+
+			const contextInjector = createContextInjector({ broker, collabId, sessionId });
+
 			relayPaneWriter.relayDirective({
 				senderAgent: agentArg,
 				receiverAgent: directive.target,
@@ -71,6 +91,7 @@ async function main(): Promise<void> {
 				artifactPaths: [],
 				forceNewThread: directive.forceNewThread,
 				now: new Date().toISOString(),
+				contextInjector,
 			});
 
 			sendNow(

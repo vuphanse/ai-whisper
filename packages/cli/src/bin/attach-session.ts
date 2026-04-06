@@ -12,6 +12,7 @@ import {
 	formatRelayAcknowledgement,
 	formatRelayReplySummary,
 } from "../runtime/relay-service.js";
+import { createContextInjector } from "../runtime/context-injector.js";
 import { waitForReply } from "../runtime/reply-wait.js";
 import { createCliSessionId } from "../runtime/id-factory.js";
 import { readCliCollabState, updateCliCollabState } from "../runtime/state-file.js";
@@ -81,6 +82,24 @@ export function createAttachSessionRuntime(input: {
 				stdin: process.stdin,
 				stdout: process.stdout,
 				onRelay: async (directive, sendNow) => {
+					if (directive.target === "pull") {
+						const injector = createContextInjector({ broker: input.broker, collabId: accepted.collabId, sessionId: accepted.sessionId });
+						const activeThread = input.broker.control.listThreads(accepted.collabId).find((t) => t.active);
+						if (!activeThread) {
+							sendNow("[ai-whisper] No active thread to pull context from.\n");
+							return null;
+						}
+						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
+						if (result.injected) {
+							interactiveSession.writeUserInput(result.payload);
+							sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
+						} else {
+							sendNow("[ai-whisper] No pending relay context to inject.\n");
+						}
+						return null;
+					}
+
+					const contextInjector = createContextInjector({ broker: input.broker, collabId: accepted.collabId, sessionId: accepted.sessionId });
 					const relay = enqueueRelayWork({
 						broker: input.broker,
 						collabId: accepted.collabId,
@@ -90,6 +109,7 @@ export function createAttachSessionRuntime(input: {
 						artifactPaths: [],
 						forceNewThread: directive.forceNewThread,
 						now: new Date().toISOString(),
+						contextInjector,
 					});
 
 					sendNow(

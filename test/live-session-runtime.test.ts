@@ -666,6 +666,41 @@ describe("live session runtime", () => {
 		expect(fakePty.writes).toEqual([]);
 	});
 
+	it("handles @@pull by injecting relay context into PTY via writeUserInput", async () => {
+		const userInputs: string[] = [];
+		const localMessages: string[] = [];
+		const interactiveSession = {
+			start: () => Promise.resolve(),
+			stop: () => Promise.resolve(),
+			writeUserInput(data: string) { userInputs.push(data); },
+			sendLocalMessage(message: string) { localMessages.push(message); },
+			onExit() {},
+		};
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession,
+			stdin: createMockStdin(),
+			stdout: process.stdout,
+			onRelay: async (directive, sendNow) => {
+				if (directive.target === "pull") {
+					interactiveSession.writeUserInput(
+						"[Context from recent relay exchange]\ncodex reviewed:\n\"Found issues\"\n\n",
+					);
+					sendNow("\u001b[2m↳ relay context attached (codex review: 3 findings)\u001b[0m\n");
+					return null;
+				}
+				return null;
+			},
+		});
+
+		await runtime.start();
+		emitInput("@@pull\r");
+		await nextTick();
+
+		expect(userInputs.some((m) => m.includes("[Context from recent relay exchange]"))).toBe(true);
+		expect(localMessages.some((m) => m.includes("relay context attached"))).toBe(true);
+	});
+
 	it("blocks input while relay work is in progress", async () => {
 		const localMessages: string[] = [];
 		const userInputs: string[] = [];

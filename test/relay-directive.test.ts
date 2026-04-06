@@ -31,4 +31,11 @@ describe("relay directive parser", () => {
 		);
 		expect(parseRelayDirective("@@codex")).toBeNull();
 	});
+
+	it("parses @@pull as a pull directive", () => {
+		const result = parseRelayDirective("@@pull");
+		expect(result).not.toBeNull();
+		expect(result!.target).toBe("pull");
+		expect(result!.instruction).toBe("");
+	});
 });
