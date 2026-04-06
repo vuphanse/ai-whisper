@@ -42,6 +42,8 @@ import {
 import {
 	insertReply,
 	listRepliesForThread,
+	listUnconsumedRepliesForSession,
+	markRepliesConsumed as markRepliesConsumedInDb,
 } from "../storage/repositories/reply-repository.js";
 import {
 	getSessionBinding,
@@ -608,6 +610,19 @@ export function createControlService(db: Database.Database) {
 		},
 		listReplies(threadId: string) {
 			return listRepliesForThread(db, threadId);
+		},
+		listUnconsumedReplies(input: {
+			collabId: string;
+			threadId: string;
+			forSessionId: string;
+		}) {
+			return listUnconsumedRepliesForSession(db, input);
+		},
+		markRepliesConsumed(input: {
+			replyIds: string[];
+			consumedBySessionId: string;
+		}) {
+			markRepliesConsumedInDb(db, input);
 		},
 		listWorkItems(threadId: string) {
 			return listWorkItemsForThread(db, threadId);
