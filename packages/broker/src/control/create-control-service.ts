@@ -71,6 +71,16 @@ import {
 	markWorkItemFailed,
 	markWorkItemsRecoveryBlockedForCollab,
 } from "../storage/repositories/work-item-repository.js";
+import {
+	insertRelayMonitor,
+	updateRelayMonitorHeartbeat,
+	isRelayMonitorConnected as queryIsRelayMonitorConnected,
+} from "../storage/repositories/relay-monitor-repository.js";
+import {
+	appendRelayEvent as insertRelayEvent,
+	pollRelayEvents as queryPollRelayEvents,
+	type RelayEvent,
+} from "../storage/repositories/relay-event-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
 	return timestamp.replace(/[^0-9]/g, "");
@@ -833,6 +843,36 @@ export function createControlService(db: Database.Database) {
 					`Session ${input.sessionId} is no longer the active binding for collab ${input.collabId}.`,
 				);
 			}
+		},
+		registerRelayMonitor(input: {
+			collabId: string;
+			monitorId: string;
+			now: string;
+		}) {
+			insertRelayMonitor(db, input);
+		},
+		heartbeatRelayMonitor(input: {
+			collabId: string;
+			monitorId: string;
+			now: string;
+		}) {
+			updateRelayMonitorHeartbeat(db, input);
+		},
+		isRelayMonitorConnected(collabId: string, now?: string): boolean {
+			return queryIsRelayMonitorConnected(db, collabId, now);
+		},
+		appendRelayEvent(input: {
+			collabId: string;
+			eventType: string;
+			senderAgent: string | null;
+			receiverAgent: string | null;
+			content: string;
+			now: string;
+		}) {
+			insertRelayEvent(db, input);
+		},
+		pollRelayEvents(collabId: string, afterId: number): RelayEvent[] {
+			return queryPollRelayEvents(db, collabId, afterId);
 		},
 	};
 }

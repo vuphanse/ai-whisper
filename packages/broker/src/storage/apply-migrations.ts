@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS reply (
   content TEXT NOT NULL,
   transition_intent TEXT,
   artifact_manifest_ids_json TEXT NOT NULL,
+  consumed_by_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
 );
 
@@ -139,6 +140,23 @@ CREATE TABLE IF NOT EXISTS session_binding (
   PRIMARY KEY (collab_id, agent_type)
 );
 
+CREATE TABLE IF NOT EXISTS relay_monitor (
+  collab_id TEXT NOT NULL,
+  monitor_id TEXT PRIMARY KEY,
+  registered_at TEXT NOT NULL,
+  last_heartbeat_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS relay_event (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collab_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  sender_agent TEXT,
+  receiver_agent TEXT,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 1, 1)
 ON CONFLICT(id) DO UPDATE SET
@@ -164,5 +182,14 @@ export function applyMigrations(db: Database.Database): void {
 		.all() as Array<{ name: string }>;
 	if (!bindingColumns.some((column) => column.name === "target_tty_path")) {
 		db.exec("ALTER TABLE session_binding ADD COLUMN target_tty_path TEXT");
+	}
+
+	const replyColumns = db
+		.prepare("PRAGMA table_info(reply)")
+		.all() as Array<{ name: string }>;
+	if (!replyColumns.some((column) => column.name === "consumed_by_json")) {
+		db.exec(
+			"ALTER TABLE reply ADD COLUMN consumed_by_json TEXT NOT NULL DEFAULT '[]'",
+		);
 	}
 }
