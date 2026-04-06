@@ -612,7 +612,7 @@ export function createControlService(db: Database.Database) {
 			collabId: string;
 			agentType: "codex" | "claude";
 			mode: "attach" | "rebind" | "reconnect";
-			targetMode?: "snippet_shell" | "adopt_current_tty" | "explicit_tty";
+			targetMode?: "snippet_shell" | "adopt_current_tty" | "explicit_tty" | "mount_current_tty";
 			targetTtyPath?: string | null;
 			now: string;
 			expiresAt: string;
@@ -680,7 +680,7 @@ export function createControlService(db: Database.Database) {
 			provider: ProviderIdentity;
 			capabilities: ProviderCapabilities;
 			now: string;
-			bindingSource: "launched" | "attached" | "adopted";
+			bindingSource: "launched" | "attached" | "adopted" | "mounted";
 		}) {
 			const claim = getAttachClaim(db, input.claimId);
 			if (!claim) {
@@ -777,7 +777,7 @@ export function createControlService(db: Database.Database) {
 			collabId: string;
 			agentType: "codex" | "claude";
 			sessionId: string;
-			bindingSource: "launched" | "attached" | "adopted";
+			bindingSource: "launched" | "attached" | "adopted" | "mounted";
 			targetTtyPath?: string | null;
 			now: string;
 		}) {

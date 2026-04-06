@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMountSessionRuntime } from "../packages/cli/src/runtime/mount-session-main.ts";
 import { createCli } from "../packages/cli/src/create-cli.ts";
+import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 
 describe("mount session runtime", () => {
 	it("starts the live session before completing the claim and records mounted session metadata", async () => {
@@ -17,19 +18,20 @@ describe("mount session runtime", () => {
 			},
 			stop: () => Promise.resolve(),
 		};
-		const updateState = vi.fn((_, update) =>
-			update({
-				version: 5,
-				collabId: "collab_mount",
-				workspaceRoot: "/tmp/workspace",
-				broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
-				launch: { mode: "none" },
-				ownedSessions: {},
-				startedAt: "2026-04-06T08:00:00.000Z",
-				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-				adoptedSessions: {},
-				mountedSessions: {},
-			}),
+		const fakeState: CliCollabState = {
+			version: 5,
+			collabId: "collab_mount",
+			workspaceRoot: "/tmp/workspace",
+			broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: "2026-04-06T08:00:00.000Z",
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
+			mountedSessions: {},
+		};
+		const updateState = vi.fn((_: string, update: (s: CliCollabState) => CliCollabState) =>
+			update(fakeState),
 		);
 
 		const runtime = createMountSessionRuntime({
@@ -59,10 +61,11 @@ describe("mount session runtime", () => {
 					supportsLaunchHooks: false,
 					extensions: {},
 				}),
-				handleWork: () => Promise.resolve({ kind: "answer", content: "ok" }),
+				getHealthState: () => "healthy" as const,
+				handleWork: () => Promise.resolve({ kind: "answer" as const, content: "ok", transitionIntent: null }),
 			}),
 			updateState,
-			runLoop: async () => async () => {},
+			runLoop: () => Promise.resolve(async () => {}),
 		});
 
 		await runtime.start();

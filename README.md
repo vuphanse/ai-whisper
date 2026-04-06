@@ -109,9 +109,20 @@ whisper collab inspect --watch
 
 `inspect` is read-only. It shows the active thread, recent work items, recent replies, and recent failed or `recovery_blocked` activity with truncated previews by default.
 
+### Terminal-first mounted sessions (Phase 7E)
+
+The preferred workflow for inline `@@` relay support. `whisper collab mount` claims the current iTerm shell as the managed session surface and launches the provider automatically:
+
+1. `whisper collab start --no-launch`
+2. in a normal iTerm tab, run `whisper collab mount codex`
+3. confirm Codex starts automatically in that same tab
+4. type `@@claude <instruction>` to relay to Claude with inline acknowledgement and reply
+
+Mounted sessions keep `ai-whisper` as the terminal owner, so the live-session relay parser can intercept `@@...` input. Recovery and reconnect default to the mounted path when the previous binding was mounted.
+
 ### Adopt existing provider sessions (Phase 7D)
 
-For the macOS/iTerm-first manual workflow:
+Legacy workflow for sessions started before `whisper collab mount` existed. Use when you have already started a provider and want to bind it without relaunching:
 
 1. `whisper collab start --no-launch`
 2. start `codex` or `claude` manually
@@ -122,7 +133,7 @@ For the macOS/iTerm-first manual workflow:
 
 The adopted session keeps the provider's terminal surface intact. The background daemon handles broker work items queued via `whisper collab tell` from another terminal.
 
-**Limitation**: Inline `@@` relay directives (e.g., `@@codex review this`) are not available inside adopted sessions. The provider process owns the terminal's input after `fg`, and the background daemon cannot intercept keystrokes. Use `whisper collab tell --target codex "review this"` from a separate terminal instead.
+**Limitation**: `attach --adopt-current-tty` does not support inline @@ relay directives. The provider process owns the terminal's input after `fg`, and the background daemon cannot intercept keystrokes. Use `whisper collab tell --target codex "review this"` from a separate terminal instead. If you need inline relay, use `whisper collab mount` instead.
 
 The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead. The two flags are mutually exclusive.
 
