@@ -46,7 +46,7 @@ export async function runCollabRecover(input: {
 
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
 		...state,
-		version: 3,
+		version: 4,
 		broker: { ...state.broker, pid: brokerPid },
 		recovery: hasRememberedBindings
 			? {

@@ -30,6 +30,8 @@ describe("cli collab attach", () => {
 		});
 
 		expect(result.claim.agentType).toBe("codex");
+		expect(result.mode).toBe("snippet");
+		if (result.mode !== "snippet") throw new Error("unreachable");
 		expect(result.snippet).toContain("attach-session");
 		expect(result.snippet).toContain("codex");
 	});

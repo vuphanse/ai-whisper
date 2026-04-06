@@ -103,7 +103,7 @@ describe("cli collab status enriched", () => {
 		// Write state file with recovery.state === "recovered"
 		const statePath = getStateFilePath(workspaceRoot);
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot,
 			broker: {
@@ -120,6 +120,7 @@ describe("cli collab status enriched", () => {
 				idleAfterRecovery: true,
 				recoveredAt: now,
 			},
+			adoptedSessions: {},
 		});
 
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
@@ -243,7 +244,7 @@ describe("phase 7c1 status output", () => {
 		await broker.stop();
 
 		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 3,
+			version: 4,
 			collabId: "collab_status_health",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4452, pid: 99123 },
@@ -251,6 +252,7 @@ describe("phase 7c1 status output", () => {
 			ownedSessions: {},
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
 		});
 
 		const status = await runCollabStatus({

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createAdoptedInteractiveSession } from "../packages/cli/src/runtime/adopted-interactive-session.ts";
 
 describe("adopted interactive session", () => {

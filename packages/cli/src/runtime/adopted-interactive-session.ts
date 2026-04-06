@@ -30,12 +30,14 @@ export function createAdoptedInteractiveSession(input: {
 	let handle: TtyHandle | null = null;
 
 	return {
-		async start() {
+		start() {
 			handle = (input.openTty ?? defaultOpenTty)(input.ttyPath);
+			return Promise.resolve();
 		},
-		async stop() {
+		stop() {
 			handle?.close();
 			handle = null;
+			return Promise.resolve();
 		},
 		writeUserInput(data: string) {
 			handle?.write(data);

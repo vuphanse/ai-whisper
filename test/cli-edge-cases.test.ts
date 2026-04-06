@@ -86,7 +86,7 @@ describe("cli edge cases", () => {
 		);
 
 		writeCliCollabState(getStateFilePath(workspaceRoot), {
-			version: 3,
+			version: 4,
 			collabId: "collab_20260403000000000",
 			workspaceRoot,
 			broker: {
@@ -114,6 +114,7 @@ describe("cli edge cases", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		});
 
 		// Overwrite sqlite with invalid bytes

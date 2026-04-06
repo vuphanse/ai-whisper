@@ -109,6 +109,25 @@ whisper collab inspect --watch
 
 `inspect` is read-only. It shows the active thread, recent work items, recent replies, and recent failed or `recovery_blocked` activity with truncated previews by default.
 
+### Adopt existing provider sessions (Phase 7D)
+
+For the macOS/iTerm-first manual workflow:
+
+1. `whisper collab start --no-launch`
+2. start `codex` or `claude` manually
+3. press `Ctrl+Z` to suspend the provider
+4. run `whisper collab attach codex --adopt-current-tty`
+5. verify the shell returns
+6. run `fg` to resume the original provider
+
+This flow is not complete until:
+
+- the shell remains usable after attach
+- `fg` resumes the original provider
+- relay preview, acknowledgement, and reply-summary rendering behave acceptably on the adopted session
+
+The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead.
+
 ## Phase Roadmap
 
 - Phase 1: foundation

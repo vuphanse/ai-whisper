@@ -100,7 +100,7 @@ describe("recover command", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -117,6 +117,7 @@ describe("recover command", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		});
 
 		return { dir, statePath, collabId, sqlitePath, now };
@@ -209,7 +210,7 @@ describe("recover command", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -226,6 +227,7 @@ describe("recover command", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		});
 
 		const mockAssessBroker = vi.fn(() => Promise.resolve({
@@ -300,7 +302,7 @@ describe("reconnect command", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -317,6 +319,7 @@ describe("reconnect command", () => {
 				idleAfterRecovery: true,
 				recoveredAt: now,
 			},
+			adoptedSessions: {},
 		});
 
 		return { dir, statePath, collabId, sqlitePath, now };
@@ -349,7 +352,7 @@ describe("reconnect command", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4411, pid: 99123 },
@@ -357,6 +360,7 @@ describe("reconnect command", () => {
 			ownedSessions: {},
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
 		});
 
 		expect(() =>
@@ -407,7 +411,7 @@ describe("recovery guards", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -424,6 +428,7 @@ describe("recovery guards", () => {
 				idleAfterRecovery: recoveryState === "recovered",
 				recoveredAt: recoveryState === "recovered" ? now : null,
 			},
+			adoptedSessions: {},
 		});
 
 		return { dir, now };
@@ -530,7 +535,7 @@ describe("broker latch", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -547,6 +552,7 @@ describe("broker latch", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		});
 
 		return { dir, statePath, collabId, sqlitePath, now };
@@ -622,7 +628,7 @@ describe("status command recovery awareness", () => {
 		const runtimeDir = join(dir, ".ai-whisper", "runtime");
 		const statePath = join(runtimeDir, "current-collab.json");
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: dir,
 			broker: {
@@ -639,6 +645,7 @@ describe("status command recovery awareness", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		});
 
 		const mockAssessBroker = vi.fn(() => Promise.resolve({

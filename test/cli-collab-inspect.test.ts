@@ -52,7 +52,7 @@ describe("collab inspect snapshot", () => {
 		await broker.stop();
 
 		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 3,
+			version: 4,
 			collabId: "collab_inspect",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4450, pid: 99123 },
@@ -60,6 +60,7 @@ describe("collab inspect snapshot", () => {
 			ownedSessions: {},
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
 		});
 
 		const output = await runCollabInspect({
@@ -161,7 +162,7 @@ describe("collab inspect watch mode", () => {
 		await broker.stop();
 
 		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 3,
+			version: 4,
 			collabId: "collab_inspect_watch",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4451, pid: 99123 },
@@ -169,6 +170,7 @@ describe("collab inspect watch mode", () => {
 			ownedSessions: {},
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
 		});
 
 		const write = vi.fn();
@@ -202,7 +204,7 @@ describe("inspect broker-down recovery latch", () => {
 		const statePath = join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json");
 
 		writeCliCollabState(statePath, {
-			version: 3,
+			version: 4,
 			collabId: "collab_inspect_latch",
 			workspaceRoot,
 			broker: { sqlitePath, host: "127.0.0.1", port: 4460, pid: 99123 },
@@ -210,6 +212,7 @@ describe("inspect broker-down recovery latch", () => {
 			ownedSessions: {},
 			startedAt: now,
 			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
 		});
 
 		await expect(
@@ -295,7 +298,7 @@ describe("inspect flagged items outside display window", () => {
 		});
 
 		const state: CliCollabState = {
-			version: 3,
+			version: 4,
 			collabId,
 			workspaceRoot: "/tmp",
 			broker: {
@@ -312,6 +315,7 @@ describe("inspect flagged items outside display window", () => {
 				idleAfterRecovery: false,
 				recoveredAt: null,
 			},
+			adoptedSessions: {},
 		};
 
 		const snapshot = buildInspectSnapshot({
