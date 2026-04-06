@@ -4,12 +4,14 @@
 
 cat <<'EOF'
 Manual validation checklist for mounted-session relay:
-  1. Start broker only with whisper collab start --no-launch
-  2. In one iTerm shell, run whisper collab mount codex
-  3. In a second iTerm shell, run whisper collab mount claude
+  Build first: pnpm build
+  Use node packages/cli/dist/bin/whisper.js for all commands below
+  1. Start broker only with node packages/cli/dist/bin/whisper.js collab start --no-launch
+  2. In one iTerm shell, run node packages/cli/dist/bin/whisper.js collab mount codex
+  3. In a second iTerm shell, run node packages/cli/dist/bin/whisper.js collab mount claude
   4. Confirm each provider launches automatically in its respective terminal
   5. From the codex terminal, type @@claude ... and verify preview, acknowledgement, and reply-summary rendering
   6. From the claude terminal, type @@codex ... and verify the same
-  7. Run whisper collab status / inspect from another shell and confirm [mounted] for both roles
+  7. Run node packages/cli/dist/bin/whisper.js collab status / inspect from another shell and confirm [mounted] for both roles
   8. Recover and reconnect a mounted role and confirm the mounted path is reused
 EOF

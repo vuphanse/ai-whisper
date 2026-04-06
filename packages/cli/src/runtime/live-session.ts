@@ -17,14 +17,125 @@ const CLEAR_LINE = "\r\u001b[2K";
 const terminalResponsePatterns = [
 	new RegExp(`${ESC}\\[[0-9;]*R`, "g"),
 	new RegExp(`${ESC}\\[[?>0-9;]*c`, "g"),
+	new RegExp(`${ESC}\\[\\?[0-9;:]*u`, "g"),
+	new RegExp(`${ESC}\\[(?:I|O)`, "g"),
+	new RegExp(`${ESC}\\[<[^${BEL}${ESC}]*[Mm]`, "g"),
 	new RegExp(`${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`, "g"),
 ];
+const csiKeyboardSequencePattern = new RegExp(
+	`${ESC}\\[(\\d+)(?::(\\d+))?(?:;(\\d+)(?::(\\d+))?)?u`,
+	"g",
+);
 
 function stripTerminalResponses(raw: string): string {
 	return terminalResponsePatterns.reduce(
 		(text, pattern) => text.replace(pattern, ""),
 		raw,
 	);
+}
+
+type NormalizedInputState = Record<string, never>;
+
+function decodePrintableCsiKeyboardSequence(
+	primaryCodepointText: string,
+	alternateCodepointText?: string,
+	modifiersText?: string,
+	eventTypeText?: string,
+): string | null {
+	if (eventTypeText !== undefined) {
+		return "";
+	}
+
+	const primaryCodepoint = Number(primaryCodepointText);
+	const alternateCodepoint =
+		alternateCodepointText !== undefined ? Number(alternateCodepointText) : null;
+	const modifiers = modifiersText !== undefined ? Number(modifiersText) : 1;
+	const decodedCodepoint = alternateCodepoint ?? primaryCodepoint;
+	const modifierBits = Math.max(0, modifiers - 1);
+	const hasCtrl = (modifierBits & 0b100) !== 0;
+
+	if (!Number.isInteger(decodedCodepoint) || decodedCodepoint < 0) {
+		return null;
+	}
+
+	if (hasCtrl) {
+		const controlCodepoint = primaryCodepoint & 0x1f;
+		if (controlCodepoint >= 0x00 && controlCodepoint <= 0x1f) {
+			return String.fromCodePoint(controlCodepoint);
+		}
+	}
+
+	// Mounted terminals already deliver printable text as ordinary bytes.
+	// Drop printable CSI-u key reports so providers like Codex do not see
+	// each keystroke twice, but still translate line-editing controls.
+	const isLineEditingControl =
+		decodedCodepoint === 0x09 ||
+		decodedCodepoint === 0x0d ||
+		decodedCodepoint === 0x08 ||
+		decodedCodepoint === 0x7f;
+	if (isLineEditingControl && modifiers <= 4) {
+		try {
+			return String.fromCodePoint(decodedCodepoint);
+		} catch {
+			return null;
+		}
+	}
+
+	const isPrintable =
+		decodedCodepoint >= 0x20 && decodedCodepoint !== 0x7f;
+	if (isPrintable) {
+		return "";
+	}
+
+	if (modifiers > 4) {
+		return null;
+	}
+
+	return null;
+}
+
+function decodeCsiKeyboardInput(input: {
+	raw: string;
+	state: NormalizedInputState;
+}): { text: string; state: NormalizedInputState } {
+	let output = "";
+	let lastIndex = 0;
+
+	for (const match of input.raw.matchAll(csiKeyboardSequencePattern)) {
+		const fullMatch = match[0];
+		const index = match.index ?? 0;
+		output += input.raw.slice(lastIndex, index);
+
+		const decoded = decodePrintableCsiKeyboardSequence(
+			match[1] ?? "",
+			match[2],
+			match[3],
+			match[4],
+		);
+		if (decoded === null) {
+			output += fullMatch;
+		} else if (decoded.length > 0) {
+			output += decoded;
+		}
+
+		lastIndex = index + fullMatch.length;
+	}
+
+	output += input.raw.slice(lastIndex);
+	return {
+		text: output,
+		state: input.state,
+	};
+}
+
+function normalizeTerminalInput(input: {
+	raw: string;
+	state: NormalizedInputState;
+}): { text: string; state: NormalizedInputState } {
+	return decodeCsiKeyboardInput({
+		raw: stripTerminalResponses(input.raw),
+		state: input.state,
+	});
 }
 
 function toHex(text: string): string {
@@ -56,6 +167,7 @@ export function createLiveSessionRuntime(input: {
 			),
 	});
 	let relayPreviewVisible = false;
+	let inputState: NormalizedInputState = {};
 
 	function debug(event: Record<string, unknown>) {
 		if (!debugLogPath) {
@@ -94,7 +206,12 @@ export function createLiveSessionRuntime(input: {
 	}
 
 	async function processChunk(raw: string) {
-		const sanitized = stripTerminalResponses(raw);
+		const normalized = normalizeTerminalInput({
+			raw,
+			state: inputState,
+		});
+		inputState = normalized.state;
+		const sanitized = normalized.text;
 		debug({
 			type: "chunk",
 			raw,

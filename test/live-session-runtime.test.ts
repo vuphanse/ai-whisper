@@ -280,4 +280,374 @@ describe("live session runtime", () => {
 
 		expect(rawModeCalls).toEqual([true, false]);
 	});
+
+	it("drops printable CSI-u keyboard echoes before relay parsing", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to claude on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("@\u001b[50:64;2:3u@\u001b[50:64;2:3uclaude say hello\r");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("Relayed to claude");
+		expect(output.join("")).not.toContain("[50:64;2:3u");
+	});
+
+	it("drops printable CSI-u keyboard echoes before passthrough to the provider", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("a\u001b[97;1:3ub\u001b[98;1:3uc\u001b[99;1:3u");
+
+		expect(fakePty.writes.join("")).toBe("abc");
+	});
+
+	it("deduplicates printable input when iTerm sends both literal bytes and matching CSI-u sequences", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to claude on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("@\u001b[50:64;2:3u@\u001b[50:64;2:3uc\u001b[99;1ul\u001b[108;1ua\u001b[97;1uu\u001b[117;1ud\u001b[100;1ue\u001b[101;1u say hello\r");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("Relayed to claude");
+		expect(output.join("")).not.toContain("@@@@");
+		expect(output.join("")).not.toContain("@@ccllaauuddee");
+	});
+
+	it("deduplicates printable input when literal bytes and CSI-u reports arrive in separate chunks", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.resolve(
+					"[ai-whisper] Relayed to claude on active thread.\n",
+				),
+		});
+
+		await runtime.start();
+		stdin.write("@");
+		stdin.write("\u001b[50:64;2:3u");
+		stdin.write("@");
+		stdin.write("\u001b[50:64;2:3u");
+		stdin.write("claude say hello\r");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("Relayed to claude");
+		expect(output.join("")).not.toContain("@@@@");
+	});
+
+	it("deduplicates recent literal runs when fast typing arrives as literal bytes followed by a CSI-u batch", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("te");
+		stdin.write("\u001b[116;1u\u001b[101;1u");
+
+		expect(fakePty.writes.join("")).toBe("te");
+	});
+
+	it("deduplicates out-of-order CSI-u echoes that arrive after later literal bytes", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("t");
+		stdin.write("\u001b[116;1:3u");
+		stdin.write("e");
+		stdin.write("l");
+		stdin.write("\u001b[101;1:3u");
+		stdin.write("\u001b[108;1:3u");
+		stdin.write("l");
+		stdin.write("\u001b[108;1:3u");
+
+		expect(fakePty.writes.join("")).toBe("tell");
+	});
+
+	it("does not corrupt an inline relay preview when Codex replays out-of-order CSI-u echoes", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+		const output: string[] = [];
+		stdout.on("data", (chunk) => output.push(String(chunk)));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("@");
+		stdin.write("\u001b[50:64;2:3u");
+		stdin.write("@");
+		stdin.write("\u001b[50:64;2:3u");
+		stdin.write("t");
+		stdin.write("\u001b[116;1:3u");
+		stdin.write("e");
+		stdin.write("l");
+		stdin.write("\u001b[101;1:3u");
+		stdin.write("\u001b[108;1:3u");
+		stdin.write("l");
+		stdin.write("\u001b[108;1:3u");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(fakePty.writes).toEqual([]);
+		expect(output.join("")).toContain("@@tell");
+		expect(output.join("")).not.toContain("@@telell");
+	});
+
+	it("decodes Ctrl+C CSI-u reports to interrupt bytes instead of forwarding literal escape text", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[99;5u\u001b[99;5:3u");
+
+		expect(fakePty.writes.join("")).toBe("\u0003");
+	});
+
+	it("forwards each Ctrl+C press exactly once even when iTerm also emits CSI-u release reports", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[99;5u\u001b[99;5:3u");
+		stdin.write("\u001b[99;5u\u001b[99;5:3u");
+
+		expect(fakePty.writes.join("")).toBe("\u0003\u0003");
+	});
+
+	it("drops standalone focus in/out escape sequences instead of forwarding them to the provider", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[O\u001b[I");
+
+		expect(fakePty.writes).toEqual([]);
+	});
+
+	it("drops terminal keyboard-mode status reports instead of forwarding them to the provider", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[?7u");
+
+		expect(fakePty.writes).toEqual([]);
+	});
 });

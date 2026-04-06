@@ -8,7 +8,8 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 describe("phase 7e manual smoke script", () => {
 	it("documents mount, automatic provider launch, and inline relay", () => {
 		const script = readFileSync(resolve(root, "scripts/manual/phase-7e-mounted-session-smoke.sh"), "utf8");
-		expect(script).toContain("whisper collab mount");
+		expect(script).toContain("node packages/cli/dist/bin/whisper.js collab mount");
+		expect(script).toContain("node packages/cli/dist/bin/whisper.js collab status");
 		expect(script).toContain("@@codex");
 		expect(script).toContain("@@claude");
 		expect(script).toContain("[mounted]");
