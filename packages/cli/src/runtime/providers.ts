@@ -9,6 +9,7 @@ import {
 	createCodexProvider,
 } from "@ai-whisper/adapter-codex";
 import type { InteractiveSessionController } from "@ai-whisper/shared";
+import { createAdoptedInteractiveSession } from "./adopted-interactive-session.js";
 import { getLiveSessionBrokerTempRoot } from "./paths.js";
 
 export function getInteractiveSessionExecArgsForTarget(
@@ -77,6 +78,13 @@ export function createInteractiveSessionForTarget(input: {
 			? { replyTimeoutMs: input.replyTimeoutMs }
 			: {}),
 	});
+}
+
+export function createAdoptedInteractiveSessionForTarget(input: {
+	target: "codex" | "claude";
+	ttyPath: string;
+}): InteractiveSessionController {
+	return createAdoptedInteractiveSession({ ttyPath: input.ttyPath });
 }
 
 export function createAttachedInteractiveSessionForTarget(input: {

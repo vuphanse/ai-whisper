@@ -165,7 +165,7 @@ export function createLiveSessionRuntime(input: {
 		async start() {
 			await input.interactiveSession.start();
 
-			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function") {
+			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function" && !process.env.AI_WHISPER_ADOPTED_TTY) {
 				ttyStdin.setRawMode(true);
 			}
 
@@ -175,7 +175,7 @@ export function createLiveSessionRuntime(input: {
 		},
 		async stop() {
 			clearRelayPreview();
-			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function") {
+			if (ttyStdin.isTTY && typeof ttyStdin.setRawMode === "function" && !process.env.AI_WHISPER_ADOPTED_TTY) {
 				ttyStdin.setRawMode(Boolean(previousRawMode));
 			}
 			await input.interactiveSession.stop();
