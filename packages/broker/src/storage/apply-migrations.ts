@@ -148,4 +148,21 @@ ON CONFLICT(id) DO UPDATE SET
 
 export function applyMigrations(db: Database.Database): void {
 	db.exec(initMigrationSql);
+
+	const attachClaimColumns = db
+		.prepare("PRAGMA table_info(attach_claim)")
+		.all() as Array<{ name: string }>;
+	if (!attachClaimColumns.some((column) => column.name === "target_mode")) {
+		db.exec("ALTER TABLE attach_claim ADD COLUMN target_mode TEXT");
+	}
+	if (!attachClaimColumns.some((column) => column.name === "target_tty_path")) {
+		db.exec("ALTER TABLE attach_claim ADD COLUMN target_tty_path TEXT");
+	}
+
+	const bindingColumns = db
+		.prepare("PRAGMA table_info(session_binding)")
+		.all() as Array<{ name: string }>;
+	if (!bindingColumns.some((column) => column.name === "target_tty_path")) {
+		db.exec("ALTER TABLE session_binding ADD COLUMN target_tty_path TEXT");
+	}
 }

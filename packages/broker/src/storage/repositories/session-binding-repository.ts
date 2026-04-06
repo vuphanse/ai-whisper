@@ -6,7 +6,8 @@ type SessionBindingRow = {
 	agent_type: "codex" | "claude";
 	binding_state: "unbound" | "pending_attach" | "bound";
 	active_session_id: string | null;
-	binding_source: "launched" | "attached" | null;
+	binding_source: "launched" | "attached" | "adopted" | null;
+	target_tty_path: string | null;
 	pending_claim_id: string | null;
 	pending_claim_expires_at: string | null;
 	updated_at: string;
@@ -20,6 +21,7 @@ function mapRowToBinding(row: SessionBindingRow): SessionBinding {
 		bindingState: row.binding_state,
 		activeSessionId: row.active_session_id ?? null,
 		bindingSource: row.binding_source ?? null,
+		targetTtyPath: row.target_tty_path ?? null,
 		pendingClaimId: row.pending_claim_id ?? null,
 		pendingClaimExpiresAt: row.pending_claim_expires_at ?? null,
 		updatedAt: row.updated_at,
@@ -37,14 +39,16 @@ export function upsertSessionBinding(
       binding_state,
       active_session_id,
       binding_source,
+      target_tty_path,
       pending_claim_id,
       pending_claim_expires_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(collab_id, agent_type) DO UPDATE SET
       binding_state = excluded.binding_state,
       active_session_id = excluded.active_session_id,
       binding_source = excluded.binding_source,
+      target_tty_path = excluded.target_tty_path,
       pending_claim_id = excluded.pending_claim_id,
       pending_claim_expires_at = excluded.pending_claim_expires_at,
       updated_at = excluded.updated_at`,
@@ -54,6 +58,7 @@ export function upsertSessionBinding(
 		binding.bindingState,
 		binding.activeSessionId ?? null,
 		binding.bindingSource ?? null,
+		binding.targetTtyPath ?? null,
 		binding.pendingClaimId ?? null,
 		binding.pendingClaimExpiresAt ?? null,
 		binding.updatedAt,
@@ -67,7 +72,7 @@ export function getSessionBinding(
 ): SessionBinding | null {
 	const row = db
 		.prepare(
-			`SELECT collab_id, agent_type, binding_state, active_session_id, binding_source, pending_claim_id, pending_claim_expires_at, updated_at
+			`SELECT collab_id, agent_type, binding_state, active_session_id, binding_source, target_tty_path, pending_claim_id, pending_claim_expires_at, updated_at
        FROM session_binding
        WHERE collab_id = ? AND agent_type = ?`,
 		)
@@ -86,7 +91,7 @@ export function listSessionBindingsForCollab(
 ): SessionBinding[] {
 	const rows = db
 		.prepare(
-			`SELECT collab_id, agent_type, binding_state, active_session_id, binding_source, pending_claim_id, pending_claim_expires_at, updated_at
+			`SELECT collab_id, agent_type, binding_state, active_session_id, binding_source, target_tty_path, pending_claim_id, pending_claim_expires_at, updated_at
        FROM session_binding
        WHERE collab_id = ?
        ORDER BY agent_type ASC`,

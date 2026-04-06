@@ -5,7 +5,9 @@ type AttachClaimRow = {
 	claim_id: string;
 	collab_id: string;
 	agent_type: "codex" | "claude";
-	mode: "attach" | "rebind";
+	mode: "attach" | "rebind" | "reconnect";
+	target_mode: "snippet_shell" | "adopt_current_tty" | "explicit_tty" | null;
+	target_tty_path: string | null;
 	secret: string;
 	status: "pending" | "consumed" | "expired" | "replaced";
 	created_at: string;
@@ -20,6 +22,8 @@ function mapRowToClaim(row: AttachClaimRow): AttachClaim {
 		collabId: row.collab_id,
 		agentType: row.agent_type,
 		mode: row.mode,
+		targetMode: row.target_mode ?? "snippet_shell",
+		targetTtyPath: row.target_tty_path ?? null,
 		secret: row.secret,
 		status: row.status,
 		createdAt: row.created_at,
@@ -38,17 +42,21 @@ export function insertAttachClaim(
       collab_id,
       agent_type,
       mode,
+      target_mode,
+      target_tty_path,
       secret,
       status,
       created_at,
       expires_at,
       consumed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	).run(
 		claim.claimId,
 		claim.collabId,
 		claim.agentType,
 		claim.mode,
+		claim.targetMode,
+		claim.targetTtyPath ?? null,
 		claim.secret,
 		claim.status,
 		claim.createdAt,
@@ -63,7 +71,7 @@ export function getAttachClaim(
 ): AttachClaim | null {
 	const row = db
 		.prepare(
-			`SELECT claim_id, collab_id, agent_type, mode, secret, status, created_at, expires_at, consumed_at
+			`SELECT claim_id, collab_id, agent_type, mode, target_mode, target_tty_path, secret, status, created_at, expires_at, consumed_at
        FROM attach_claim
        WHERE claim_id = ?`,
 		)

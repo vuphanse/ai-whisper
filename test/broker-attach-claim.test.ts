@@ -28,6 +28,41 @@ describe("broker attach claims", () => {
 		})).toThrow(/consumed/i);
 	});
 
+	it("preserves adopted target metadata through claim issue and complete", () => {
+		const runtime = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4311 });
+		runtime.control.startCollab({ collabId: "collab_adopt_claim", workspaceRoot: "/tmp/workspace", displayName: "adopt claim", now: "2026-04-06T16:00:00.000Z" });
+
+		const claim = runtime.control.issueAttachClaim({
+			collabId: "collab_adopt_claim",
+			agentType: "codex",
+			mode: "attach",
+			targetMode: "adopt_current_tty",
+			targetTtyPath: "/dev/ttys012",
+			now: "2026-04-06T16:00:00.000Z",
+			expiresAt: "2026-04-06T16:05:00.000Z",
+		});
+
+		expect(claim.targetMode).toBe("adopt_current_tty");
+		expect(claim.targetTtyPath).toBe("/dev/ttys012");
+
+		const accepted = runtime.control.completeAttachClaim({
+			claimId: claim.claimId,
+			secret: claim.secret,
+			sessionId: "session_codex_adopted",
+			provider: { providerId: "openai-codex-cli", toolFamily: "codex", providerVersion: "1.0.0" },
+			capabilities: { supportsDirectPackets: true, supportsNormalization: false, supportsRelayInterception: true, supportsLocalBuffering: true, supportsLaunchHooks: false, extensions: {} },
+			now: "2026-04-06T16:01:00.000Z",
+			bindingSource: "adopted",
+		});
+
+		expect(accepted.sessionId).toBe("session_codex_adopted");
+
+		const binding = runtime.control.listSessionBindings("collab_adopt_claim")
+			.find((item) => item.agentType === "codex");
+		expect(binding?.bindingSource).toBe("adopted");
+		expect(binding?.targetTtyPath).toBe("/dev/ttys012");
+	});
+
 	it("rejects a foreign session id whose collab or agentType does not match the claim", () => {
 		const runtime = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4311 });
 		runtime.control.startCollab({ collabId: "collab_a", workspaceRoot: "/tmp/a", displayName: "a", now: "2026-04-05T12:00:00.000Z" });

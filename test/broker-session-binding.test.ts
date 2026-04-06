@@ -28,6 +28,40 @@ describe("broker session bindings", () => {
 		expect(() => runtime.control.assertActiveBinding({ collabId: "collab_binding", sessionId: "session_codex_old" })).toThrow(/active binding/i);
 	});
 
+	it("stores adopted tty metadata on active bindings", () => {
+		const runtime = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4311 });
+		const now = "2026-04-06T16:20:00.000Z";
+
+		runtime.control.startCollab({
+			collabId: "collab_adopted_binding",
+			workspaceRoot: "/tmp/workspace",
+			displayName: "adopted binding test",
+			now,
+		});
+		runtime.control.registerSession({
+			sessionId: "session_codex_adopted",
+			collabId: "collab_adopted_binding",
+			agentType: "codex",
+			capabilities: { supportsDirectPackets: true, supportsNormalization: false, supportsRelayInterception: true, supportsLocalBuffering: true, supportsLaunchHooks: false, extensions: {} },
+			now,
+		});
+		runtime.control.setSessionBinding({
+			collabId: "collab_adopted_binding",
+			agentType: "codex",
+			sessionId: "session_codex_adopted",
+			bindingSource: "adopted",
+			targetTtyPath: "/dev/ttys012",
+			now,
+		});
+
+		const binding = runtime.control
+			.listSessionBindings("collab_adopted_binding")
+			.find((item) => item.agentType === "codex");
+
+		expect(binding?.bindingSource).toBe("adopted");
+		expect(binding?.targetTtyPath).toBe("/dev/ttys012");
+	});
+
 	it("old session remains assertable during pending_attach window", () => {
 		const runtime = createBrokerRuntime({
 			sqlitePath: ":memory:",

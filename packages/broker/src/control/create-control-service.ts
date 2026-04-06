@@ -612,6 +612,8 @@ export function createControlService(db: Database.Database) {
 			collabId: string;
 			agentType: "codex" | "claude";
 			mode: "attach" | "rebind" | "reconnect";
+			targetMode?: "snippet_shell" | "adopt_current_tty" | "explicit_tty";
+			targetTtyPath?: string | null;
 			now: string;
 			expiresAt: string;
 		}) {
@@ -629,6 +631,8 @@ export function createControlService(db: Database.Database) {
 				collabId: input.collabId,
 				agentType: input.agentType,
 				mode: input.mode,
+				targetMode: input.targetMode ?? "snippet_shell",
+				targetTtyPath: input.targetTtyPath ?? null,
 				secret,
 				status: "pending",
 				createdAt: input.now,
@@ -676,7 +680,7 @@ export function createControlService(db: Database.Database) {
 			provider: ProviderIdentity;
 			capabilities: ProviderCapabilities;
 			now: string;
-			bindingSource: "launched" | "attached";
+			bindingSource: "launched" | "attached" | "adopted";
 		}) {
 			const claim = getAttachClaim(db, input.claimId);
 			if (!claim) {
@@ -734,6 +738,7 @@ export function createControlService(db: Database.Database) {
 						bindingState: "bound",
 						activeSessionId: input.sessionId,
 						bindingSource: input.bindingSource,
+						targetTtyPath: claim.targetTtyPath ?? null,
 						pendingClaimId: null,
 						pendingClaimExpiresAt: null,
 						updatedAt: input.now,
@@ -772,7 +777,8 @@ export function createControlService(db: Database.Database) {
 			collabId: string;
 			agentType: "codex" | "claude";
 			sessionId: string;
-			bindingSource: "launched" | "attached";
+			bindingSource: "launched" | "attached" | "adopted";
+			targetTtyPath?: string | null;
 			now: string;
 		}) {
 			upsertSessionBinding(
@@ -784,6 +790,7 @@ export function createControlService(db: Database.Database) {
 					bindingState: "bound",
 					activeSessionId: input.sessionId,
 					bindingSource: input.bindingSource,
+					targetTtyPath: input.targetTtyPath ?? null,
 					pendingClaimId: null,
 					pendingClaimExpiresAt: null,
 					updatedAt: input.now,
