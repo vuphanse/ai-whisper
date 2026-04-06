@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { createCli, resolveReconnectTargetMode } from "../packages/cli/src/create-cli.ts";
 
 describe("cli command wiring", () => {
-	it("registers collab subcommands: start, status, tell, stop, attach, rebind, recover, reconnect, inspect", () => {
+	it("registers collab subcommands: start, status, tell, stop, attach, rebind, recover, reconnect, inspect, mount", () => {
 		const cli = createCli();
 		const collab = cli.commands.find((c) => c.name() === "collab");
 		expect(collab).toBeDefined();
 
 		const subcommandNames = collab!.commands.map((c) => c.name()).sort();
-		expect(subcommandNames).toEqual(["attach", "inspect", "rebind", "reconnect", "recover", "start", "status", "stop", "tell"]);
+		expect(subcommandNames).toEqual(["attach", "inspect", "mount", "rebind", "reconnect", "recover", "start", "status", "stop", "tell"]);
 	});
 
 	it("tell subcommand accepts --target and --action options", () => {

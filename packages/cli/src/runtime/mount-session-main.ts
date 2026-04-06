@@ -1,0 +1,188 @@
+import type { BrokerRuntime } from "@ai-whisper/broker";
+import { createLiveSessionRuntime } from "./live-session.js";
+import { runCompanionAgentLoop } from "./companion-agent-loop.js";
+import {
+	createInteractiveSessionForTarget,
+	createProviderForTarget,
+} from "./providers.js";
+import {
+	enqueueRelayWork,
+	formatRelayAcknowledgement,
+	formatRelayReplySummary,
+} from "./relay-service.js";
+import { waitForReply } from "./reply-wait.js";
+import { createCliSessionId } from "./id-factory.js";
+import { updateCliCollabState } from "./state-file.js";
+import { getStateFilePath } from "./paths.js";
+
+export function createMountSessionRuntime(input: {
+	target: "codex" | "claude";
+	ttyPath: string;
+	workspaceRoot: string;
+	claimId: string;
+	secret: string;
+	broker: BrokerRuntime;
+	updateState?: typeof updateCliCollabState;
+	createProvider?: typeof createProviderForTarget;
+	createInteractiveSession?: typeof createInteractiveSessionForTarget;
+	createLiveSession?: typeof createLiveSessionRuntime;
+	runLoop?: typeof runCompanionAgentLoop;
+}) {
+	return {
+		async start() {
+			const sessionId = createCliSessionId(input.target, new Date().toISOString());
+			const provider = (input.createProvider ?? createProviderForTarget)(input.target);
+			const interactiveSession = (input.createInteractiveSession ?? createInteractiveSessionForTarget)({
+				target: input.target,
+				cwd: process.cwd(),
+				stdout: process.stdout,
+			});
+
+			// Deferred claim — set after liveSession.start() proves the provider launched cleanly.
+			// onRelay guards against null so there is no race between relay arrival and claim completion.
+			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
+
+			// Mounted sessions own the terminal; process.stdin is the real tty read side.
+			// The live-session runtime intercepts inline @@ relay directives from stdin.
+			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
+				interactiveSession,
+				stdin: process.stdin,
+				stdout: process.stdout,
+				onRelay: async (directive, sendNow) => {
+					if (!resolvedClaim) {
+						throw new Error("Relay not available: session claim not yet completed");
+					}
+					const relay = enqueueRelayWork({
+						broker: input.broker,
+						collabId: resolvedClaim.collabId,
+						originSessionId: resolvedClaim.sessionId,
+						target: directive.target,
+						instruction: directive.instruction,
+						artifactPaths: [],
+						forceNewThread: directive.forceNewThread,
+						now: new Date().toISOString(),
+					});
+
+					sendNow(
+						`${formatRelayAcknowledgement({
+							target: directive.target,
+							createdNewThread: relay.createdNewThread,
+						})}\n`,
+					);
+
+					const reply = await waitForReply({
+						broker: input.broker,
+						threadId: relay.thread.threadId,
+						workItemId: relay.workItem.workItemId,
+					});
+
+					return `${formatRelayReplySummary({
+						target: directive.target,
+						replyKind: reply.kind,
+						content: reply.content,
+					})}\n`;
+				},
+			});
+
+			let stopLoop = async () => {};
+			let liveSessionStarted = false;
+			let stopping = false;
+			const stateFilePath = getStateFilePath(input.workspaceRoot);
+
+			const stop = async () => {
+				if (stopping) return;
+				stopping = true;
+				await stopLoop();
+				if (liveSessionStarted) {
+					await liveSession.stop();
+				}
+				try {
+					(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
+						const nextMountedSessions = { ...current.mountedSessions };
+						delete nextMountedSessions[input.target];
+						return {
+							...current,
+							mountedSessions: nextMountedSessions,
+						};
+					});
+				} catch {
+					// State cleanup is best-effort.
+				}
+				await input.broker.stop();
+			};
+
+			process.once("SIGINT", () => void stop().then(() => process.exit(0)));
+			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
+
+			try {
+				// Start the live session first — this launches the provider in the current terminal.
+				// If this fails, the claim stays unconsumed and the binding remains in pending_attach.
+				await liveSession.start();
+				liveSessionStarted = true;
+
+				// Only now consume the claim and flip the binding to "bound".
+				resolvedClaim = input.broker.control.completeAttachClaim({
+					claimId: input.claimId,
+					secret: input.secret,
+					sessionId,
+					provider: provider.getIdentity(),
+					capabilities: provider.getCapabilities(),
+					now: new Date().toISOString(),
+					bindingSource: "mounted",
+				});
+
+				// Update state file: record mounted session metadata + clear recovery state.
+				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
+					let next = {
+						...current,
+						mountedSessions: {
+							...current.mountedSessions,
+							[input.target]: {
+								agentType: input.target,
+								ttyPath: input.ttyPath,
+								sessionPid: process.pid,
+							},
+						},
+					};
+
+					// Clear recovery state if this was a reconnect (mirrors attach-session.ts pattern).
+					if (next.recovery.state === "recovered") {
+						const remainingDegraded = input.broker.control
+							.listSessionBindings(resolvedClaim!.collabId)
+							.some((b) => {
+								if (!b.activeSessionId) return false;
+								const s = input.broker.control
+									.listSessions(resolvedClaim!.collabId)
+									.find((sess) => sess.sessionId === b.activeSessionId);
+								return s?.healthState !== "healthy";
+							});
+
+						next = {
+							...next,
+							recovery: remainingDegraded
+								? { ...next.recovery, idleAfterRecovery: false }
+								: { state: "normal" as const, idleAfterRecovery: false, recoveredAt: null },
+						};
+					}
+
+					return next;
+				});
+
+				stopLoop = await (input.runLoop ?? runCompanionAgentLoop)({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+					sessionId: resolvedClaim.sessionId,
+					provider,
+					interactiveSession,
+				});
+			} catch (err) {
+				await stopLoop();
+				if (liveSessionStarted) {
+					await liveSession.stop();
+				}
+				await input.broker.stop();
+				throw err;
+			}
+		},
+	};
+}

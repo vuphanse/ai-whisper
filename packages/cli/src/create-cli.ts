@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { Command } from "commander";
 import { runCollabAttach } from "./commands/collab/attach.js";
+import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
@@ -248,6 +249,19 @@ export function createCli(): Command {
 			} else {
 				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
 			}
+		});
+
+	collab
+		.command("mount")
+		.description("Mount the current terminal as the managed session surface for a role")
+		.argument("<agent>", "Target agent: codex or claude")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (target: "codex" | "claude", opts: WorkspaceOpts) => {
+			await runCollabMount({
+				workspaceRoot: opts.workspace,
+				target,
+				now: new Date().toISOString(),
+			});
 		});
 
 	collab
