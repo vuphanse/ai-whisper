@@ -1,4 +1,5 @@
 .worktrees/
+.ai-whisper/
 docs/superpowers/plans/
 node_modules
 dist
