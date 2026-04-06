@@ -863,7 +863,7 @@ export function createControlService(db: Database.Database) {
 		},
 		appendRelayEvent(input: {
 			collabId: string;
-			eventType: string;
+			eventType: RelayEvent["eventType"];
 			senderAgent: string | null;
 			receiverAgent: string | null;
 			content: string;
