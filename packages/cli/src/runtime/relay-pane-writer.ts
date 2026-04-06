@@ -24,7 +24,6 @@ export function createRelayPaneWriter(input: {
 		relayResponse(event: {
 			senderAgent: string;
 			receiverAgent: string;
-			replyKind: string;
 			content: string;
 			now: string;
 		}) {
