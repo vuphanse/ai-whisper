@@ -8,6 +8,7 @@ import {
 	parseRelayDirective,
 } from "./relay-directive.js";
 import { createRelayLineBuffer } from "./relay-line-buffer.js";
+import { createBusyIndicator } from "./busy-indicator.js";
 import type { createRelayPaneWriter } from "./relay-pane-writer.js";
 
 const ESC = String.fromCharCode(0x1b);
@@ -151,6 +152,7 @@ export function createLiveSessionRuntime(input: {
 		directive: RelayDirective,
 		sendNow: (message: string) => void,
 	) => Promise<string | null>;
+	onRelayCancel?: () => void;
 	relayPaneWriter?: ReturnType<typeof createRelayPaneWriter>;
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
@@ -160,6 +162,9 @@ export function createLiveSessionRuntime(input: {
 	};
 	const previousRawMode = ttyStdin.isRaw;
 	const debugLogPath = process.env.AI_WHISPER_DEBUG_INPUT_LOG;
+	const busyIndicator = createBusyIndicator({
+		write: (data) => input.interactiveSession.sendLocalMessage(data),
+	});
 	const lineBuffer = createRelayLineBuffer({
 		getError: getRelayDirectiveError,
 		isRelayDirective: (line) => parseRelayDirective(line) !== null,
@@ -225,6 +230,25 @@ export function createLiveSessionRuntime(input: {
 			return;
 		}
 
+		// Block input while relay work is in progress
+		if (busyIndicator.isBusy()) {
+			// Only allow Ctrl+C (0x03) to trigger cancellation
+			if (sanitized.includes("\x03")) {
+				busyIndicator.hide();
+				if (input.onRelayCancel) {
+					input.onRelayCancel();
+				}
+				if (input.relayPaneWriter) {
+					input.relayPaneWriter.cancellation({
+						agent: "user",
+						content: "relay work cancelled by user",
+						now: new Date().toISOString(),
+					});
+				}
+			}
+			return;
+		}
+
 		for (const decision of lineBuffer.push(sanitized)) {
 			debug({
 				type: "decision",
@@ -263,6 +287,11 @@ export function createLiveSessionRuntime(input: {
 			return;
 		}
 
+		busyIndicator.show({
+			senderAgent: directive.target === "pull" ? "pull" : directive.target,
+			instruction: directive.instruction || "pull context",
+		});
+
 		try {
 			const message = await input.onRelay(
 				directive,
@@ -287,6 +316,8 @@ export function createLiveSessionRuntime(input: {
 			input.interactiveSession.sendLocalMessage(
 				`[ai-whisper] ${message}\n`,
 			);
+		} finally {
+			busyIndicator.hide();
 		}
 	}
 

@@ -47,11 +47,13 @@ async function main(): Promise<void> {
 		stdout: process.stdout,
 	});
 	const relayPaneWriter = createRelayPaneWriter({ broker, collabId });
+	const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
 	const liveSession = createLiveSessionRuntime({
 		interactiveSession,
 		stdin: process.stdin,
 		stdout: process.stdout,
 		relayPaneWriter,
+		onRelayCancel: () => { relayCancelHandle.cancel?.(); },
 		onRelay: async (directive, sendNow) => {
 			relayPaneWriter.relayDirective({
 				senderAgent: agentArg,
@@ -122,6 +124,7 @@ async function main(): Promise<void> {
 			provider,
 			interactiveSession,
 			relayPaneWriter,
+			relayCancelHandle,
 		});
 		await exitRequested;
 	} finally {

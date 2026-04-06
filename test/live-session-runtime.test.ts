@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { createFakePty } from "./helpers/fake-pty.ts";
 import { createLiveSessionRuntime } from "../packages/cli/src/runtime/live-session.ts";
 
+let _mockStdin: PassThrough | null = null;
+
+function createMockStdin() {
+	_mockStdin = new PassThrough();
+	return _mockStdin;
+}
+
+function emitInput(data: string) {
+	_mockStdin!.write(data);
+}
+
+function nextTick() {
+	return new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
 describe("live session runtime", () => {
 	it("forwards ordinary byte input to the host session without waiting for newline", async () => {
 		const stdin = new PassThrough();
@@ -649,5 +664,46 @@ describe("live session runtime", () => {
 		stdin.write("\u001b[?7u");
 
 		expect(fakePty.writes).toEqual([]);
+	});
+
+	it("blocks input while relay work is in progress", async () => {
+		const localMessages: string[] = [];
+		const userInputs: string[] = [];
+		let relayWorkResolve: () => void;
+		const relayWorkPromise = new Promise<void>((r) => { relayWorkResolve = r; });
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) { userInputs.push(data); },
+				sendLocalMessage(message: string) { localMessages.push(message); },
+				onExit() {},
+			},
+			stdin: createMockStdin(),
+			stdout: process.stdout,
+			onRelay: async () => {
+				await relayWorkPromise;
+				return null;
+			},
+			onRelayCancel: () => {}, // no-op — this test is about input blocking, not cancellation
+		});
+
+		await runtime.start();
+
+		// Trigger relay
+		emitInput("@@codex review\r");
+
+		// Try to type while relay is in progress — should be blocked
+		emitInput("hello");
+		expect(userInputs.join("")).not.toContain("hello");
+
+		// Complete relay work
+		relayWorkResolve!();
+		await nextTick();
+
+		// Now input should work
+		emitInput("hello again");
+		expect(userInputs.join("")).toContain("hello again");
 	});
 });

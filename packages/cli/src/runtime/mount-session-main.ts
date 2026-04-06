@@ -43,6 +43,7 @@ export function createMountSessionRuntime(input: {
 			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
 			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
 			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
+			const relayCancelHandle: { cancel: (() => void) | null } = { cancel: null };
 
 			// Mounted sessions own the terminal; process.stdin is the real tty read side.
 			// The live-session runtime intercepts inline @@ relay directives from stdin.
@@ -53,6 +54,7 @@ export function createMountSessionRuntime(input: {
 				get relayPaneWriter() {
 					return relayPaneWriter ?? undefined;
 				},
+				onRelayCancel: () => { relayCancelHandle.cancel?.(); },
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
 						throw new Error("Relay not available: session claim not yet completed");
@@ -215,6 +217,7 @@ export function createMountSessionRuntime(input: {
 					provider,
 					interactiveSession,
 					relayPaneWriter: relayPaneWriter!,
+					relayCancelHandle,
 				});
 			} catch (err) {
 				await stopLoop();
