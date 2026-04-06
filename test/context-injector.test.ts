@@ -4,67 +4,68 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { createSessionId } from "../packages/shared/src/index.ts";
+import { createContextInjector } from "../packages/cli/src/runtime/context-injector.ts";
+
+function setupBrokerWithThread() {
+	const dir = mkdtempSync(join(tmpdir(), "ai-whisper-consumed-"));
+	const broker = createBrokerRuntime({
+		sqlitePath: join(dir, "broker.sqlite"),
+		host: "127.0.0.1",
+		port: 4311,
+	});
+
+	broker.control.startCollab({
+		collabId: "collab_1",
+		workspaceRoot: "/tmp/test",
+		displayName: "test",
+		now: "2026-04-06T00:00:00.000Z",
+	});
+
+	const codexSession = createSessionId("session_codex");
+	const claudeSession = createSessionId("session_claude");
+
+	broker.control.registerSession({
+		sessionId: codexSession,
+		collabId: "collab_1",
+		agentType: "codex",
+		capabilities: { supportsDirectPackets: true },
+		now: "2026-04-06T00:00:00.000Z",
+	});
+	broker.control.registerSession({
+		sessionId: claudeSession,
+		collabId: "collab_1",
+		agentType: "claude",
+		capabilities: { supportsDirectPackets: true },
+		now: "2026-04-06T00:00:00.000Z",
+	});
+
+	broker.control.setSessionBinding({
+		collabId: "collab_1",
+		agentType: "codex",
+		sessionId: codexSession,
+		bindingSource: "launched",
+		now: "2026-04-06T00:00:00.000Z",
+	});
+	broker.control.setSessionBinding({
+		collabId: "collab_1",
+		agentType: "claude",
+		sessionId: claudeSession,
+		bindingSource: "launched",
+		now: "2026-04-06T00:00:00.000Z",
+	});
+
+	const thread = broker.control.createThread({
+		threadId: "thread_test1",
+		collabId: "collab_1",
+		title: "test thread",
+		createdBySessionId: codexSession,
+		now: "2026-04-06T00:00:00.000Z",
+	});
+
+	return { broker, codexSession, claudeSession, thread };
+}
 
 describe("reply consumed tracking", () => {
-	function setupBrokerWithThread() {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-consumed-"));
-		const broker = createBrokerRuntime({
-			sqlitePath: join(dir, "broker.sqlite"),
-			host: "127.0.0.1",
-			port: 4311,
-		});
-
-		broker.control.startCollab({
-			collabId: "collab_1",
-			workspaceRoot: "/tmp/test",
-			displayName: "test",
-			now: "2026-04-06T00:00:00.000Z",
-		});
-
-		const codexSession = createSessionId("session_codex");
-		const claudeSession = createSessionId("session_claude");
-
-		broker.control.registerSession({
-			sessionId: codexSession,
-			collabId: "collab_1",
-			agentType: "codex",
-			capabilities: { supportsDirectPackets: true },
-			now: "2026-04-06T00:00:00.000Z",
-		});
-		broker.control.registerSession({
-			sessionId: claudeSession,
-			collabId: "collab_1",
-			agentType: "claude",
-			capabilities: { supportsDirectPackets: true },
-			now: "2026-04-06T00:00:00.000Z",
-		});
-
-		broker.control.setSessionBinding({
-			collabId: "collab_1",
-			agentType: "codex",
-			sessionId: codexSession,
-			bindingSource: "launched",
-			now: "2026-04-06T00:00:00.000Z",
-		});
-		broker.control.setSessionBinding({
-			collabId: "collab_1",
-			agentType: "claude",
-			sessionId: claudeSession,
-			bindingSource: "launched",
-			now: "2026-04-06T00:00:00.000Z",
-		});
-
-		const thread = broker.control.createThread({
-			threadId: "thread_test1",
-			collabId: "collab_1",
-			title: "test thread",
-			createdBySessionId: codexSession,
-			now: "2026-04-06T00:00:00.000Z",
-		});
-
-		return { broker, codexSession, claudeSession, thread };
-	}
-
 	it("lists unconsumed replies for a target session", () => {
 		const { broker, codexSession, claudeSession, thread } = setupBrokerWithThread();
 
@@ -161,5 +162,80 @@ describe("reply consumed tracking", () => {
 			forSessionId: claudeSession,
 		});
 		expect(forClaude).toHaveLength(1);
+	});
+});
+
+describe("context injector", () => {
+	it("builds context block from unconsumed replies", () => {
+		const { broker, codexSession, claudeSession, thread } = setupBrokerWithThread();
+
+		broker.control.enqueueWorkItem({
+			workItemId: "work_1",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			senderSessionId: claudeSession,
+			targetSessionId: codexSession,
+			requestedAction: "review_diff",
+			instruction: "review the implementation",
+			contextPacket: { kind: "full", goal: "review", currentState: "Context available", decisionsMade: [], assumptions: [], relevantArtifacts: [], openQuestions: [], successCriteria: [] },
+			now: "2026-04-06T00:01:00.000Z",
+		});
+
+		broker.control.postReply({
+			replyId: "reply_2",
+			threadId: thread.threadId,
+			collabId: "collab_1",
+			workItemId: "work_1",
+			sourceSessionId: codexSession,
+			kind: "review",
+			content: "Found 3 issues:\n1) Missing error handling\n2) No validation\n3) Blocking IO",
+			transitionIntent: "completed",
+			artifactManifestIds: [],
+			now: "2026-04-06T00:02:00.000Z",
+		});
+
+		const injector = createContextInjector({
+			broker,
+			collabId: "collab_1",
+			sessionId: claudeSession,
+		});
+
+		const result = injector.injectContext({
+			userInput: "Fix the findings from codex review",
+			activeThreadId: thread.threadId,
+		});
+
+		expect(result.injected).toBe(true);
+		expect(result.payload).toContain("[Context from recent relay exchange]");
+		expect(result.payload).toContain("Found 3 issues:");
+		expect(result.payload).toContain("Fix the findings from codex review");
+		expect(result.summary).toContain("codex");
+
+		// Should be consumed now
+		const again = injector.injectContext({
+			userInput: "anything",
+			activeThreadId: thread.threadId,
+		});
+		expect(again.injected).toBe(false);
+		expect(again.payload).toBe("anything");
+	});
+
+	it("returns unmodified input when no unconsumed replies exist", () => {
+		const { broker, claudeSession, thread } = setupBrokerWithThread();
+
+		const injector = createContextInjector({
+			broker,
+			collabId: "collab_1",
+			sessionId: claudeSession,
+		});
+
+		const result = injector.injectContext({
+			userInput: "do something",
+			activeThreadId: thread.threadId,
+		});
+
+		expect(result.injected).toBe(false);
+		expect(result.payload).toBe("do something");
+		expect(result.summary).toBeNull();
 	});
 });
