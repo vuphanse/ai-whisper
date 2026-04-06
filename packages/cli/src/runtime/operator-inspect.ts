@@ -25,6 +25,8 @@ export function buildInspectSnapshot(input: {
 			agentType,
 			bindingState: binding?.bindingState ?? "unbound",
 			healthState: session?.healthState ?? null,
+			bindingSource: binding?.bindingSource ?? null,
+			targetTtyPath: binding?.targetTtyPath ?? null,
 		};
 	});
 
@@ -112,6 +114,8 @@ export function formatInspectSnapshot(input: {
 		agentType: string;
 		bindingState: string;
 		healthState: string | null;
+		bindingSource?: string | null;
+		targetTtyPath?: string | null;
 	}>;
 	activeThread: {
 		threadId: string;
@@ -147,7 +151,7 @@ export function formatInspectSnapshot(input: {
 		"Roles:",
 		...input.roles.map(
 			(role) =>
-				`  - ${role.agentType}: ${role.bindingState}${role.healthState ? ` (${role.healthState})` : ""}`,
+				`  - ${role.agentType}: ${role.bindingState}${role.healthState ? ` (${role.healthState})` : ""}${role.bindingSource ? ` [${role.bindingSource}]` : ""}${role.targetTtyPath ? ` tty=${role.targetTtyPath}` : ""}`,
 		),
 	];
 

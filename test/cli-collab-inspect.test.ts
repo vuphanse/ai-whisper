@@ -336,6 +336,83 @@ describe("inspect flagged items outside display window", () => {
 	});
 });
 
+describe("adopted operator visibility", () => {
+	it("renders adopted binding source and tty path in inspect output", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_adopted",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [
+				{
+					agentType: "codex",
+					bindingState: "bound",
+					healthState: "healthy",
+					bindingSource: "adopted",
+					targetTtyPath: "/dev/ttys012",
+				},
+				{
+					agentType: "claude",
+					bindingState: "unbound",
+					healthState: null,
+					bindingSource: null,
+					targetTtyPath: null,
+				},
+			],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-06T17:00:00.000Z",
+		});
+
+		expect(output).toContain("codex: bound (healthy) [adopted]");
+		expect(output).toContain("/dev/ttys012");
+	});
+
+	it("surfaces adopted binding source in buildInspectSnapshot", () => {
+		const runtime = createBrokerRuntime({ sqlitePath: ":memory:", host: "127.0.0.1", port: 4470 });
+		const now = "2026-04-06T17:00:00.000Z";
+
+		runtime.control.startCollab({ collabId: "collab_adopt_snap", workspaceRoot: "/tmp", displayName: "adopt snap", now });
+		runtime.control.registerSession({
+			sessionId: "session_codex_adopt",
+			collabId: "collab_adopt_snap",
+			agentType: "codex",
+			capabilities: { supportsDirectPackets: true, supportsNormalization: false, supportsRelayInterception: true, supportsLocalBuffering: true, supportsLaunchHooks: false, extensions: {} },
+			now,
+		});
+		runtime.control.setSessionBinding({
+			collabId: "collab_adopt_snap",
+			agentType: "codex",
+			sessionId: "session_codex_adopt",
+			bindingSource: "adopted",
+			targetTtyPath: "/dev/ttys012",
+			now,
+		});
+
+		const snapshot = buildInspectSnapshot({
+			broker: runtime,
+			state: {
+				version: 4,
+				collabId: "collab_adopt_snap",
+				workspaceRoot: "/tmp",
+				broker: { sqlitePath: ":memory:", host: "127.0.0.1", port: 4470, pid: 1 },
+				launch: { mode: "none" },
+				ownedSessions: {},
+				startedAt: now,
+				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+				adoptedSessions: {},
+			},
+			now,
+		});
+
+		const codexRole = snapshot.roles.find((r) => r.agentType === "codex");
+		expect(codexRole?.bindingSource).toBe("adopted");
+		expect(codexRole?.targetTtyPath).toBe("/dev/ttys012");
+	});
+});
+
 describe("operator inspect renderer", () => {
 	it("truncates long reply content in compact mode", () => {
 		expect(truncatePreview("abcdefghijklmnopqrstuvwxyz", 12)).toBe("abcdefghi...");

@@ -158,17 +158,22 @@ export function createCli(): Command {
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--replace", "Replace the existing binding without prompting")
+		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
+		.option("--tty <path>", "Adopt an explicit local tty path")
 		.action(
 			async (
 				target: "codex" | "claude",
-				opts: WorkspaceOpts & { replace?: boolean },
+				opts: WorkspaceOpts & { replace?: boolean; adoptCurrentTty?: boolean; tty?: string },
 			) => {
+				const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
 				const result = await runCollabRebind({
 					workspaceRoot: opts.workspace,
 					target,
 					now: new Date().toISOString(),
 					...(opts.replace !== undefined ? { replace: opts.replace } : {}),
 					isInteractive: Boolean(process.stdin.isTTY),
+					targetMode,
+					...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
 					confirmReplace: async (message: string) => {
 						const rl = createInterface({ input: process.stdin, output: process.stdout });
 						return new Promise<boolean>((resolve) => {
@@ -179,7 +184,11 @@ export function createCli(): Command {
 						});
 					},
 				});
-				console.log(result.snippet);
+				if (result.mode === "snippet") {
+					console.log(result.snippet);
+				} else {
+					console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
+				}
 			},
 		);
 
@@ -200,13 +209,22 @@ export function createCli(): Command {
 		.description("Reconnect a remembered role after broker recovery")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action((target: string, opts: WorkspaceOpts) => {
+		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
+		.option("--tty <path>", "Adopt an explicit local tty path")
+		.action((target: string, opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
+			const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
 			const result = runCollabReconnect({
 				workspaceRoot: opts.workspace,
 				target: target as "codex" | "claude",
 				now: new Date().toISOString(),
+				targetMode,
+				...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
 			});
-			console.log(result.snippet);
+			if (result.mode === "snippet") {
+				console.log(result.snippet);
+			} else {
+				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
+			}
 		});
 
 	collab
