@@ -23,14 +23,19 @@ export function startAdoptionDaemon(input: {
 			input.ttyPath,
 			"--claim-id",
 			input.claimId,
-			"--secret",
-			input.secret,
 		],
 		{
 			detached: true,
 			stdio: "ignore",
+			env: {
+				...process.env,
+				AI_WHISPER_CLAIM_SECRET: input.secret,
+			},
 		},
 	);
 	child.unref();
-	return child.pid!;
+	if (child.pid === undefined) {
+		throw new Error(`Failed to spawn adoption daemon for ${input.target}`);
+	}
+	return child.pid;
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 
 export function resolveCurrentTty(): string {
 	const ttyPath = execFileSync("tty", [], { encoding: "utf8" }).trim();
@@ -21,5 +21,9 @@ export function validateExplicitTty(ttyPath: string): string {
 	if (!existsSync(ttyPath)) {
 		throw new Error(`TTY path does not exist: ${ttyPath}`);
 	}
-	return ttyPath;
+	const canonical = realpathSync(ttyPath);
+	if (!canonical.startsWith("/dev/")) {
+		throw new Error(`TTY path resolves outside /dev/: ${ttyPath} -> ${canonical}`);
+	}
+	return canonical;
 }

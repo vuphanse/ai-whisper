@@ -124,11 +124,10 @@ export function createAdoptSessionRuntime(input: {
 					// State file cleanup is best-effort
 				}
 				await input.broker.stop();
-				process.exit(0);
 			};
 
-			process.once("SIGINT", () => void stop());
-			process.once("SIGTERM", () => void stop());
+			process.once("SIGINT", () => void stop().then(() => process.exit(0)));
+			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
 			try {
 				await liveSession.start();

@@ -16,14 +16,13 @@ if (isEntryPoint) {
 	const workspaceArgIdx = args.indexOf("--workspace");
 	const ttyArgIdx = args.indexOf("--tty");
 	const claimIdArgIdx = args.indexOf("--claim-id");
-	const secretArgIdx = args.indexOf("--secret");
 	const workspaceRoot = workspaceArgIdx !== -1 ? args[workspaceArgIdx + 1] : undefined;
 	const ttyPath = ttyArgIdx !== -1 ? args[ttyArgIdx + 1] : undefined;
 	const claimId = claimIdArgIdx !== -1 ? args[claimIdArgIdx + 1] : undefined;
-	const secret = secretArgIdx !== -1 ? args[secretArgIdx + 1] : undefined;
+	const secret = process.env.AI_WHISPER_CLAIM_SECRET;
 
 	if (!target || !workspaceRoot || !ttyPath || !claimId || !secret) {
-		console.error("Usage: adopt-session <codex|claude> --workspace <path> --tty <path> --claim-id <id> --secret <secret>");
+		console.error("Usage: AI_WHISPER_CLAIM_SECRET=<secret> adopt-session <codex|claude> --workspace <path> --tty <path> --claim-id <id>");
 		process.exit(1);
 	}
 
