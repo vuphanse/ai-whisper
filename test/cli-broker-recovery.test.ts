@@ -376,6 +376,86 @@ describe("reconnect command", () => {
 			runCollabReconnect({ workspaceRoot: dir, target: "claude", now }),
 		).toThrow(/no remembered binding/i);
 	});
+
+	async function buildAdoptedReconnectFixture() {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-adopted-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const collabId = "collab_reconnect_adopted";
+		const now = "2026-04-06T17:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4412 });
+		broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "reconnect adopted", now });
+		broker.control.registerSession({
+			sessionId: "session_codex_adopted",
+			collabId,
+			agentType: "codex",
+			capabilities: {
+				supportsDirectPackets: true,
+				supportsNormalization: false,
+				supportsRelayInterception: true,
+				supportsLocalBuffering: true,
+				supportsLaunchHooks: false,
+				extensions: {},
+			},
+			now,
+		});
+		broker.control.setSessionBinding({
+			collabId,
+			agentType: "codex",
+			sessionId: "session_codex_adopted",
+			bindingSource: "adopted",
+			now,
+		});
+		broker.control.prepareCollabRecovery({ collabId, now });
+		await broker.stop();
+
+		const statePath = join(dir, ".ai-whisper", "runtime", "current-collab.json");
+		writeCliCollabState(statePath, {
+			version: 4,
+			collabId,
+			workspaceRoot: dir,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4412, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "recovered", idleAfterRecovery: true, recoveredAt: now },
+			adoptedSessions: {},
+		});
+
+		return { dir, collabId, sqlitePath, now };
+	}
+
+	it("defaults to adopt_current_tty mode when previous binding was adopted", async () => {
+		const { dir, now } = await buildAdoptedReconnectFixture();
+
+		const startDaemon = vi.fn(() => 99345);
+		const result = runCollabReconnect({
+			workspaceRoot: dir,
+			target: "codex",
+			now,
+			resolveCurrentTty: () => "/dev/ttys099",
+			startAdoptionDaemon: startDaemon,
+		});
+
+		expect(result.mode).toBe("adopted");
+		if (result.mode === "adopted") {
+			expect(result.ttyPath).toBe("/dev/ttys099");
+			expect(result.daemonPid).toBe(99345);
+		}
+	});
+
+	it("respects explicit snippet_shell targetMode even when previous binding was adopted", async () => {
+		const { dir, now } = await buildAdoptedReconnectFixture();
+
+		const result = runCollabReconnect({
+			workspaceRoot: dir,
+			target: "codex",
+			now,
+			targetMode: "snippet_shell",
+		});
+
+		expect(result.mode).toBe("snippet");
+	});
 });
 
 describe("recovery guards", () => {

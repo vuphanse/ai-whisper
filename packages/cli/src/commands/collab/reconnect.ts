@@ -58,7 +58,11 @@ export function runCollabReconnect(input: {
 		);
 	}
 
-	const targetMode = input.targetMode ?? "snippet_shell";
+	// When no explicit targetMode is provided, default based on how the role was previously bound.
+	// A session that was adopted should reconnect via adoption, not a paste snippet.
+	const defaultMode: "snippet_shell" | "adopt_current_tty" =
+		current.bindingSource === "adopted" ? "adopt_current_tty" : "snippet_shell";
+	const targetMode = input.targetMode ?? defaultMode;
 	const ttyPath =
 		targetMode === "adopt_current_tty"
 			? (input.resolveCurrentTty ?? defaultResolveCurrentTty)()

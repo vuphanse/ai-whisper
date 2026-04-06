@@ -31,6 +31,19 @@ function collectArtifact(value: string, previous: string[] = []): string[] {
 	return [...previous, value];
 }
 
+export function resolveReconnectTargetMode(opts: {
+	adoptCurrentTty?: boolean;
+	tty?: string;
+}): "adopt_current_tty" | "explicit_tty" | undefined {
+	if (opts.adoptCurrentTty) {
+		return "adopt_current_tty";
+	}
+	if (opts.tty) {
+		return "explicit_tty";
+	}
+	return undefined;
+}
+
 export function createCli(): Command {
 	const cli = new Command().name("whisper").description("ai-whisper CLI");
 
@@ -74,12 +87,13 @@ export function createCli(): Command {
 				if (status.recovery.state === "recovery_required") {
 					console.log("  Recovery required: run `whisper collab recover`");
 				} else if (status.recovery.state === "recovered") {
-					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>`");
+					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>` (adopted sessions auto-detect tty mode)");
 				}
 
 				for (const [role, binding] of [["Codex", status.roles.codex], ["Claude", status.roles.claude]] as const) {
 					const health = "healthState" in binding && binding.healthState ? ` (${binding.healthState})` : "";
-					console.log(`  ${role}: ${binding.bindingState}${health}`);
+					const source = "bindingSource" in binding && binding.bindingSource ? ` [${binding.bindingSource}]` : "";
+					console.log(`  ${role}: ${binding.bindingState}${health}${source}`);
 				}
 
 				console.log(
@@ -137,6 +151,9 @@ export function createCli(): Command {
 		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
 		.option("--tty <path>", "Adopt an explicit local tty path")
 		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
+			if (opts.adoptCurrentTty && opts.tty) {
+				throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
+			}
 			const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
 			const result = await runCollabAttach({
 				workspaceRoot: opts.workspace,
@@ -165,6 +182,9 @@ export function createCli(): Command {
 				target: "codex" | "claude",
 				opts: WorkspaceOpts & { replace?: boolean; adoptCurrentTty?: boolean; tty?: string },
 			) => {
+				if (opts.adoptCurrentTty && opts.tty) {
+					throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
+				}
 				const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
 				const result = await runCollabRebind({
 					workspaceRoot: opts.workspace,
@@ -212,12 +232,15 @@ export function createCli(): Command {
 		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
 		.option("--tty <path>", "Adopt an explicit local tty path")
 		.action((target: string, opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
-			const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
+			if (opts.adoptCurrentTty && opts.tty) {
+				throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
+			}
+			const targetMode = resolveReconnectTargetMode(opts);
 			const result = runCollabReconnect({
 				workspaceRoot: opts.workspace,
 				target: target as "codex" | "claude",
 				now: new Date().toISOString(),
-				targetMode,
+				...(targetMode ? { targetMode } : {}),
 				...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
 			});
 			if (result.mode === "snippet") {

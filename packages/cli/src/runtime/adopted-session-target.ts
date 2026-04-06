@@ -2,7 +2,14 @@ import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 
 export function resolveCurrentTty(): string {
-	const ttyPath = execFileSync("tty", [], { encoding: "utf8" }).trim();
+	const stdin = process.stdin as NodeJS.ReadStream & { path?: string };
+	const ttyPath =
+		stdin.isTTY && typeof stdin.path === "string"
+			? stdin.path
+			: execFileSync("tty", [], {
+					encoding: "utf8",
+					stdio: ["inherit", "pipe", "pipe"],
+			  }).trim();
 	if (!ttyPath.startsWith("/dev/")) {
 		throw new Error(
 			"Current shell is not attached to a local tty. `--adopt-current-tty` requires a real tty-backed shell.",

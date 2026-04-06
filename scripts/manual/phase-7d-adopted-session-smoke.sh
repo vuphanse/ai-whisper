@@ -14,14 +14,18 @@ Manual validation checklist for adopted-session attach:
   5. Confirm the shell returns and jobs still shows the stopped provider
   6. Run fg to resume the original provider session
   7. Confirm the original provider session resumes normally
-  8. Send a relay and verify relay rendering (preview, acknowledgement, reply-summary)
-  9. Run whisper collab status and confirm the role shows as adopted
-  10. Run whisper collab inspect and confirm tty path is visible
+  8. Ensure both roles are bound before testing broker-driven relay
+  9. From another terminal, run whisper collab tell --target <role> "say hello from smoke test"
+  10. Confirm the adopted terminal shows broker-driven acknowledgement and reply output
+  11. Run whisper collab status and confirm the role shows as bound and [adopted]
+  12. Run whisper collab inspect and confirm tty path is visible
 
 Validation points:
   - Shell remains usable after attach (no raw-mode takeover)
   - fg resumes the original provider process
-  - relay rendering (preview, acknowledgement, reply-summary) works on the adopted session
+  - both roles are bound before whisper collab tell is used
+  - whisper collab tell reaches the adopted daemon from another terminal
+  - write-side acknowledgement and reply-summary rendering work on the adopted session
   - status and inspect show the role as adopted with tty path
   - If the adopted agent dies, the role degrades visibly
 EOF

@@ -85,7 +85,7 @@ whisper collab reconnect codex
 whisper collab reconnect claude
 ```
 
-Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Each reconnect command prints the same kind of shell snippet described above: run it from a shell prompt in the terminal you want to dedicate to that role, not inside an already-running provider prompt. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
+Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. For roles that were originally bound via `--adopt-current-tty`, reconnect defaults to adoption mode — suspend the provider with `Ctrl+Z`, run `whisper collab reconnect <role>`, then `fg`. For snippet-based roles, reconnect prints a shell snippet as before. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
 
 ### Operator monitoring workflow (Phase 7C1)
 
@@ -120,13 +120,11 @@ For the macOS/iTerm-first manual workflow:
 5. verify the shell returns
 6. run `fg` to resume the original provider
 
-This flow is not complete until:
+The adopted session keeps the provider's terminal surface intact. The background daemon handles broker work items queued via `whisper collab tell` from another terminal.
 
-- the shell remains usable after attach
-- `fg` resumes the original provider
-- relay preview, acknowledgement, and reply-summary rendering behave acceptably on the adopted session
+**Limitation**: Inline `@@` relay directives (e.g., `@@codex review this`) are not available inside adopted sessions. The provider process owns the terminal's input after `fg`, and the background daemon cannot intercept keystrokes. Use `whisper collab tell --target codex "review this"` from a separate terminal instead.
 
-The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead.
+The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead. The two flags are mutually exclusive.
 
 ## Phase Roadmap
 

@@ -52,11 +52,14 @@ describe("companion agent loop", () => {
 		});
 
 		const handled: ProviderWorkRequest[] = [];
+		const localMessages: string[] = [];
 		const interactiveSession: InteractiveSessionController = {
 			start: () => Promise.resolve(),
 			stop: () => Promise.resolve(),
 			writeUserInput() {},
-			sendLocalMessage() {},
+			sendLocalMessage(message: string) {
+				localMessages.push(message);
+			},
 		};
 
 		const provider: CompanionProvider = {
@@ -142,6 +145,8 @@ describe("companion agent loop", () => {
 				.listReplies(thread.threadId)
 				.some((reply) => reply.workItemId === workItem.workItemId),
 		).toBe(true);
+		expect(localMessages.some((message) => message.includes("Received broker work"))).toBe(true);
+		expect(localMessages.some((message) => message.includes("[ai-whisper][codex] answer: handled status?"))).toBe(true);
 
 		await stop();
 	});

@@ -15,14 +15,17 @@ describe("phase 7d manual smoke script", () => {
 		expect(output).toContain("--provider");
 		expect(output).toContain("--workspace");
 		expect(output).toContain("Ctrl+Z");
+		expect(output).toContain("jobs");
 		expect(output).toContain("fg");
-		expect(output).toContain("relay rendering");
+		expect(output).toContain("whisper collab tell");
+		expect(output).toContain("[adopted]");
 	});
 
-	it("documents shell resume and relay rendering as required validation points", () => {
+	it("documents shell resume and broker-driven adopted relay validation points", () => {
 		const readme = readFileSync(resolve(process.cwd(), "README.md"), "utf8");
 		expect(readme).toContain("--adopt-current-tty");
 		expect(readme).toContain("Ctrl+Z");
 		expect(readme).toContain("fg");
+		expect(readme).toContain("whisper collab tell");
 	});
 });
