@@ -2,6 +2,20 @@
 
 **Date:** 2026-04-04
 
+## Reconciliation Update (2026-04-08)
+
+The relay execution assumptions in this document are no longer the current product direction for mounted relay.
+
+Spec follow-up:
+
+- `docs/superpowers/specs/2026-04-08-ai-whisper-turn-owned-mounted-relay-handoff-design.md`
+
+Reason for the correction:
+
+- the hidden non-interactive provider execution path broke the requirement that the visible Codex and Claude sessions should be the real workflow actors sharing the same collaboration topic and turn state
+
+This document remains useful historical context for the original relay decomposition and shared broker concepts, but its hidden-executor execution model should be treated as superseded for mounted relay.
+
 ## Purpose
 
 Narrow the originally broad post-MVP "Phase 6" bucket into one coherent next step: move the primary collaboration loop from the CLI into the live Codex and Claude sessions through explicit in-session relay.

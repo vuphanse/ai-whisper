@@ -2,6 +2,21 @@
 
 **Date:** 2026-04-06
 
+## Reconciliation Update (2026-04-08)
+
+The mounted relay execution assumptions in this document have been corrected by a follow-up spec:
+
+- `docs/superpowers/specs/2026-04-08-ai-whisper-turn-owned-mounted-relay-handoff-design.md`
+
+Reason for the correction:
+
+- the current mounted relay implementation kept the visible sessions as user-facing shells while hidden non-interactive provider invocations performed relay work
+- that broke the intended Reviewer/Implementer baton-pass workflow because the visible sessions were not the real execution surfaces
+
+This Phase 7E design remains valid for the terminal-first mounted-session lifecycle, terminal ownership model, and mounted binding semantics.
+
+But the relay behavior described here should now be read together with the follow-up turn-owned handoff spec, which supersedes the earlier hidden-executor relay assumptions for mounted sessions.
+
 ## Purpose
 
 Phase 7D made it possible to bind already-running Codex and Claude sessions from normal macOS/iTerm shells. That solved the shell-resume and recovery side of the personal workflow, but it did not solve the original inline relay requirement.
