@@ -206,6 +206,42 @@ describe("cli collab status enriched", () => {
 	});
 });
 
+describe("turn-owned relay status", () => {
+	it("includes turnOwner, waitingAgent, and handoffState in the status payload", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-status-turn-"));
+		const runtimeDir = join(workspaceRoot, ".ai-whisper", "runtime");
+		mkdirSync(runtimeDir, { recursive: true });
+		const sqlitePath = join(runtimeDir, "broker.sqlite");
+		const collabId = "collab_turn_status";
+		const now = "2026-04-08T00:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4323 });
+		broker.control.startCollab({ collabId, workspaceRoot, displayName: "turn status test", now });
+		await broker.stop();
+
+		writeCliCollabState(getStateFilePath(workspaceRoot), {
+			version: 5,
+			collabId,
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4323, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
+			mountedSessions: {},
+		});
+
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
+		expect(status.active).toBe(true);
+		if (status.active) {
+			expect(status).toHaveProperty("turnOwner");
+			expect(status).toHaveProperty("waitingAgent");
+			expect(status).toHaveProperty("handoffState");
+		}
+	});
+});
+
 describe("phase 7c1 status output", () => {
 	it("includes per-role healthState on the status payload for bound roles", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-status-health-"));

@@ -15,6 +15,7 @@ export function buildInspectSnapshot(input: {
 	const activeThread = threads.find((thread) => thread.active) ?? null;
 	const bindings = input.broker.control.listSessionBindings(input.state.collabId);
 	const sessions = input.broker.control.listSessions(input.state.collabId);
+	const turn = input.broker.control.getRelayTurnState(input.state.collabId);
 
 	const roles = (["codex", "claude"] as const).map((agentType) => {
 		const binding = bindings.find((candidate) => candidate.agentType === agentType);
@@ -41,6 +42,9 @@ export function buildInspectSnapshot(input: {
 			replies: [],
 			flaggedItems: [],
 			refreshedAt: input.now,
+			turnOwner: turn.turnOwner,
+			waitingAgent: turn.waitingAgent,
+			handoffState: turn.handoffState,
 		};
 	}
 
@@ -103,6 +107,9 @@ export function buildInspectSnapshot(input: {
 		replies,
 		flaggedItems,
 		refreshedAt: input.now,
+		turnOwner: turn.turnOwner,
+		waitingAgent: turn.waitingAgent,
+		handoffState: turn.handoffState,
 	};
 }
 
@@ -142,6 +149,9 @@ export function formatInspectSnapshot(input: {
 	flaggedItems: Array<{ workItemId: string; deliveryState: string; instructionPreview: string }>;
 	watch: boolean;
 	refreshedAt: string;
+	turnOwner?: "codex" | "claude" | "none";
+	waitingAgent?: "codex" | "claude" | null;
+	handoffState?: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
 }) {
 	const lines = [
 		...(input.watch ? [`Live Inspect (${input.refreshedAt})`] : []),
@@ -153,6 +163,9 @@ export function formatInspectSnapshot(input: {
 			(role) =>
 				`  - ${role.agentType}: ${role.bindingState}${role.healthState ? ` (${role.healthState})` : ""}${role.bindingSource ? ` [${role.bindingSource}]` : ""}${role.targetTtyPath ? ` tty=${role.targetTtyPath}` : ""}`,
 		),
+		`Turn owner: ${input.turnOwner ?? "none"}`,
+		`Waiting: ${input.waitingAgent ?? "none"}`,
+		`Handoff state: ${input.handoffState ?? "idle"}`,
 	];
 
 	if (!input.activeThread) {

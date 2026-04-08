@@ -120,6 +120,9 @@ export function formatStatusPanel(input: {
 	activeThreadTitle: string | null;
 	uptime: string;
 	lastRelayAge: string | null;
+	turnOwner: "codex" | "claude" | "none";
+	waitingAgent: "codex" | "claude" | null;
+	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
 }): string {
 	const lines: string[] = [];
 
@@ -148,6 +151,13 @@ export function formatStatusPanel(input: {
 	lines.push(`Uptime: ${input.uptime}`);
 	if (input.lastRelayAge) {
 		lines.push(`${GREEN}Last relay: ${input.lastRelayAge}${RESET}`);
+	}
+	lines.push(`Turn owner: ${input.turnOwner}`);
+	if (input.waitingAgent) {
+		lines.push(`Waiting: ${input.waitingAgent}`);
+	}
+	if (input.handoffState !== "idle") {
+		lines.push(`Handoff: ${input.handoffState.replaceAll("_", " ")}`);
 	}
 
 	return lines.join("\n");

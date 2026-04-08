@@ -24,6 +24,7 @@ type BrokerLike = {
 		acceptRelayHandoff(input: { handoffId: string; acceptedAt: string }): void;
 		declineRelayHandoff(input: { handoffId: string; now: string }): void;
 		deferRelayHandoff(input: { handoffId: string; deferredAt: string }): void;
+		failRelayHandoffOnDisconnect?(input: { handoffId: string; now: string }): void;
 		handoffBackRelay?(input: {
 			handoffId: string;
 			nextHandoffId: string;
@@ -180,6 +181,20 @@ export function createMountedTurnOwnedRelay(input: {
 				now,
 			});
 			input.turnCapture?.reset();
+		},
+
+		async handleOwnerDisconnect() {
+			const state = input.broker.control.getRelayTurnState(input.collabId);
+			if (!state.unresolvedHandoffId) {
+				return;
+			}
+			input.broker.control.failRelayHandoffOnDisconnect?.({
+				handoffId: state.unresolvedHandoffId,
+				now: new Date().toISOString(),
+			});
+			input.writeLocalMessage(
+				`[ai-whisper] Mounted ${input.currentAgent} session disconnected during unresolved handoff.`,
+			);
 		},
 	};
 }

@@ -474,6 +474,46 @@ describe("operator inspect renderer", () => {
 	});
 });
 
+describe("turn-owned relay inspect", () => {
+	it("renders turn owner, waiting agent, and handoff state in inspect output", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-turn-"));
+		const sqlitePath = join(workspaceRoot, "broker.sqlite");
+		const now = "2026-04-08T00:00:00.000Z";
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4324 });
+
+		broker.control.startCollab({
+			collabId: "collab_inspect_turn",
+			workspaceRoot,
+			displayName: "inspect turn",
+			now,
+		});
+		await broker.stop();
+
+		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
+			version: 5,
+			collabId: "collab_inspect_turn",
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4324, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
+			mountedSessions: {},
+		});
+
+		const output = await runCollabInspect({
+			workspaceRoot,
+			now,
+			watch: false,
+			assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+		});
+		expect(output).toContain("Turn owner:");
+		expect(output).toContain("Waiting:");
+		expect(output).toContain("Handoff state:");
+	});
+});
+
 describe("mounted operator visibility", () => {
 	it("renders mounted binding source and tty path in inspect output", () => {
 		const output = formatInspectSnapshot({

@@ -134,12 +134,36 @@ describe("relay monitor", () => {
 				activeThreadTitle: "impl review",
 				uptime: "2m15s",
 				lastRelayAge: "15s ago",
+				turnOwner: "none",
+				waitingAgent: null,
+				handoffState: "idle",
 			});
 
 			expect(output).toContain("claude");
 			expect(output).toContain("codex");
 			expect(output).toContain("active");
 			expect(output).toContain("impl review");
+		});
+
+		it("renders turn owner, waiting side, and stale handoff state", () => {
+			const output = formatStatusPanel({
+				providers: [
+					{ name: "claude", health: "online" },
+					{ name: "codex", health: "online" },
+				],
+				collabState: "active",
+				threadCount: 1,
+				activeThreadTitle: "turn handoff",
+				uptime: "5m",
+				lastRelayAge: "2m ago",
+				turnOwner: "claude",
+				waitingAgent: "codex",
+				handoffState: "stale_handoff",
+			});
+
+			expect(output).toContain("Turn owner: claude");
+			expect(output).toContain("Waiting: codex");
+			expect(output).toContain("stale handoff");
 		});
 	});
 });

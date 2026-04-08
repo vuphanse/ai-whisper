@@ -94,6 +94,8 @@ export async function runCollabStatus(input: {
 	const codexBinding = bindings.find((b) => b.agentType === "codex");
 	const claudeBinding = bindings.find((b) => b.agentType === "claude");
 
+	const turn = broker.control.getRelayTurnState(state.collabId);
+
 	await broker.stop();
 
 	function enrichBinding(
@@ -126,5 +128,8 @@ export async function runCollabStatus(input: {
 		activeThread: activeThread
 			? { threadId: activeThread.threadId, title: activeThread.title }
 			: null,
+		turnOwner: turn.turnOwner,
+		waitingAgent: turn.waitingAgent,
+		handoffState: turn.handoffState,
 	};
 }

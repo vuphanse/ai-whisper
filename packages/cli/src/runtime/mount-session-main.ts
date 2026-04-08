@@ -211,7 +211,12 @@ export function createMountSessionRuntime(input: {
 
 				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
 				// or provider crashes). stop() is idempotent via the `stopping` guard.
-				interactiveSession.onExit(() => void stop().then(() => process.exit(0)));
+				interactiveSession.onExit(() => {
+					if (resolvedClaim && relayPaneWriter) {
+						void turnRelay.handleOwnerDisconnect();
+					}
+					void stop().then(() => process.exit(0));
+				});
 
 				ownerRefreshTimer = setInterval(() => {
 					void turnRelay.refreshOwnerView();

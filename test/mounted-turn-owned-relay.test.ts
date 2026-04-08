@@ -316,6 +316,40 @@ describe("mounted turn-owned relay", () => {
 		);
 	});
 
+	it("releases the sender and marks the handoff degraded when the owner session exits", async () => {
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 10_000,
+				})),
+				failRelayHandoffOnDisconnect: vi.fn(),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+				getRelayHandoff: vi.fn(() => null),
+			},
+		};
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: async (_args: { prompt: string; initialValue: string }) => null,
+		});
+
+		await relay.handleOwnerDisconnect();
+
+		expect(broker.control.failRelayHandoffOnDisconnect).toHaveBeenCalledWith(
+			expect.objectContaining({ handoffId: "handoff_1" }),
+		);
+	});
+
 	it("swallows ordinary waiting-side input but allows Ctrl+C", async () => {
 		const stdin = new PassThrough();
 		const localMessages: string[] = [];
