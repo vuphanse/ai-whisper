@@ -27,6 +27,7 @@ describe("mounted turn-owned relay", () => {
 				})),
 				acceptRelayHandoff: vi.fn(),
 				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
 			},
 		};
 
@@ -67,6 +68,7 @@ describe("mounted turn-owned relay", () => {
 				})),
 				acceptRelayHandoff: vi.fn(),
 				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
 			},
 		};
 
@@ -145,6 +147,9 @@ describe("mounted turn-owned relay", () => {
 					requestText: "Implement the approved plan",
 					status: "deferred" as const,
 				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
 			},
 		};
 

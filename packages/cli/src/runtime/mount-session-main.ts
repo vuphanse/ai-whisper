@@ -41,6 +41,7 @@ export function createMountSessionRuntime(input: {
 			let stopLoop = async () => {};
 			let liveSessionStarted = false;
 			let stopping = false;
+			let closeLineReader = () => {};
 			const stateFilePath = getStateFilePath(input.workspaceRoot);
 
 			// liveSession is set after the collab claim resolves so collabId is available
@@ -55,6 +56,7 @@ export function createMountSessionRuntime(input: {
 					clearInterval(ownerRefreshTimer);
 					ownerRefreshTimer = null;
 				}
+				closeLineReader();
 				await stopLoop();
 				if (liveSessionStarted && liveSession) {
 					await liveSession.stop();
@@ -114,10 +116,12 @@ export function createMountSessionRuntime(input: {
 				// Must happen before createLiveSessionRuntime so the waiting gate can be
 				// passed directly — spread would evaluate the getter once at call time and
 				// freeze it as undefined if turnRelay were still null.
-				const readLine = createLocalModalLineReader({
+				const lineReader = createLocalModalLineReader({
 					stdin: process.stdin,
 					stdout: process.stdout,
 				});
+				const readLine = lineReader.readLine;
+				closeLineReader = lineReader.close;
 
 				const turnRelay = createMountedTurnOwnedRelay({
 					broker: input.broker,

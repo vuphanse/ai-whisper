@@ -109,13 +109,13 @@ export function createMountedTurnOwnedRelay(input: {
 				initialValue: handoff.requestText,
 			});
 			if (composed === null) return;
+			input.turnCapture?.reset();
+			const text = composed.endsWith("\n") ? composed : `${composed}\n`;
+			input.writeUserInput(text);
 			input.broker.control.acceptRelayHandoff({
 				handoffId: handoff.handoffId,
 				acceptedAt: new Date().toISOString(),
 			});
-			input.turnCapture?.reset();
-			const text = composed.endsWith("\n") ? composed : `${composed}\n`;
-			input.writeUserInput(text);
 		},
 
 		async declinePendingHandoff() {

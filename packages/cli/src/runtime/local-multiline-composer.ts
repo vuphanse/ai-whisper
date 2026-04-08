@@ -10,7 +10,10 @@ export function createLocalModalLineReader(input: {
 		terminal: true,
 	});
 
-	return () => rl.question("");
+	return {
+		readLine: () => rl.question(""),
+		close: () => rl.close(),
+	};
 }
 
 export function createLocalMultilineComposer(input: {
