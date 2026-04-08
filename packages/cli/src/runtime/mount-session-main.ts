@@ -13,6 +13,7 @@ import { getStateFilePath } from "./paths.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
 import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
 import { createLocalMultilineComposer, createLocalModalLineReader } from "./local-multiline-composer.js";
+import { createAssistantTurnCapture } from "./assistant-turn-capture.js";
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -123,6 +124,11 @@ export function createMountSessionRuntime(input: {
 				const readLine = lineReader.readLine;
 				closeLineReader = lineReader.close;
 
+				const turnCapture = createAssistantTurnCapture();
+				interactiveSession.onProviderOutput?.((data: string) => {
+					turnCapture.recordProviderOutput(data);
+				});
+
 				const turnRelay = createMountedTurnOwnedRelay({
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
@@ -138,6 +144,7 @@ export function createMountSessionRuntime(input: {
 						});
 						return composer.run();
 					},
+					turnCapture,
 				});
 
 				const onRelay = async (

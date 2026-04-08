@@ -8,4 +8,5 @@ export interface InteractiveSessionController {
 	writeUserInput(data: string): void;
 	sendLocalMessage(message: string): void;
 	onExit(handler: () => void): void;
+	onProviderOutput?(handler: (data: string) => void): void;
 }

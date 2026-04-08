@@ -24,6 +24,14 @@ type BrokerLike = {
 		acceptRelayHandoff(input: { handoffId: string; acceptedAt: string }): void;
 		declineRelayHandoff(input: { handoffId: string; now: string }): void;
 		deferRelayHandoff(input: { handoffId: string; deferredAt: string }): void;
+		handoffBackRelay?(input: {
+			handoffId: string;
+			nextHandoffId: string;
+			senderAgent: "codex" | "claude";
+			targetAgent: "codex" | "claude";
+			requestText: string;
+			now: string;
+		}): void;
 	};
 };
 
@@ -34,7 +42,11 @@ export function createMountedTurnOwnedRelay(input: {
 	writeLocalMessage: (text: string) => void;
 	writeUserInput: (text: string) => void;
 	openComposer: (args: { prompt: string; initialValue: string }) => Promise<string | null>;
-	turnCapture?: { reset(): void };
+	turnCapture?: {
+		reset(): void;
+		finishAssistantTurn(): void;
+		extractLatestAssistantTurn(): { confidence: "high" | "low"; text: string | null };
+	};
 }) {
 	const STALE_HANDOFF_AFTER_MS = 5 * 60_000;
 
@@ -64,6 +76,17 @@ export function createMountedTurnOwnedRelay(input: {
 		const handoff = input.broker.control.getRelayHandoff(state.unresolvedHandoffId);
 		if (!handoff) return null;
 		if (handoff.status !== "pending" && handoff.status !== "deferred") return null;
+		if (handoff.targetAgent !== input.currentAgent) return null;
+		return handoff;
+	}
+
+	function getAcceptedHandoff(): RelayHandoff | null {
+		const state = refreshTurnState();
+		if (state.turnOwner !== input.currentAgent) return null;
+		if (!state.unresolvedHandoffId) return null;
+		const handoff = input.broker.control.getRelayHandoff(state.unresolvedHandoffId);
+		if (!handoff) return null;
+		if (handoff.status !== "accepted") return null;
 		if (handoff.targetAgent !== input.currentAgent) return null;
 		return handoff;
 	}
@@ -133,6 +156,28 @@ export function createMountedTurnOwnedRelay(input: {
 			input.broker.control.deferRelayHandoff({
 				handoffId: handoff.handoffId,
 				deferredAt: new Date().toISOString(),
+			});
+		},
+
+		async handBackTo(target: "codex" | "claude") {
+			const handoff = getAcceptedHandoff();
+			if (!handoff) return;
+			input.turnCapture?.finishAssistantTurn();
+			const captured = input.turnCapture?.extractLatestAssistantTurn() ?? { confidence: "low" as const, text: null };
+			const initialValue = captured.confidence === "high" && captured.text !== null ? captured.text : "";
+			const composed = await input.openComposer({
+				prompt: `[ai-whisper] Hand back to ${target}`,
+				initialValue,
+			});
+			if (composed === null) return;
+			const now = new Date().toISOString();
+			input.broker.control.handoffBackRelay?.({
+				handoffId: handoff.handoffId,
+				nextHandoffId: `handoff_${now.replace(/[^0-9]/g, "")}`,
+				senderAgent: input.currentAgent,
+				targetAgent: target,
+				requestText: composed,
+				now,
 			});
 		},
 	};

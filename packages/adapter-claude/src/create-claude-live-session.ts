@@ -40,8 +40,10 @@ export function createClaudeLiveSession(input: {
 }): InteractiveSessionController {
 	let pty: PtyLike | null = null;
 	let exitHandler: (() => void) | null = null;
+	let outputHandler: ((data: string) => void) | null = null;
 
 	function handleData(data: string) {
+		outputHandler?.(data);
 		input.stdout.write(data);
 	}
 
@@ -72,6 +74,9 @@ export function createClaudeLiveSession(input: {
 		},
 		onExit(handler: () => void) {
 			exitHandler = handler;
+		},
+		onProviderOutput(handler: (data: string) => void) {
+			outputHandler = handler;
 		},
 	};
 }
