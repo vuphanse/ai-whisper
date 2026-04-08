@@ -96,6 +96,7 @@ This follow-up includes:
 - explicit turn ownership for mounted relay
 - pending handoff lifecycle for mounted sessions
 - sender-side waiting/blocking driven by turn state
+- explicit waiting-side stdin interception in mounted runtime
 - owner-side pending handoff UI in the mounted PTY
 - guaranteed safe accept flow using a multiline local composer before injection
 - explicit bare decline
@@ -130,6 +131,17 @@ When the sender issues `@@codex ...` or `@@claude ...`:
 - the sender sees waiting UX tied to the new owner
 - sender input remains blocked until the owner resolves the handoff
 
+The blocking mechanism must be implemented explicitly in mounted runtime.
+
+Mounted runtime is the foreground terminal owner for mounted sessions, so it should:
+
+- continue reading stdin normally
+- swallow ordinary user keystrokes on the waiting side instead of forwarding them to the provider PTY
+- keep only the allowed workflow escape path such as `Ctrl+C`
+- redraw waiting UX reactively while the sender is blocked
+
+The design must not rely on passive PTY behavior or assume that a provider shell will block keyboard input on its own.
+
 ### Owner Side
 
 The owner receives a pending handoff card in the visible mounted PTY.
@@ -141,6 +153,24 @@ The owner may:
 - decline
 
 Deferring does not release the sender. It only means the owner keeps the turn while postponing execution of the pending handoff task.
+
+### Stale Handoffs
+
+Deferred handoffs may remain pending for a long time, and the sender still waits.
+
+For this phase, the workflow contract should remain strict:
+
+- a stale handoff does not automatically release the sender
+- a stale handoff does not automatically return ownership
+
+Instead, the system should surface explicit stale visibility:
+
+- record handoff age
+- mark long-pending handoffs as `stale_handoff`
+- show stale state clearly in relay monitor, status, and inspect output
+- preserve explicit owner action as the only normal way to resolve the handoff
+
+This preserves the baton-pass contract without silently changing workflow state behind the users' backs.
 
 Decline is bare:
 
@@ -192,6 +222,21 @@ Cancellation semantics split into two phases:
 
 This is stronger than the old hidden-executor path, where in-flight cancellation was only best-effort after delivery.
 
+## Overlapping Handoffs
+
+For this phase, overlapping unresolved handoffs are not allowed.
+
+Rule:
+
+- only one unresolved handoff may exist at a time for a collab
+
+That means:
+
+- if a handoff is pending, accepted, deferred, or otherwise unresolved, a new relay attempt should be rejected locally
+- the rejection should explain that the current handoff must be resolved before another relay can begin
+
+This keeps the single-owner workflow model unambiguous and avoids queue semantics in the first slice.
+
 ## Handback And Result Capture
 
 ### Explicit Handback
@@ -210,6 +255,27 @@ Handback result capture should default to:
 - latest assistant turn only
 
 This is the best candidate for a concise return payload and avoids dragging in unrelated output from the whole turn.
+
+### Latest Assistant Turn Boundary
+
+For this phase, "latest assistant turn" should be interpreted conservatively.
+
+The mounted runtime should attempt to capture:
+
+- the most recent completed assistant-output block observed after handoff acceptance
+- excluding local workflow overlays, ANSI-only redraws, and owner keystrokes
+
+It should not assume perfect provider-native semantic boundaries.
+
+### Low-Confidence Extraction Rule
+
+Extraction should be treated as low-confidence when any of the following is true:
+
+- no completed assistant-output block has been observed since handoff acceptance
+- provider output appears to still be streaming or actively in progress
+- captured content is empty after stripping ANSI control sequences and whitespace
+- captured content is dominated by workflow overlays, tool markup, or terminal noise rather than assistant content
+- user input and provider output are interleaved in a way that prevents a clean latest-assistant-turn boundary from being identified
 
 ### Low-Confidence Fallback
 
@@ -244,6 +310,8 @@ It should track:
 - handoff lifecycle events
 - sender waiting state
 - decline/cancel/handback events
+- stale handoff state and age metadata
+- unresolved handoff exclusivity
 
 It should not remain the hidden execution engine for mounted relay as the primary product model.
 
@@ -255,11 +323,14 @@ It should own:
 
 - outgoing handoff interception
 - sender blocking
+- waiting-side stdin swallowing except the workflow escape path
 - pending handoff card rendering
 - accept composer rendering
 - safe request injection after accept submit
 - owner-side capture of candidate assistant output for handback
 - handback composer rendering
+
+Mounted runtime should also detect owner-session termination during unresolved handoff and surface that failure into workflow state.
 
 ### Relay Monitor Role
 
@@ -269,10 +340,13 @@ Relay monitor should evolve from request/response log display into explicit work
 - waiting role
 - pending handoff
 - accepted/in-progress state
+- stale handoff state
 - declines
 - handback transitions
 
 The monitor remains an operator surface, but it should reflect the turn model directly.
+
+Monitor refresh should be driven by broker state changes or repeated reads from broker truth, not by local assumptions cached only inside one mounted runtime.
 
 ## Legacy Transitional State
 
@@ -281,6 +355,17 @@ The current hidden `handleWork(...)` execution path may still exist in code temp
 However, the updated product truth is:
 
 - mounted relay is not considered correct if the visible session is not the real actor
+
+## Disconnect And Failure Handling
+
+If the owner mounted session disconnects or crashes while a handoff is unresolved:
+
+- the handoff must not remain silently pending forever
+- the workflow should move to a failed or degraded handoff state
+- the blocked sender should be released
+- relay monitor, status, and inspect should surface recovery guidance clearly
+
+This should not be modeled as an implicit decline, because the owner did not choose to reject the handoff.
 
 The new spec should treat the hidden executor path as transitional legacy behavior, not as the desired mounted relay architecture.
 
@@ -299,6 +384,18 @@ The follow-up implementation should prove:
 9. handback capture prefers latest assistant turn only
 10. low-confidence extraction falls back to a blank multiline handback composer
 11. relay monitor reflects turn owner and handoff lifecycle states
+
+## Test Harness Requirements
+
+The implementation plan should explicitly account for test infrastructure supporting:
+
+- mounted runtime stdin interception on the waiting side
+- PTY-like owner-session transcript capture for handback extraction
+- transcript fixtures that include ANSI noise, workflow overlays, and interleaved user/provider output
+- owner disconnect during unresolved handoff
+- local rejection of overlapping unresolved handoffs
+
+These are integration-heavy behaviors and should not be left implicit in the plan.
 
 ## Completion Criteria
 
