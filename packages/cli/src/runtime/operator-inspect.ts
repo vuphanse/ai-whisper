@@ -149,9 +149,9 @@ export function formatInspectSnapshot(input: {
 	flaggedItems: Array<{ workItemId: string; deliveryState: string; instructionPreview: string }>;
 	watch: boolean;
 	refreshedAt: string;
-	turnOwner?: "codex" | "claude" | "none";
-	waitingAgent?: "codex" | "claude" | null;
-	handoffState?: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
+	turnOwner: "codex" | "claude" | "none";
+	waitingAgent: "codex" | "claude" | null;
+	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
 }) {
 	const lines = [
 		...(input.watch ? [`Live Inspect (${input.refreshedAt})`] : []),

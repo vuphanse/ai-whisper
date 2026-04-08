@@ -50,6 +50,7 @@ export function createMountedTurnOwnedRelay(input: {
 	};
 }) {
 	const STALE_HANDOFF_AFTER_MS = 5 * 60_000;
+	let disconnectHandled = false;
 
 	function refreshTurnState(now = new Date().toISOString()): RelayTurnState {
 		let state = input.broker.control.getRelayTurnState(input.collabId, now);
@@ -184,6 +185,8 @@ export function createMountedTurnOwnedRelay(input: {
 		},
 
 		async handleOwnerDisconnect() {
+			if (disconnectHandled) return;
+			disconnectHandled = true;
 			const state = input.broker.control.getRelayTurnState(input.collabId);
 			if (!state.unresolvedHandoffId) {
 				return;

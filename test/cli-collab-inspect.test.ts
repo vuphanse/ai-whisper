@@ -372,6 +372,9 @@ describe("adopted operator visibility", () => {
 			flaggedItems: [],
 			watch: false,
 			refreshedAt: "2026-04-06T17:00:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
 		});
 
 		expect(output).toContain("codex: bound (healthy) [adopted]");
@@ -465,6 +468,9 @@ describe("operator inspect renderer", () => {
 			flaggedItems: [],
 			watch: false,
 			refreshedAt: "2026-04-06T09:30:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
 		});
 
 		expect(output).toContain("Collab: collab_123");
@@ -535,6 +541,9 @@ describe("mounted operator visibility", () => {
 			flaggedItems: [],
 			watch: false,
 			refreshedAt: "2026-04-06T09:00:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
 		});
 
 		expect(output).toContain("[mounted]");
