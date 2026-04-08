@@ -151,20 +151,17 @@ export function createMountSessionRuntime(input: {
 						now: new Date().toISOString(),
 					});
 
+					const handoffNow = new Date().toISOString();
 					input.broker.control.createRelayHandoff({
-						handoffId: `handoff_${Date.now()}`,
+						handoffId: `handoff_${handoffNow.replace(/[^0-9]/g, "")}`,
 						collabId: resolvedClaim.collabId,
 						senderAgent: input.target,
 						targetAgent: directive.target,
 						requestText: directive.instruction,
-						now: new Date().toISOString(),
+						now: handoffNow,
 					});
 
 					sendNow(`[ai-whisper] Handed turn to ${directive.target}.`);
-					relayPaneWriter.status({
-						content: `Turn handed to ${directive.target}.`,
-						now: new Date().toISOString(),
-					});
 
 					return null;
 				};
