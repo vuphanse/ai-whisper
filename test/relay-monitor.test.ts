@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { PassThrough } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
 import {
+	createRelayMonitorRuntime,
 	formatRelayConversationLine,
 	formatStatusPanel,
 	renderRelayConversationBatch,
@@ -164,6 +166,48 @@ describe("relay monitor", () => {
 			expect(output).toContain("Turn owner: claude");
 			expect(output).toContain("Waiting: codex");
 			expect(output).toContain("stale handoff");
+		});
+	});
+
+	describe("createRelayMonitorRuntime", () => {
+		it("writes turn owner line to stdout when turn state is present", async () => {
+			const chunks: string[] = [];
+			const stdout = new PassThrough();
+			stdout.on("data", (chunk: Buffer) => { chunks.push(chunk.toString()); });
+
+			const broker = {
+				control: {
+					registerRelayMonitor: vi.fn(),
+					heartbeatRelayMonitor: vi.fn(),
+					pollRelayEvents: vi.fn(() => []),
+					listSessions: vi.fn(() => []),
+					listThreads: vi.fn(() => []),
+					getRelayTurnState: vi.fn(() => ({
+						collabId: "collab_monitor",
+						turnOwner: "claude" as const,
+						waitingAgent: "codex" as const,
+						unresolvedHandoffId: null,
+						handoffState: "pending" as const,
+						handoffAgeMs: 3_000,
+					})),
+				},
+			};
+
+			const monitor = createRelayMonitorRuntime({
+				broker: broker as never,
+				collabId: "collab_monitor",
+				monitorId: "monitor_test",
+				stdout,
+				pollIntervalMs: 1,
+			});
+
+			monitor.start();
+			// Allow one poll cycle to complete before stopping
+			await new Promise<void>((resolve) => setTimeout(resolve, 20));
+			await monitor.stop();
+
+			const output = chunks.join("");
+			expect(output).toContain("Turn owner: claude");
 		});
 	});
 });

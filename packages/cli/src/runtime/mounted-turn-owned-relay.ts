@@ -171,7 +171,10 @@ export function createMountedTurnOwnedRelay(input: {
 				prompt: `[ai-whisper] Hand back to ${target}`,
 				initialValue,
 			});
-			if (composed === null) return;
+			if (composed === null) {
+				input.turnCapture?.reset();
+				return;
+			}
 			const now = new Date().toISOString();
 			input.broker.control.handoffBackRelay?.({
 				handoffId: handoff.handoffId,

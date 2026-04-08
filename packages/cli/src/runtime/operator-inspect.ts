@@ -45,6 +45,7 @@ export function buildInspectSnapshot(input: {
 			turnOwner: turn.turnOwner,
 			waitingAgent: turn.waitingAgent,
 			handoffState: turn.handoffState,
+			handoffAgeMs: turn.handoffAgeMs,
 		};
 	}
 
@@ -110,6 +111,7 @@ export function buildInspectSnapshot(input: {
 		turnOwner: turn.turnOwner,
 		waitingAgent: turn.waitingAgent,
 		handoffState: turn.handoffState,
+		handoffAgeMs: turn.handoffAgeMs,
 	};
 }
 
@@ -152,6 +154,7 @@ export function formatInspectSnapshot(input: {
 	turnOwner: "codex" | "claude" | "none";
 	waitingAgent: "codex" | "claude" | null;
 	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
+	handoffAgeMs?: number | null;
 }) {
 	const lines = [
 		...(input.watch ? [`Live Inspect (${input.refreshedAt})`] : []),
@@ -166,6 +169,7 @@ export function formatInspectSnapshot(input: {
 		`Turn owner: ${input.turnOwner ?? "none"}`,
 		`Waiting: ${input.waitingAgent ?? "none"}`,
 		`Handoff state: ${input.handoffState ?? "idle"}`,
+		...(input.handoffAgeMs != null ? [`Handoff age: ${Math.floor(input.handoffAgeMs / 1000)}s`] : []),
 	];
 
 	if (!input.activeThread) {

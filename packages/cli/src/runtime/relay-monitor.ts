@@ -173,6 +173,7 @@ export function createRelayMonitorRuntime(input: {
 	let cursor = 0;
 	let stopping = false;
 	let previousLatestEvent: RelayEventItem | null = null;
+	let previousTurnStateKey: string | null = null;
 	let loopResolve!: () => void;
 	const loopDone = new Promise<void>((r) => {
 		loopResolve = r;
@@ -194,6 +195,43 @@ export function createRelayMonitorRuntime(input: {
 			}),
 		);
 		previousLatestEvent = events[events.length - 1] ?? previousLatestEvent;
+	}
+
+	function renderTurnPanel() {
+		const turn = input.broker.control.getRelayTurnState(
+			input.collabId,
+			new Date().toISOString(),
+		);
+		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}`;
+		if (turnStateKey === previousTurnStateKey) {
+			return;
+		}
+		previousTurnStateKey = turnStateKey;
+
+		const sessions = input.broker.control.listSessions(input.collabId);
+		const threads = input.broker.control.listThreads(input.collabId);
+		const activeThread = threads.find((t) => t.active) ?? null;
+
+		const providers = (["codex", "claude"] as const).map((agentType) => {
+			const session = sessions.find((s) => s.agentType === agentType);
+			const rawHealth = session?.healthState ?? "offline";
+			const health = rawHealth === "healthy" ? "online" : rawHealth;
+			return { name: agentType, health };
+		});
+
+		const panel = formatStatusPanel({
+			providers,
+			collabState: "active",
+			threadCount: threads.length,
+			activeThreadTitle: activeThread?.title ?? null,
+			uptime: "",
+			lastRelayAge: null,
+			turnOwner: turn.turnOwner,
+			waitingAgent: turn.waitingAgent,
+			handoffState: turn.handoffState,
+		});
+
+		input.stdout.write(`\n${panel}\n`);
 	}
 
 	return {
@@ -221,6 +259,8 @@ export function createRelayMonitorRuntime(input: {
 						cursor = events[events.length - 1]!.id;
 						render(events);
 					}
+
+					renderTurnPanel();
 
 					await sleep(input.pollIntervalMs ?? 250);
 				}

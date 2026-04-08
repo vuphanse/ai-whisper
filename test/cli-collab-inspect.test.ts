@@ -520,6 +520,53 @@ describe("turn-owned relay inspect", () => {
 	});
 });
 
+describe("handoff age in inspect output", () => {
+	it("renders handoff age in seconds when handoffAgeMs is non-null", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_handoff_age",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [
+				{ agentType: "codex", bindingState: "bound", healthState: "healthy" },
+				{ agentType: "claude", bindingState: "bound", healthState: "healthy" },
+			],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-08T00:00:00.000Z",
+			turnOwner: "claude",
+			waitingAgent: "codex",
+			handoffState: "pending",
+			handoffAgeMs: 75_000,
+		});
+
+		expect(output).toContain("Handoff age: 75s");
+	});
+
+	it("omits handoff age line when handoffAgeMs is null", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_no_age",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-08T00:00:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
+			handoffAgeMs: null,
+		});
+
+		expect(output).not.toContain("Handoff age:");
+	});
+});
+
 describe("mounted operator visibility", () => {
 	it("renders mounted binding source and tty path in inspect output", () => {
 		const output = formatInspectSnapshot({
