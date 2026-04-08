@@ -125,6 +125,43 @@ describe("mounted turn-owned relay", () => {
 		);
 	});
 
+	it("renders 'Deferred' label when the pending handoff has been deferred", async () => {
+		const writes: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "deferred" as const,
+					handoffAgeMs: 60_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "deferred" as const,
+				})),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage: (text: string) => { writes.push(text); },
+			writeUserInput() {},
+			openComposer: async (_args) => null,
+		});
+
+		await relay.refreshOwnerView();
+		expect(writes.join("")).toContain("Deferred");
+		expect(writes.join("")).toContain("codex");
+	});
+
 	it("swallows ordinary waiting-side input but allows Ctrl+C", async () => {
 		const stdin = new PassThrough();
 		const localMessages: string[] = [];
