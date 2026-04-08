@@ -166,6 +166,18 @@ export function deferRelayHandoffTxn(
 	})();
 }
 
+/**
+ * Marks a handoff as stale at the workflow level by setting `handoff_state = 'stale_handoff'`
+ * on `relay_turn_state`. The `relay_handoff` record itself is intentionally NOT given a
+ * "stale" status — `"stale"` is not a terminal handoff status and does not appear in
+ * `RelayHandoffRecord.status`. Staleness is a transient workflow annotation on turn state,
+ * not a resolved outcome for the handoff record.
+ *
+ * Callers that need to determine whether a handoff is stale MUST read `getRelayTurnState`
+ * (checking `handoffState === "stale_handoff"`) rather than inspecting the handoff record's
+ * `status` field directly. Reading `getRelayHandoff(id).status` after this call will still
+ * return the previous status (e.g. `"deferred"` or `"accepted"`), which is correct by design.
+ */
 export function markRelayHandoffStaleTxn(
 	db: Database.Database,
 	input: { handoffId: string; now: string },
