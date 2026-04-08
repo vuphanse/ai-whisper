@@ -50,12 +50,21 @@ export function createMountSessionRuntime(input: {
 				interactiveSession,
 				stdin: process.stdin,
 				stdout: process.stdout,
-				get relayPaneWriter() {
-					return relayPaneWriter ?? undefined;
-				},
-				get externalInputGate() {
-					return turnRelay?.getWaitingGate();
-				},
+				// relayPaneWriter and externalInputGate are read lazily via a getter object
+				// so they reflect the values set after completeAttachClaim at call time.
+				// The cast below is needed because exactOptionalPropertyTypes treats
+				// `T | undefined` from a getter differently from an absent optional key.
+				...(({
+					get relayPaneWriter() { return relayPaneWriter ?? undefined; },
+					get externalInputGate() { return turnRelay?.getWaitingGate(); },
+				}) as {
+					relayPaneWriter?: ReturnType<typeof createRelayPaneWriter>;
+					externalInputGate?: {
+						isBlocked(): boolean;
+						renderBlockedMessage(): string;
+						onCancel(): void;
+					};
+				}),
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
 						throw new Error("Relay not available: session claim not yet completed");
