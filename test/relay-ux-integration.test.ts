@@ -201,6 +201,11 @@ describe("relay UX integration", () => {
 		await claudeRelay.acceptPendingHandoff();
 		expect(claudeInjected.join("")).toContain("Implement the approved plan");
 
+		expect(broker.control.getRelayTurnState("collab_turn")).toMatchObject({
+			turnOwner: "claude",
+			handoffState: "accepted",
+		});
+
 		await claudeRelay.handBackTo("codex");
 
 		const turn = broker.control.getRelayTurnState("collab_turn");

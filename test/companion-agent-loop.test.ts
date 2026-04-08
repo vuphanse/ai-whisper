@@ -3,32 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
-
-describe("relay turn state guardrail", () => {
-	it("keeps mounted relay handoff coverage out of the hidden executor loop", () => {
-		const broker = createBrokerRuntime({
-			sqlitePath: ":memory:",
-			host: "127.0.0.1",
-			port: 4324,
-		});
-
-		broker.control.startCollab({
-			collabId: "collab_legacy_loop",
-			workspaceRoot: "/tmp/test",
-			displayName: "legacy loop",
-			now: "2026-04-08T00:00:00.000Z",
-		});
-
-		expect(broker.control.getRelayTurnState("collab_legacy_loop")).toEqual({
-			collabId: "collab_legacy_loop",
-			turnOwner: "none",
-			waitingAgent: null,
-			unresolvedHandoffId: null,
-			handoffState: "idle",
-			handoffAgeMs: null,
-		});
-	});
-});
 import type {
 	CompanionProvider,
 	InteractiveSessionController,
@@ -36,6 +10,36 @@ import type {
 } from "../packages/shared/src/index.ts";
 import { createSessionId } from "../packages/shared/src/index.ts";
 import { runCompanionAgentLoop } from "../packages/cli/src/runtime/companion-agent-loop.ts";
+
+describe("relay turn state guardrail", () => {
+	it("keeps mounted relay handoff coverage out of the hidden executor loop", async () => {
+		const broker = createBrokerRuntime({
+			sqlitePath: ":memory:",
+			host: "127.0.0.1",
+			port: 4324,
+		});
+
+		try {
+			broker.control.startCollab({
+				collabId: "collab_legacy_loop",
+				workspaceRoot: "/tmp/test",
+				displayName: "legacy loop",
+				now: "2026-04-08T00:00:00.000Z",
+			});
+
+			expect(broker.control.getRelayTurnState("collab_legacy_loop")).toEqual({
+				collabId: "collab_legacy_loop",
+				turnOwner: "none",
+				waitingAgent: null,
+				unresolvedHandoffId: null,
+				handoffState: "idle",
+				handoffAgeMs: null,
+			});
+		} finally {
+			await broker.stop();
+		}
+	});
+});
 
 describe("companion agent loop", () => {
 	it("drives broker work through an attached interactive session", async () => {
