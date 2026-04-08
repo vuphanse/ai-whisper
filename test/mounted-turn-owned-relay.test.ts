@@ -209,8 +209,65 @@ describe("mounted turn-owned relay", () => {
 		await relay.handBackTo("codex");
 		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
 			expect.objectContaining({
+				handoffId: "handoff_1",
+				senderAgent: "claude",
 				targetAgent: "codex",
 				requestText: "Implemented the plan.",
+			}),
+		);
+	});
+
+	it("opens blank composer when turn capture confidence is low", async () => {
+		const composerArgs: Array<{ prompt: string; initialValue: string }> = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 5_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "accepted" as const,
+				})),
+				handoffBackRelay: vi.fn(),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: async (args: { prompt: string; initialValue: string }) => {
+				composerArgs.push(args);
+				return "manual result";
+			},
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				extractLatestAssistantTurn: () => ({ confidence: "low" as const, text: null }),
+			},
+		});
+
+		await relay.handBackTo("codex");
+
+		expect(composerArgs[0]?.initialValue).toBe("");
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({
+				targetAgent: "codex",
+				requestText: "manual result",
 			}),
 		);
 	});
