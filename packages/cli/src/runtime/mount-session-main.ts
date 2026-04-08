@@ -1,4 +1,5 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
+import type { RelayDirective } from "@ai-whisper/shared";
 import { createLiveSessionRuntime } from "./live-session.js";
 import { runCompanionAgentLoop } from "./companion-agent-loop.js";
 import {
@@ -35,90 +36,16 @@ export function createMountSessionRuntime(input: {
 				stdout: process.stdout,
 			});
 
-			// Deferred claim — set after liveSession.start() proves the provider launched cleanly.
-			// onRelay guards against null so there is no race between relay arrival and claim completion.
-			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
-			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
-			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
-			// turnRelay is created lazily once resolvedClaim is set (collabId is required).
-			let turnRelay: ReturnType<typeof createMountedTurnOwnedRelay> | null = null;
 			let ownerRefreshTimer: ReturnType<typeof setInterval> | null = null;
-
-			// Mounted sessions own the terminal; process.stdin is the real tty read side.
-			// The live-session runtime intercepts inline @@ relay directives from stdin.
-			const liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
-				interactiveSession,
-				stdin: process.stdin,
-				stdout: process.stdout,
-				// relayPaneWriter and externalInputGate are read lazily via a getter object
-				// so they reflect the values set after completeAttachClaim at call time.
-				// The cast below is needed because exactOptionalPropertyTypes treats
-				// `T | undefined` from a getter differently from an absent optional key.
-				...(({
-					get relayPaneWriter() { return relayPaneWriter ?? undefined; },
-					get externalInputGate() { return turnRelay?.getWaitingGate(); },
-				}) as {
-					relayPaneWriter?: ReturnType<typeof createRelayPaneWriter>;
-					externalInputGate?: {
-						isBlocked(): boolean;
-						renderBlockedMessage(): string;
-						onCancel(): void;
-					};
-				}),
-				onRelay: async (directive, sendNow) => {
-					if (!resolvedClaim) {
-						throw new Error("Relay not available: session claim not yet completed");
-					}
-
-					if (directive.target === "pull") {
-						const injector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
-						const activeThread = input.broker.control.listThreads(resolvedClaim.collabId).find((t) => t.active);
-						if (!activeThread) {
-							sendNow("[ai-whisper] No active thread to pull context from.\n");
-							return null;
-						}
-						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
-						if (result.injected) {
-							interactiveSession.writeUserInput(result.payload);
-							sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
-						} else {
-							sendNow("[ai-whisper] No pending relay context to inject.\n");
-						}
-						return null;
-					}
-
-					const writer = relayPaneWriter!;
-
-					writer.relayDirective({
-						senderAgent: input.target,
-						receiverAgent: directive.target,
-						instruction: directive.instruction,
-						now: new Date().toISOString(),
-					});
-
-					input.broker.control.createRelayHandoff({
-						handoffId: `handoff_${Date.now()}`,
-						collabId: resolvedClaim.collabId,
-						senderAgent: input.target,
-						targetAgent: directive.target,
-						requestText: directive.instruction,
-						now: new Date().toISOString(),
-					});
-
-					sendNow(`[ai-whisper] Handed turn to ${directive.target}.`);
-					writer.status({
-						content: `Turn handed to ${directive.target}.`,
-						now: new Date().toISOString(),
-					});
-
-					return null;
-				},
-			});
-
 			let stopLoop = async () => {};
 			let liveSessionStarted = false;
 			let stopping = false;
 			const stateFilePath = getStateFilePath(input.workspaceRoot);
+
+			// liveSession is set after the collab claim resolves so collabId is available
+			// for turnRelay, allowing externalInputGate to be passed directly instead of
+			// via a lazy getter (spread evaluates getters once, freezing undefined at call time).
+			let liveSession: ReturnType<typeof createLiveSessionRuntime> | null = null;
 
 			const stop = async () => {
 				if (stopping) return;
@@ -128,7 +55,7 @@ export function createMountSessionRuntime(input: {
 					ownerRefreshTimer = null;
 				}
 				await stopLoop();
-				if (liveSessionStarted) {
+				if (liveSessionStarted && liveSession) {
 					await liveSession.stop();
 				}
 				// Mark the session degraded before stopping the broker so status/inspect
@@ -158,20 +85,14 @@ export function createMountSessionRuntime(input: {
 				await input.broker.stop();
 			};
 
+			// resolvedClaim is needed in stop() and onRelay; hoist declaration above stop().
+			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
+
 			process.once("SIGINT", () => void stop().then(() => process.exit(0)));
 			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
 			try {
-				// Start the live session first — this launches the provider in the current terminal.
-				// If this fails, the claim stays unconsumed and the binding remains in pending_attach.
-				await liveSession.start();
-				liveSessionStarted = true;
-
-				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
-				// or provider crashes). stop() is idempotent via the `stopping` guard.
-				interactiveSession.onExit(() => void stop().then(() => process.exit(0)));
-
-				// Only now consume the claim and flip the binding to "bound".
+				// Consume the claim to get collabId, which is needed for turnRelay and relayPaneWriter.
 				resolvedClaim = input.broker.control.completeAttachClaim({
 					claimId: input.claimId,
 					secret: input.secret,
@@ -183,19 +104,92 @@ export function createMountSessionRuntime(input: {
 				});
 
 				// Initialize the relay pane writer now that collabId is available.
-				relayPaneWriter = createRelayPaneWriter({
+				const relayPaneWriter = createRelayPaneWriter({
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
 				});
 
 				// Initialize the turn-owned relay manager now that collabId is available.
-				turnRelay = createMountedTurnOwnedRelay({
+				// Must happen before createLiveSessionRuntime so the waiting gate can be
+				// passed directly — spread would evaluate the getter once at call time and
+				// freeze it as undefined if turnRelay were still null.
+				const turnRelay = createMountedTurnOwnedRelay({
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
 					currentAgent: input.target,
 				});
+
+				const onRelay = async (
+					directive: RelayDirective,
+					sendNow: (message: string) => void,
+				): Promise<string | null> => {
+					if (!resolvedClaim) {
+						throw new Error("Relay not available: session claim not yet completed");
+					}
+
+					if (directive.target === "pull") {
+						const injector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
+						const activeThread = input.broker.control.listThreads(resolvedClaim.collabId).find((t) => t.active);
+						if (!activeThread) {
+							sendNow("[ai-whisper] No active thread to pull context from.\n");
+							return null;
+						}
+						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
+						if (result.injected) {
+							interactiveSession.writeUserInput(result.payload);
+							sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
+						} else {
+							sendNow("[ai-whisper] No pending relay context to inject.\n");
+						}
+						return null;
+					}
+
+					relayPaneWriter.relayDirective({
+						senderAgent: input.target,
+						receiverAgent: directive.target,
+						instruction: directive.instruction,
+						now: new Date().toISOString(),
+					});
+
+					input.broker.control.createRelayHandoff({
+						handoffId: `handoff_${Date.now()}`,
+						collabId: resolvedClaim.collabId,
+						senderAgent: input.target,
+						targetAgent: directive.target,
+						requestText: directive.instruction,
+						now: new Date().toISOString(),
+					});
+
+					sendNow(`[ai-whisper] Handed turn to ${directive.target}.`);
+					relayPaneWriter.status({
+						content: `Turn handed to ${directive.target}.`,
+						now: new Date().toISOString(),
+					});
+
+					return null;
+				};
+
+				// Mounted sessions own the terminal; process.stdin is the real tty read side.
+				// The live-session runtime intercepts inline @@ relay directives from stdin.
+				liveSession = (input.createLiveSession ?? createLiveSessionRuntime)({
+					interactiveSession,
+					stdin: process.stdin,
+					stdout: process.stdout,
+					relayPaneWriter,
+					externalInputGate: turnRelay.getWaitingGate(),
+					onRelay,
+				});
+
+				// Start the live session — this launches the provider in the current terminal.
+				await liveSession.start();
+				liveSessionStarted = true;
+
+				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
+				// or provider crashes). stop() is idempotent via the `stopping` guard.
+				interactiveSession.onExit(() => void stop().then(() => process.exit(0)));
+
 				ownerRefreshTimer = setInterval(() => {
-					void turnRelay!.refreshOwnerView();
+					void turnRelay.refreshOwnerView();
 				}, 1000);
 				await turnRelay.refreshOwnerView();
 
@@ -246,7 +240,7 @@ export function createMountSessionRuntime(input: {
 				});
 			} catch (err) {
 				await stopLoop();
-				if (liveSessionStarted) {
+				if (liveSessionStarted && liveSession) {
 					await liveSession.stop();
 				}
 				await input.broker.stop();

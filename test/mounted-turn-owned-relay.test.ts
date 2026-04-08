@@ -8,6 +8,7 @@ describe("mounted turn-owned relay", () => {
 		const localMessages: string[] = [];
 		const userInputs: string[] = [];
 
+		const onCancel = vi.fn();
 		const runtime = createLiveSessionRuntime({
 			interactiveSession: {
 				start: () => Promise.resolve(),
@@ -22,7 +23,7 @@ describe("mounted turn-owned relay", () => {
 			externalInputGate: {
 				isBlocked: () => true,
 				renderBlockedMessage: () => 'waiting for reply from claude (12s)',
-				onCancel: vi.fn(),
+				onCancel,
 			},
 		});
 
@@ -33,6 +34,7 @@ describe("mounted turn-owned relay", () => {
 
 		expect(userInputs).toEqual([]);
 		expect(localMessages.join("")).toContain("waiting for reply from claude");
+		expect(onCancel).toHaveBeenCalled();
 		expect(runtime).toBeTruthy();
 	});
 });
