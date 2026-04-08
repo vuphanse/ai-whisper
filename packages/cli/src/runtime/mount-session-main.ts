@@ -5,16 +5,12 @@ import {
 	createInteractiveSessionForTarget,
 	createProviderForTarget,
 } from "./providers.js";
-import {
-	enqueueRelayWork,
-	formatRelayAcknowledgement,
-} from "./relay-service.js";
 import { createContextInjector } from "./context-injector.js";
-import { waitForReply } from "./reply-wait.js";
 import { createCliSessionId } from "./id-factory.js";
 import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
+import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -44,7 +40,9 @@ export function createMountSessionRuntime(input: {
 			let resolvedClaim: { collabId: string; sessionId: string; agentType: string } | null = null;
 			// relayPaneWriter is created lazily once resolvedClaim is set (collabId is required).
 			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
-			let activeRelayWorkItemId: string | null = null;
+			// turnRelay is created lazily once resolvedClaim is set (collabId is required).
+			let turnRelay: ReturnType<typeof createMountedTurnOwnedRelay> | null = null;
+			let ownerRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 			// Mounted sessions own the terminal; process.stdin is the real tty read side.
 			// The live-session runtime intercepts inline @@ relay directives from stdin.
@@ -55,15 +53,8 @@ export function createMountSessionRuntime(input: {
 				get relayPaneWriter() {
 					return relayPaneWriter ?? undefined;
 				},
-				onRelayCancel: () => {
-					if (!activeRelayWorkItemId) {
-						return;
-					}
-
-					input.broker.control.requestWorkItemCancellation({
-						workItemId: activeRelayWorkItemId,
-						requestedAt: new Date().toISOString(),
-					});
+				get externalInputGate() {
+					return turnRelay?.getWaitingGate();
 				},
 				onRelay: async (directive, sendNow) => {
 					if (!resolvedClaim) {
@@ -87,7 +78,6 @@ export function createMountSessionRuntime(input: {
 						return null;
 					}
 
-					const contextInjector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
 					const writer = relayPaneWriter!;
 
 					writer.relayDirective({
@@ -97,42 +87,20 @@ export function createMountSessionRuntime(input: {
 						now: new Date().toISOString(),
 					});
 
-					const relay = enqueueRelayWork({
-						broker: input.broker,
+					input.broker.control.createRelayHandoff({
+						handoffId: `handoff_${Date.now()}`,
 						collabId: resolvedClaim.collabId,
-						originSessionId: resolvedClaim.sessionId,
-						target: directive.target,
-						instruction: directive.instruction,
-						artifactPaths: [],
-						forceNewThread: directive.forceNewThread,
+						senderAgent: input.target,
+						targetAgent: directive.target,
+						requestText: directive.instruction,
 						now: new Date().toISOString(),
-						contextInjector,
 					});
-					activeRelayWorkItemId = relay.workItem.workItemId;
 
-					try {
-						sendNow(
-							formatRelayAcknowledgement({
-								target: directive.target,
-								createdNewThread: relay.createdNewThread,
-							}),
-						);
-
-						const reply = await waitForReply({
-							broker: input.broker,
-							threadId: relay.thread.threadId,
-							workItemId: relay.workItem.workItemId,
-						});
-
-						writer.relayResponse({
-							senderAgent: directive.target,
-							receiverAgent: input.target,
-							content: reply.content,
-							now: new Date().toISOString(),
-						});
-					} finally {
-						activeRelayWorkItemId = null;
-					}
+					sendNow(`[ai-whisper] Handed turn to ${directive.target}.`);
+					writer.status({
+						content: `Turn handed to ${directive.target}.`,
+						now: new Date().toISOString(),
+					});
 
 					return null;
 				},
@@ -146,6 +114,10 @@ export function createMountSessionRuntime(input: {
 			const stop = async () => {
 				if (stopping) return;
 				stopping = true;
+				if (ownerRefreshTimer !== null) {
+					clearInterval(ownerRefreshTimer);
+					ownerRefreshTimer = null;
+				}
 				await stopLoop();
 				if (liveSessionStarted) {
 					await liveSession.stop();
@@ -206,6 +178,17 @@ export function createMountSessionRuntime(input: {
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
 				});
+
+				// Initialize the turn-owned relay manager now that collabId is available.
+				turnRelay = createMountedTurnOwnedRelay({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+					currentAgent: input.target,
+				});
+				ownerRefreshTimer = setInterval(() => {
+					void turnRelay!.refreshOwnerView();
+				}, 1000);
+				await turnRelay.refreshOwnerView();
 
 				// Update state file: record mounted session metadata + clear recovery state.
 				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {

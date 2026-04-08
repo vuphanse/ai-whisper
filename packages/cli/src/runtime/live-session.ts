@@ -154,6 +154,11 @@ export function createLiveSessionRuntime(input: {
 	) => Promise<string | null>;
 	onRelayCancel?: () => void;
 	relayPaneWriter?: ReturnType<typeof createRelayPaneWriter> | undefined;
+	externalInputGate?: {
+		isBlocked(): boolean;
+		renderBlockedMessage(): string;
+		onCancel(): void;
+	};
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
 		isTTY?: boolean;
@@ -227,6 +232,18 @@ export function createLiveSessionRuntime(input: {
 			sanitizedHex: toHex(sanitized),
 		});
 		if (sanitized.length === 0) {
+			return;
+		}
+
+		// Block input while the external turn gate is active (e.g. waiting for the
+		// other agent to hand back the turn). Only Ctrl+C is allowed as a cancel signal.
+		if (input.externalInputGate?.isBlocked()) {
+			input.interactiveSession.sendLocalMessage(
+				`\r\u001b[2K${input.externalInputGate.renderBlockedMessage()}`,
+			);
+			if (sanitized.includes("\x03")) {
+				input.externalInputGate.onCancel();
+			}
 			return;
 		}
 
