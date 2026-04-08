@@ -217,6 +217,50 @@ describe("mounted turn-owned relay", () => {
 		);
 	});
 
+	it("resets turn capture after successful handback to prevent stale text on retry", async () => {
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 5_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "accepted" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+				handoffBackRelay: vi.fn(),
+			},
+		};
+		const reset = vi.fn();
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: async () => "done",
+			turnCapture: {
+				reset,
+				finishAssistantTurn: vi.fn(),
+				extractLatestAssistantTurn: () => ({ confidence: "high" as const, text: "done" }),
+			},
+		});
+
+		await relay.handBackTo("codex");
+		expect(reset).toHaveBeenCalled();
+	});
+
 	it("opens blank composer when turn capture confidence is low", async () => {
 		const composerArgs: Array<{ prompt: string; initialValue: string }> = [];
 		const broker = {

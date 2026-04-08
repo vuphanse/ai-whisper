@@ -15,6 +15,20 @@ describe("assistant turn capture", () => {
 		});
 	});
 
+	it("handles CRLF output from PTY (onlcr mode) correctly", () => {
+		const capture = createAssistantTurnCapture();
+		// PTY converts \n to \r\n — simulate real PTY output
+		capture.recordProviderOutput("Thinking...\r\r\n");
+		capture.recordProviderOutput("Implemented the plan.\r\n");
+		capture.recordProviderOutput("Added tests.\r\n");
+		capture.finishAssistantTurn();
+
+		expect(capture.extractLatestAssistantTurn()).toEqual({
+			confidence: "high",
+			text: "Implemented the plan.\nAdded tests.",
+		});
+	});
+
 	it("falls back when output is only ansi noise or still streaming", () => {
 		const capture = createAssistantTurnCapture();
 		capture.recordProviderOutput("\u001b[2K\r");

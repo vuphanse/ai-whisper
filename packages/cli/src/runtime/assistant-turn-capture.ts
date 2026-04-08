@@ -14,15 +14,16 @@ export function createAssistantTurnCapture() {
 			current += chunk;
 		},
 		finishAssistantTurn() {
-			// Strip ANSI escape sequences.
-			let cleaned = current.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
-			// Simulate carriage-return overwrite: within each newline-delimited line,
-			// a bare \r resets the visible content — keep only the last \r-separated segment.
+			// Normalize CRLF first (PTY onlcr converts \n -> \r\n in the data stream).
+			let cleaned = current.replace(/\r\n/g, "\n");
+			// Strip CSI escape sequences.
+			cleaned = cleaned.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+			// Simulate bare \r overwrite: keep only the last \r-separated segment per line.
 			cleaned = cleaned
 				.split("\n")
 				.map((line) => {
 					const parts = line.split("\r");
-					return parts[parts.length - 1];
+					return parts[parts.length - 1] ?? "";
 				})
 				.join("\n")
 				.trim();

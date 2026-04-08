@@ -179,6 +179,7 @@ export function createMountedTurnOwnedRelay(input: {
 				requestText: composed,
 				now,
 			});
+			input.turnCapture?.reset();
 		},
 	};
 }
