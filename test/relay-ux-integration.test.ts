@@ -2,11 +2,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { createSessionId } from "../packages/shared/src/index.ts";
 import { createRelayPaneWriter } from "../packages/cli/src/runtime/relay-pane-writer.ts";
 import { createContextInjector } from "../packages/cli/src/runtime/context-injector.ts";
+import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 
 describe("relay UX integration", () => {
 	let dir: string | undefined;
@@ -134,5 +135,79 @@ describe("relay UX integration", () => {
 		expect(result2.injected).toBe(false);
 		expect(result2.payload).toBe("anything else");
 		expect(result2.summary).toBeNull();
+	});
+
+	it("full flow: handoff → sender blocked → owner accept → handback", async () => {
+		broker = createBrokerRuntime({
+			sqlitePath: ":memory:",
+			host: "127.0.0.1",
+			port: 4323,
+		});
+
+		broker.control.startCollab({
+			collabId: "collab_turn",
+			workspaceRoot: "/tmp/test",
+			displayName: "turn-owned",
+			now: "2026-04-08T00:00:00.000Z",
+		});
+
+		broker.control.createRelayHandoff({
+			handoffId: "handoff_1",
+			collabId: "collab_turn",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Implement the approved plan",
+			now: "2026-04-08T00:00:05.000Z",
+		});
+
+		const codexRelay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "codex",
+			writeLocalMessage: vi.fn(),
+			writeUserInput: vi.fn(),
+			openComposer: ({ initialValue }: { initialValue: string }) => Promise.resolve(initialValue),
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				extractLatestAssistantTurn: () => ({ confidence: "low" as const, text: null }),
+			},
+		});
+		const claudeInjected: string[] = [];
+		const claudeRelay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage: vi.fn(),
+			writeUserInput(text: string) { claudeInjected.push(text); },
+			openComposer: ({ initialValue }: { initialValue: string }) => Promise.resolve(initialValue),
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				extractLatestAssistantTurn: () => ({ confidence: "high" as const, text: "Implemented the approved plan." }),
+			},
+		});
+
+		expect(codexRelay.getWaitingGate().isBlocked()).toBe(true);
+
+		await claudeRelay.acceptPendingHandoff();
+		expect(claudeInjected.join("")).toContain("Implement the approved plan");
+
+		await claudeRelay.handBackTo("codex");
+
+		const turn = broker.control.getRelayTurnState("collab_turn");
+		expect(turn.turnOwner).toBe("codex");
+		expect(turn.waitingAgent).toBe("claude");
+
+		expect(broker.control.getRelayTurnState("collab_turn")).toEqual(
+			expect.objectContaining({
+				turnOwner: "codex",
+				waitingAgent: "claude",
+				handoffState: "pending",
+			}),
+		);
+
+		const nextHandoff = broker.control.getRelayHandoff(turn.unresolvedHandoffId!);
+		expect(nextHandoff?.requestText).toContain("Implemented the approved plan.");
 	});
 });
