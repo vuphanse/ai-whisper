@@ -87,6 +87,19 @@ import {
 	pollRelayEvents as queryPollRelayEvents,
 	type RelayEvent,
 } from "../storage/repositories/relay-event-repository.js";
+import {
+	queryRelayTurnState,
+} from "../storage/repositories/relay-turn-state-repository.js";
+import {
+	createRelayHandoffTxn,
+	acceptRelayHandoffTxn,
+	deferRelayHandoffTxn,
+	markRelayHandoffStaleTxn,
+	declineRelayHandoffTxn,
+	handoffBackRelayTxn,
+	failRelayHandoffOnDisconnectTxn,
+	queryRelayHandoff,
+} from "../storage/repositories/relay-handoff-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
 	return timestamp.replace(/[^0-9]/g, "");
@@ -978,6 +991,47 @@ export function createControlService(db: Database.Database) {
 		},
 		pollRelayEvents(collabId: string, afterId: number): RelayEvent[] {
 			return queryPollRelayEvents(db, collabId, afterId);
+		},
+		getRelayTurnState(collabId: string, now?: string) {
+			return queryRelayTurnState(db, collabId, now);
+		},
+		createRelayHandoff(input: {
+			handoffId: string;
+			collabId: string;
+			senderAgent: "codex" | "claude";
+			targetAgent: "codex" | "claude";
+			requestText: string;
+			now: string;
+		}) {
+			return createRelayHandoffTxn(db, input);
+		},
+		acceptRelayHandoff(input: { handoffId: string; acceptedAt: string }) {
+			return acceptRelayHandoffTxn(db, input);
+		},
+		deferRelayHandoff(input: { handoffId: string; deferredAt: string }) {
+			return deferRelayHandoffTxn(db, input);
+		},
+		declineRelayHandoff(input: { handoffId: string; now: string }) {
+			return declineRelayHandoffTxn(db, input);
+		},
+		markRelayHandoffStale(input: { handoffId: string; now: string }) {
+			return markRelayHandoffStaleTxn(db, input);
+		},
+		handoffBackRelay(input: {
+			handoffId: string;
+			nextHandoffId: string;
+			senderAgent: "codex" | "claude";
+			targetAgent: "codex" | "claude";
+			requestText: string;
+			now: string;
+		}) {
+			return handoffBackRelayTxn(db, input);
+		},
+		failRelayHandoffOnDisconnect(input: { handoffId: string; now: string }) {
+			return failRelayHandoffOnDisconnectTxn(db, input);
+		},
+		getRelayHandoff(handoffId: string) {
+			return queryRelayHandoff(db, handoffId);
 		},
 	};
 }

@@ -162,6 +162,29 @@ CREATE TABLE IF NOT EXISTS work_item_cancellation (
   requested_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS relay_turn_state (
+  collab_id TEXT PRIMARY KEY,
+  turn_owner TEXT NOT NULL,
+  waiting_agent TEXT,
+  unresolved_handoff_id TEXT,
+  handoff_state TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS relay_handoff (
+  handoff_id TEXT PRIMARY KEY,
+  collab_id TEXT NOT NULL,
+  sender_agent TEXT NOT NULL,
+  target_agent TEXT NOT NULL,
+  request_text TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  accepted_at TEXT,
+  deferred_at TEXT,
+  resolved_at TEXT,
+  last_activity_at TEXT NOT NULL
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 1, 1)
 ON CONFLICT(id) DO UPDATE SET
