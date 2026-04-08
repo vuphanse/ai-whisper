@@ -6,11 +6,14 @@ import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 describe("mount session runtime", () => {
 	it("starts the live session before completing the claim and records mounted session metadata", async () => {
 		const callOrder: string[] = [];
-		const completeAttachClaim = vi.fn(() => ({
-			collabId: "collab_mount",
-			sessionId: "session_codex_mount",
-			agentType: "codex",
-		}));
+		const completeAttachClaim = vi.fn(() => {
+			callOrder.push("complete-claim");
+			return {
+				collabId: "collab_mount",
+				sessionId: "session_codex_mount",
+				agentType: "codex",
+			};
+		});
 		const liveSession = {
 			start: () => {
 				callOrder.push("live-start");
@@ -78,9 +81,55 @@ describe("mount session runtime", () => {
 
 		await runtime.start();
 
-		expect(callOrder).toEqual(["live-start"]);
+		expect(callOrder).toEqual(["live-start", "complete-claim"]);
 		expect(completeAttachClaim).toHaveBeenCalledWith(expect.objectContaining({ bindingSource: "mounted" }));
 		expect(updateState).toHaveBeenCalled();
+	});
+
+	it("does not consume the claim when provider startup fails", async () => {
+		const completeAttachClaim = vi.fn();
+		const runtime = createMountSessionRuntime({
+			target: "codex",
+			ttyPath: "/dev/ttys031",
+			workspaceRoot: "/tmp/workspace",
+			claimId: "claim_mount_1",
+			secret: "secret_mount",
+			broker: {
+				control: {
+					completeAttachClaim,
+				},
+				stop: () => Promise.resolve(),
+			} as never,
+			createInteractiveSession: () => ({
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput() {},
+				sendLocalMessage() {},
+				onExit() {},
+			}),
+			createLiveSession: () => ({
+				start: () => Promise.reject(new Error("provider failed to launch")),
+				stop: () => Promise.resolve(),
+			}) as never,
+			createProvider: () => ({
+				getIdentity: () => ({ providerId: "codex-cli", toolFamily: "codex", providerVersion: "1.0.0" }),
+				getCapabilities: () => ({
+					supportsDirectPackets: true,
+					supportsNormalization: false,
+					supportsRelayInterception: true,
+					supportsLocalBuffering: true,
+					supportsLaunchHooks: false,
+					extensions: {},
+				}),
+				getHealthState: () => "healthy" as const,
+				handleWork: () => Promise.resolve({ kind: "answer" as const, content: "ok", transitionIntent: null }),
+			}),
+			updateState: vi.fn(),
+			runLoop: () => Promise.resolve(async () => {}),
+		});
+
+		await expect(runtime.start()).rejects.toThrow("provider failed to launch");
+		expect(completeAttachClaim).not.toHaveBeenCalled();
 	});
 });
 

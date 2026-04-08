@@ -1,4 +1,5 @@
 export function createAssistantTurnCapture() {
+	const ansiCsiPattern = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;?]*[A-Za-z]`, "g");
 	let current = "";
 	let latestCompleted: string | null = null;
 	let streaming = false;
@@ -17,7 +18,7 @@ export function createAssistantTurnCapture() {
 			// Normalize CRLF first (PTY onlcr converts \n -> \r\n in the data stream).
 			let cleaned = current.replace(/\r\n/g, "\n");
 			// Strip CSI escape sequences.
-			cleaned = cleaned.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+			cleaned = cleaned.replace(ansiCsiPattern, "");
 			// Simulate bare \r overwrite: keep only the last \r-separated segment per line.
 			cleaned = cleaned
 				.split("\n")

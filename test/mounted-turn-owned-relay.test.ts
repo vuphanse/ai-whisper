@@ -37,17 +37,17 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage: (text: string) => { writes.push(text); },
 			writeUserInput: (text: string) => { injected.push(text); },
-			openComposer: async (_args: { prompt: string; initialValue: string }) => "Implement the approved plan\nKeep commits small.\n",
+			openComposer: () => Promise.resolve("Implement the approved plan\nKeep commits small.\n"),
 		});
 
-		await relay.refreshOwnerView();
+		relay.refreshOwnerView();
 		await relay.acceptPendingHandoff();
 
 		expect(writes.join("")).toContain("Pending handoff from codex");
 		expect(injected.join("")).toContain("Implement the approved plan");
 	});
 
-	it("declines a pending handoff without requiring a reason", async () => {
+	it("declines a pending handoff without requiring a reason", () => {
 		const broker = {
 			control: {
 				getRelayTurnState: vi.fn(() => ({
@@ -78,16 +78,16 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async (_args: { prompt: string; initialValue: string }) => "",
+			openComposer: () => Promise.resolve(""),
 		});
 
-		await relay.declinePendingHandoff();
+		relay.declinePendingHandoff();
 		expect(broker.control.declineRelayHandoff).toHaveBeenCalledWith(
 			expect.objectContaining({ handoffId: "handoff_1" }),
 		);
 	});
 
-	it("defers a pending handoff and keeps the sender waiting", async () => {
+	it("defers a pending handoff and keeps the sender waiting", () => {
 		const broker = {
 			control: {
 				getRelayTurnState: vi.fn(() => ({
@@ -118,16 +118,16 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async (_args: { prompt: string; initialValue: string }) => "",
+			openComposer: () => Promise.resolve(""),
 		});
 
-		await relay.deferPendingHandoff();
+		relay.deferPendingHandoff();
 		expect(broker.control.deferRelayHandoff).toHaveBeenCalledWith(
 			expect.objectContaining({ handoffId: "handoff_1" }),
 		);
 	});
 
-	it("renders 'Deferred' label when the pending handoff has been deferred", async () => {
+	it("renders 'Deferred' label when the pending handoff has been deferred", () => {
 		const writes: string[] = [];
 		const broker = {
 			control: {
@@ -159,12 +159,85 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage: (text: string) => { writes.push(text); },
 			writeUserInput() {},
-			openComposer: async (_args) => null,
+			openComposer: () => Promise.resolve(null),
 		});
 
-		await relay.refreshOwnerView();
+		relay.refreshOwnerView();
 		expect(writes.join("")).toContain("Deferred");
 		expect(writes.join("")).toContain("codex");
+	});
+
+	it("does not re-render the same owner card on repeated refreshes", () => {
+		const writes: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage: (text: string) => { writes.push(text); },
+			writeUserInput() {},
+			openComposer: () => Promise.resolve(null),
+		});
+
+		relay.refreshOwnerView();
+		relay.refreshOwnerView();
+
+		expect(writes).toHaveLength(1);
+	});
+
+	it("does not fail the handoff when the disconnect comes from the waiting side", () => {
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 10_000,
+				})),
+				failRelayHandoffOnDisconnect: vi.fn(),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+				getRelayHandoff: vi.fn(() => null),
+			},
+		};
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "codex",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: () => Promise.resolve(null),
+		});
+
+		relay.handleOwnerDisconnect();
+
+		expect(broker.control.failRelayHandoffOnDisconnect).not.toHaveBeenCalled();
 	});
 
 	it("prefills handback from the latest assistant turn and falls back to blank composer on low confidence", async () => {
@@ -198,7 +271,7 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async ({ initialValue }: { initialValue: string }) => initialValue,
+			openComposer: ({ initialValue }: { initialValue: string }) => Promise.resolve(initialValue),
 			turnCapture: {
 				reset: vi.fn(),
 				finishAssistantTurn: vi.fn(),
@@ -249,7 +322,7 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async () => "done",
+			openComposer: () => Promise.resolve("done"),
 			turnCapture: {
 				reset,
 				finishAssistantTurn: vi.fn(),
@@ -339,9 +412,9 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async (args: { prompt: string; initialValue: string }) => {
+			openComposer: (args: { prompt: string; initialValue: string }) => {
 				composerArgs.push(args);
-				return "manual result";
+				return Promise.resolve("manual result");
 			},
 			turnCapture: {
 				reset: vi.fn(),
@@ -361,7 +434,7 @@ describe("mounted turn-owned relay", () => {
 		);
 	});
 
-	it("releases the sender and marks the handoff degraded when the owner session exits", async () => {
+	it("releases the sender and marks the handoff degraded when the owner session exits", () => {
 		const broker = {
 			control: {
 				getRelayTurnState: vi.fn(() => ({
@@ -385,10 +458,10 @@ describe("mounted turn-owned relay", () => {
 			currentAgent: "claude",
 			writeLocalMessage() {},
 			writeUserInput() {},
-			openComposer: async (_args: { prompt: string; initialValue: string }) => null,
+			openComposer: () => Promise.resolve(null),
 		});
 
-		await relay.handleOwnerDisconnect();
+		relay.handleOwnerDisconnect();
 
 		expect(broker.control.failRelayHandoffOnDisconnect).toHaveBeenCalledWith(
 			expect.objectContaining({ handoffId: "handoff_1" }),
@@ -411,10 +484,10 @@ describe("mounted turn-owned relay", () => {
 			},
 			stdin,
 			stdout: process.stdout,
-			onRelay: async () => null,
+			onRelay: () => Promise.resolve(null),
 			externalInputGate: {
 				isBlocked: () => true,
-				renderBlockedMessage: () => 'waiting for reply from claude (12s)',
+				renderBlockedMessage: () => "waiting for reply from claude (12s)",
 				onCancel,
 			},
 		});
@@ -428,5 +501,36 @@ describe("mounted turn-owned relay", () => {
 		expect(localMessages.join("")).toContain("waiting for reply from claude");
 		expect(onCancel).toHaveBeenCalled();
 		expect(runtime).toBeTruthy();
+	});
+
+	it("routes owner-side handoff hotkeys before provider passthrough", async () => {
+		const stdin = new PassThrough();
+		const localMessages: string[] = [];
+		const userInputs: string[] = [];
+			const handleOwnerInput = vi.fn((text: string) => Promise.resolve(text === "a"));
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) { userInputs.push(data); },
+				sendLocalMessage(data: string) { localMessages.push(data); },
+				onExit() {},
+			},
+			stdin,
+			stdout: process.stdout,
+			onRelay: () => Promise.resolve(null),
+			externalInputRouter: {
+				handleInput: handleOwnerInput,
+			},
+		});
+
+		await runtime.start();
+		stdin.write("a");
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(handleOwnerInput).toHaveBeenCalledWith("a");
+		expect(userInputs).toEqual([]);
+		expect(localMessages).toEqual([]);
 	});
 });

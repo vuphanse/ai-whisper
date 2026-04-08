@@ -159,6 +159,9 @@ export function createLiveSessionRuntime(input: {
 		renderBlockedMessage(): string;
 		onCancel(): void;
 	};
+	externalInputRouter?: {
+		handleInput(text: string): Promise<boolean> | boolean;
+	};
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
 		isTTY?: boolean;
@@ -233,6 +236,13 @@ export function createLiveSessionRuntime(input: {
 		});
 		if (sanitized.length === 0) {
 			return;
+		}
+
+		if (input.externalInputRouter) {
+			const handled = await input.externalInputRouter.handleInput(sanitized);
+			if (handled) {
+				return;
+			}
 		}
 
 		// Block input while the external turn gate is active (e.g. waiting for the

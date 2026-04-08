@@ -87,9 +87,9 @@ export function createRelayHandoffTxn(
 	return db.transaction(() => {
 		// Check for existing unresolved handoff
 		const existing = db
-			.prepare(
-				`SELECT unresolved_handoff_id FROM relay_turn_state WHERE collab_id = ?`,
-			)
+				.prepare(
+					"SELECT unresolved_handoff_id FROM relay_turn_state WHERE collab_id = ?",
+				)
 			.get(input.collabId) as { unresolved_handoff_id: string | null } | undefined;
 
 		if (existing?.unresolved_handoff_id) {

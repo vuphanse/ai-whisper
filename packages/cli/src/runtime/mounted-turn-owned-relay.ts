@@ -51,6 +51,7 @@ export function createMountedTurnOwnedRelay(input: {
 }) {
 	const STALE_HANDOFF_AFTER_MS = 5 * 60_000;
 	let disconnectHandled = false;
+	let lastOwnerCardKey: string | null = null;
 
 	function refreshTurnState(now = new Date().toISOString()): RelayTurnState {
 		let state = input.broker.control.getRelayTurnState(input.collabId, now);
@@ -93,7 +94,28 @@ export function createMountedTurnOwnedRelay(input: {
 		return handoff;
 	}
 
-	return {
+		async function handleOwnerInput(text: string): Promise<boolean> {
+		const handoff = getPendingHandoff();
+		if (!handoff) {
+			return false;
+		}
+
+		if (text === "a" || text === "A") {
+			await api.acceptPendingHandoff();
+			return true;
+		}
+			if (text === "d" || text === "D") {
+				api.declinePendingHandoff();
+				return true;
+			}
+			if (text === " ") {
+				api.deferPendingHandoff();
+				return true;
+			}
+		return false;
+	}
+
+	const api = {
 		getWaitingGate() {
 			return {
 				isBlocked: () => refreshTurnState().waitingAgent === input.currentAgent,
@@ -117,10 +139,18 @@ export function createMountedTurnOwnedRelay(input: {
 			};
 		},
 
-		async refreshOwnerView() {
+		refreshOwnerView() {
 			const handoff = getPendingHandoff();
-			if (!handoff) return;
+			if (!handoff) {
+				lastOwnerCardKey = null;
+				return;
+			}
 			const label = handoff.status === "deferred" ? "Deferred handoff" : "Pending handoff";
+			const cardKey = `${handoff.handoffId}|${handoff.status}|${handoff.requestText}`;
+			if (cardKey === lastOwnerCardKey) {
+				return;
+			}
+			lastOwnerCardKey = cardKey;
 			input.writeLocalMessage(
 				`[ai-whisper] ${label} from ${handoff.senderAgent}\n${handoff.requestText}\n[a] accept  [d] decline  [space] defer`,
 			);
@@ -143,7 +173,7 @@ export function createMountedTurnOwnedRelay(input: {
 			});
 		},
 
-		async declinePendingHandoff() {
+		declinePendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
 			input.broker.control.declineRelayHandoff({
@@ -152,7 +182,7 @@ export function createMountedTurnOwnedRelay(input: {
 			});
 		},
 
-		async deferPendingHandoff() {
+		deferPendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
 			input.broker.control.deferRelayHandoff({
@@ -187,10 +217,13 @@ export function createMountedTurnOwnedRelay(input: {
 			input.turnCapture?.reset();
 		},
 
-		async handleOwnerDisconnect() {
+		handleOwnerDisconnect() {
 			if (disconnectHandled) return;
 			disconnectHandled = true;
 			const state = input.broker.control.getRelayTurnState(input.collabId);
+			if (state.turnOwner !== input.currentAgent) {
+				return;
+			}
 			if (!state.unresolvedHandoffId) {
 				return;
 			}
@@ -202,5 +235,8 @@ export function createMountedTurnOwnedRelay(input: {
 				`[ai-whisper] Mounted ${input.currentAgent} session disconnected during unresolved handoff.`,
 			);
 		},
+		handleOwnerInput,
 	};
+
+	return api;
 }

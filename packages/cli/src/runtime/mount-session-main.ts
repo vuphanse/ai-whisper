@@ -49,6 +49,13 @@ export function createMountSessionRuntime(input: {
 			// for turnRelay, allowing externalInputGate to be passed directly instead of
 			// via a lazy getter (spread evaluates getters once, freezing undefined at call time).
 			let liveSession: ReturnType<typeof createLiveSessionRuntime> | null = null;
+			let relayPaneWriter: ReturnType<typeof createRelayPaneWriter> | null = null;
+			let turnRelay: ReturnType<typeof createMountedTurnOwnedRelay> | null = null;
+			const relayPaneWriterProxy = {
+				status(event: { content: string; now: string }) {
+					relayPaneWriter?.status(event);
+				},
+			} as ReturnType<typeof createRelayPaneWriter>;
 
 			const stop = async () => {
 				if (stopping) return;
@@ -96,27 +103,6 @@ export function createMountSessionRuntime(input: {
 			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
 			try {
-				// Consume the claim to get collabId, which is needed for turnRelay and relayPaneWriter.
-				resolvedClaim = input.broker.control.completeAttachClaim({
-					claimId: input.claimId,
-					secret: input.secret,
-					sessionId,
-					provider: provider.getIdentity(),
-					capabilities: provider.getCapabilities(),
-					now: new Date().toISOString(),
-					bindingSource: "mounted",
-				});
-
-				// Initialize the relay pane writer now that collabId is available.
-				const relayPaneWriter = createRelayPaneWriter({
-					broker: input.broker,
-					collabId: resolvedClaim.collabId,
-				});
-
-				// Initialize the turn-owned relay manager now that collabId is available.
-				// Must happen before createLiveSessionRuntime so the waiting gate can be
-				// passed directly — spread would evaluate the getter once at call time and
-				// freeze it as undefined if turnRelay were still null.
 				const lineReader = createLocalModalLineReader({
 					stdin: process.stdin,
 					stdout: process.stdout,
@@ -129,25 +115,7 @@ export function createMountSessionRuntime(input: {
 					turnCapture.recordProviderOutput(data);
 				});
 
-				const turnRelay = createMountedTurnOwnedRelay({
-					broker: input.broker,
-					collabId: resolvedClaim.collabId,
-					currentAgent: input.target,
-					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
-					writeUserInput: (text) => interactiveSession.writeUserInput(text),
-					openComposer: async (args) => {
-						const composer = createLocalMultilineComposer({
-							prompt: args.prompt,
-							initialValue: args.initialValue,
-							writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
-							readLine,
-						});
-						return composer.run();
-					},
-					turnCapture,
-				});
-
-				const onRelay = async (
+				const onRelay = (
 					directive: RelayDirective,
 					sendNow: (message: string) => void,
 				): Promise<string | null> => {
@@ -155,13 +123,13 @@ export function createMountSessionRuntime(input: {
 						throw new Error("Relay not available: session claim not yet completed");
 					}
 
-					if (directive.target === "pull") {
-						const injector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
-						const activeThread = input.broker.control.listThreads(resolvedClaim.collabId).find((t) => t.active);
-						if (!activeThread) {
-							sendNow("[ai-whisper] No active thread to pull context from.\n");
-							return null;
-						}
+						if (directive.target === "pull") {
+							const injector = createContextInjector({ broker: input.broker, collabId: resolvedClaim.collabId, sessionId: resolvedClaim.sessionId });
+							const activeThread = input.broker.control.listThreads(resolvedClaim.collabId).find((t) => t.active);
+							if (!activeThread) {
+								sendNow("[ai-whisper] No active thread to pull context from.\n");
+								return Promise.resolve(null);
+							}
 						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
 						if (result.injected) {
 							interactiveSession.writeUserInput(result.payload);
@@ -169,10 +137,10 @@ export function createMountSessionRuntime(input: {
 						} else {
 							sendNow("[ai-whisper] No pending relay context to inject.\n");
 						}
-						return null;
-					}
+							return Promise.resolve(null);
+						}
 
-					relayPaneWriter.relayDirective({
+					relayPaneWriter?.relayDirective({
 						senderAgent: input.target,
 						receiverAgent: directive.target,
 						instruction: directive.instruction,
@@ -191,8 +159,8 @@ export function createMountSessionRuntime(input: {
 
 					sendNow(`[ai-whisper] Handed turn to ${directive.target}.`);
 
-					return null;
-				};
+						return Promise.resolve(null);
+					};
 
 				// Mounted sessions own the terminal; process.stdin is the real tty read side.
 				// The live-session runtime intercepts inline @@ relay directives from stdin.
@@ -200,8 +168,20 @@ export function createMountSessionRuntime(input: {
 					interactiveSession,
 					stdin: process.stdin,
 					stdout: process.stdout,
-					relayPaneWriter,
-					externalInputGate: turnRelay.getWaitingGate(),
+					relayPaneWriter: relayPaneWriterProxy,
+					externalInputGate: {
+						isBlocked: () => turnRelay?.getWaitingGate().isBlocked() ?? false,
+						renderBlockedMessage: () =>
+							turnRelay?.getWaitingGate().renderBlockedMessage() ?? "",
+						onCancel: () => {
+							turnRelay?.getWaitingGate().onCancel();
+						},
+					},
+					externalInputRouter: {
+						handleInput: async (text) => {
+							return (await turnRelay?.handleOwnerInput(text)) ?? false;
+						},
+					},
 					onRelay,
 				});
 
@@ -209,22 +189,57 @@ export function createMountSessionRuntime(input: {
 				await liveSession.start();
 				liveSessionStarted = true;
 
-				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
-				// or provider crashes). stop() is idempotent via the `stopping` guard.
-				interactiveSession.onExit(() => {
-					void (async () => {
-						if (resolvedClaim) {
-							await turnRelay.handleOwnerDisconnect();
-						}
-						await stop();
-						process.exit(0);
-					})();
+				// Only now consume the claim and flip the binding to "bound".
+				resolvedClaim = input.broker.control.completeAttachClaim({
+					claimId: input.claimId,
+					secret: input.secret,
+					sessionId,
+					provider: provider.getIdentity(),
+					capabilities: provider.getCapabilities(),
+					now: new Date().toISOString(),
+					bindingSource: "mounted",
 				});
 
-				ownerRefreshTimer = setInterval(() => {
-					void turnRelay.refreshOwnerView();
-				}, 1000);
-				await turnRelay.refreshOwnerView();
+				relayPaneWriter = createRelayPaneWriter({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+				});
+
+				turnRelay = createMountedTurnOwnedRelay({
+					broker: input.broker,
+					collabId: resolvedClaim.collabId,
+					currentAgent: input.target,
+					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
+					writeUserInput: (text) => interactiveSession.writeUserInput(text),
+					openComposer: async (args) => {
+						const composer = createLocalMultilineComposer({
+							prompt: args.prompt,
+							initialValue: args.initialValue,
+							writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
+							readLine,
+						});
+						return composer.run();
+					},
+					turnCapture,
+				});
+				const mountedTurnRelay = turnRelay;
+
+				// Degrade if the provider exits unexpectedly (e.g. user Ctrl+C inside the provider,
+				// or provider crashes). stop() is idempotent via the `stopping` guard.
+					interactiveSession.onExit(() => {
+							void (async () => {
+								if (resolvedClaim) {
+									mountedTurnRelay.handleOwnerDisconnect();
+								}
+								await stop();
+								process.exit(0);
+						})();
+					});
+
+					ownerRefreshTimer = setInterval(() => {
+						void mountedTurnRelay.refreshOwnerView();
+					}, 1000);
+					mountedTurnRelay.refreshOwnerView();
 
 				// Update state file: record mounted session metadata + clear recovery state.
 				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
