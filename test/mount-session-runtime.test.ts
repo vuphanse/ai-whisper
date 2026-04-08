@@ -41,7 +41,14 @@ describe("mount session runtime", () => {
 			claimId: "claim_mount_1",
 			secret: "secret_mount",
 			broker: {
-				control: { completeAttachClaim, listSessionBindings: () => [], listSessions: () => [], markSessionDegraded: vi.fn() },
+				control: {
+					completeAttachClaim,
+					listSessionBindings: () => [],
+					listSessions: () => [],
+					markSessionDegraded: vi.fn(),
+					getRelayTurnState: () => ({ collabId: "collab_mount", turnOwner: "none", waitingAgent: null, unresolvedHandoffId: null, handoffState: "idle", handoffAgeMs: null }),
+					getRelayHandoff: () => null,
+				},
 				stop: () => Promise.resolve(),
 			} as never,
 			createInteractiveSession: () => ({
@@ -120,6 +127,8 @@ describe("mount session runtime — degradation on exit", () => {
 						listSessionBindings: () => [],
 						listSessions: () => [],
 						markSessionDegraded,
+						getRelayTurnState: () => ({ collabId: "collab_mount", turnOwner: "none", waitingAgent: null, unresolvedHandoffId: null, handoffState: "idle", handoffAgeMs: null }),
+						getRelayHandoff: () => null,
 					},
 					stop: () => Promise.resolve(),
 				} as never,

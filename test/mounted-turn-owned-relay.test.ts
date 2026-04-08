@@ -1,8 +1,130 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createLiveSessionRuntime } from "../packages/cli/src/runtime/live-session.ts";
+import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 
 describe("mounted turn-owned relay", () => {
+	it("renders a pending handoff card for the owner and injects the accepted request", async () => {
+		const writes: string[] = [];
+		const injected: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan\nKeep commits small.",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage: (text: string) => { writes.push(text); },
+			writeUserInput: (text: string) => { injected.push(text); },
+			openComposer: async (_args: { prompt: string; initialValue: string }) => "Implement the approved plan\nKeep commits small.\n",
+		});
+
+		await relay.refreshOwnerView();
+		await relay.acceptPendingHandoff();
+
+		expect(writes.join("")).toContain("Pending handoff from codex");
+		expect(injected.join("")).toContain("Implement the approved plan");
+	});
+
+	it("declines a pending handoff without requiring a reason", async () => {
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: async (_args: { prompt: string; initialValue: string }) => "",
+		});
+
+		await relay.declinePendingHandoff();
+		expect(broker.control.declineRelayHandoff).toHaveBeenCalledWith(
+			expect.objectContaining({ handoffId: "handoff_1" }),
+		);
+	});
+
+	it("defers a pending handoff and keeps the sender waiting", async () => {
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "pending" as const,
+				})),
+				deferRelayHandoff: vi.fn(),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage() {},
+			writeUserInput() {},
+			openComposer: async (_args: { prompt: string; initialValue: string }) => "",
+		});
+
+		await relay.deferPendingHandoff();
+		expect(broker.control.deferRelayHandoff).toHaveBeenCalledWith(
+			expect.objectContaining({ handoffId: "handoff_1" }),
+		);
+	});
+
 	it("swallows ordinary waiting-side input but allows Ctrl+C", async () => {
 		const stdin = new PassThrough();
 		const localMessages: string[] = [];

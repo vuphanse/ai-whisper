@@ -12,6 +12,7 @@ import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
 import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
+import { createLocalMultilineComposer, createLocalModalLineReader } from "./local-multiline-composer.js";
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -113,10 +114,26 @@ export function createMountSessionRuntime(input: {
 				// Must happen before createLiveSessionRuntime so the waiting gate can be
 				// passed directly — spread would evaluate the getter once at call time and
 				// freeze it as undefined if turnRelay were still null.
+				const readLine = createLocalModalLineReader({
+					stdin: process.stdin,
+					stdout: process.stdout,
+				});
+
 				const turnRelay = createMountedTurnOwnedRelay({
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
 					currentAgent: input.target,
+					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
+					writeUserInput: (text) => interactiveSession.writeUserInput(text),
+					openComposer: async (args) => {
+						const composer = createLocalMultilineComposer({
+							prompt: args.prompt,
+							initialValue: args.initialValue,
+							writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
+							readLine,
+						});
+						return composer.run();
+					},
 				});
 
 				const onRelay = async (
