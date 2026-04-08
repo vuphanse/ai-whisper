@@ -6,6 +6,12 @@ cat <<'EOF'
 Manual validation checklist for mounted-session relay:
   Build first: pnpm build
   Use node packages/cli/dist/bin/whisper.js for all commands below
+  Preferred full-flow probe:
+    ./scripts/manual/phase-7e-mounted-turn-handoff-probe.sh --reset-runtime
+  Probe notes:
+    - The probe starts relay-monitor plus both mounted providers in tmux
+    - Both mounted providers set AI_WHISPER_DEBUG_INPUT_LOG for byte-level debugging
+    - Inspect the generated .ai-whisper/manual/... logs after the run
   1. Start broker only with node packages/cli/dist/bin/whisper.js collab start --no-launch
   2. In one iTerm shell, run node packages/cli/dist/bin/whisper.js collab mount codex
   3. In a second iTerm shell, run node packages/cli/dist/bin/whisper.js collab mount claude

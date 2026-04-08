@@ -38,4 +38,15 @@ describe("assistant turn capture", () => {
 			text: null,
 		});
 	});
+
+	it("detects visible assistant output before a turn is formally completed", () => {
+		const capture = createAssistantTurnCapture();
+
+		capture.recordProviderOutput("Implemented the plan.\r\n");
+		expect(capture.hasVisibleAssistantTurn()).toBe(true);
+
+		capture.reset();
+		capture.recordProviderOutput("\u001b[2K\r");
+		expect(capture.hasVisibleAssistantTurn()).toBe(false);
+	});
 });

@@ -296,6 +296,52 @@ describe("live session runtime", () => {
 		expect(rawModeCalls).toEqual([true, false]);
 	});
 
+	it("pauses stdin handling and raw mode while modal input is active", async () => {
+		const stdout = new PassThrough();
+		const rawModeCalls: boolean[] = [];
+		const stdin = new PassThrough() as PassThrough & {
+			isTTY: boolean;
+			isRaw: boolean;
+			setRawMode(mode: boolean): void;
+		};
+		stdin.isTTY = true;
+		stdin.isRaw = false;
+		stdin.setRawMode = (mode: boolean) => {
+			rawModeCalls.push(mode);
+			stdin.isRaw = mode;
+		};
+
+		const userInputs: string[] = [];
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					userInputs.push(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () => Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		await runtime.withPausedInput(async () => {
+			stdin.write("/\u001b[47;1:3u");
+			await nextTick();
+		});
+		stdin.write("a");
+		await nextTick();
+		await runtime.stop();
+
+		expect(userInputs).toEqual(["a"]);
+		expect(rawModeCalls).toEqual([true, false, true, false]);
+	});
+
 	it("drops printable CSI-u keyboard echoes before relay parsing", async () => {
 		const stdin = new PassThrough();
 		const stdout = new PassThrough();
@@ -357,6 +403,35 @@ describe("live session runtime", () => {
 
 		await runtime.start();
 		stdin.write("a\u001b[97;1:3ub\u001b[98;1:3uc\u001b[99;1:3u");
+
+		expect(fakePty.writes.join("")).toBe("abc");
+	});
+
+	it("decodes printable CSI-u-only input before passthrough to the provider", async () => {
+		const stdin = new PassThrough();
+		const stdout = new PassThrough();
+		const fakePty = createFakePty();
+
+		const runtime = createLiveSessionRuntime({
+			interactiveSession: {
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput(data: string) {
+					fakePty.write(data);
+				},
+				sendLocalMessage(message: string) {
+					stdout.write(message);
+				},
+				onExit() {},
+			},
+			stdin,
+			stdout,
+			onRelay: () =>
+				Promise.reject(new Error("relay should not fire")),
+		});
+
+		await runtime.start();
+		stdin.write("\u001b[97;1:3u\u001b[98;1:3u\u001b[99;1:3u");
 
 		expect(fakePty.writes.join("")).toBe("abc");
 	});

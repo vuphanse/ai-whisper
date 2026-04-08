@@ -12,8 +12,15 @@ import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
 import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
-import { createLocalMultilineComposer, createLocalModalLineReader } from "./local-multiline-composer.js";
+import {
+	createLocalModalConfirm,
+	createLocalMultilineComposer,
+	createLocalModalLineReader,
+} from "./local-multiline-composer.js";
 import { createAssistantTurnCapture } from "./assistant-turn-capture.js";
+import { captureClipboardHandback } from "./clipboard-handback-capture.js";
+import { submitInjectedProviderInput } from "./provider-submit-strategy.js";
+import { createRuntimeDebugLogger } from "./runtime-debug-log.js";
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -103,14 +110,32 @@ export function createMountSessionRuntime(input: {
 			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
 			try {
-				const lineReader = createLocalModalLineReader({
-					stdin: process.stdin,
-					stdout: process.stdout,
-				});
-				const readLine = lineReader.readLine;
-				closeLineReader = lineReader.close;
-
 				const turnCapture = createAssistantTurnCapture();
+				const debugLog = createRuntimeDebugLogger({
+					logPath: process.env.AI_WHISPER_DEBUG_INPUT_LOG ?? null,
+					sessionId: process.env.AI_WHISPER_SESSION_ID ?? null,
+				});
+				const writeInjectedInput = (channel: string, value: string) => {
+					debugLog({
+						type: "programmatic-write",
+						channel,
+						data: value,
+					});
+					interactiveSession.writeUserInput(value);
+				};
+				const submitInjectedInput = async (text: string) => {
+					debugLog({
+						type: "programmatic-submit",
+						channel: "mounted-submit",
+						data: text,
+					});
+					await submitInjectedProviderInput({
+						target: input.target,
+						text,
+						writeUserInput: (value) =>
+							writeInjectedInput("mounted-submit", value),
+					});
+				};
 				interactiveSession.onProviderOutput?.((data: string) => {
 					turnCapture.recordProviderOutput(data);
 				});
@@ -132,7 +157,7 @@ export function createMountSessionRuntime(input: {
 							}
 						const result = injector.injectContext({ userInput: "", activeThreadId: activeThread.threadId });
 						if (result.injected) {
-							interactiveSession.writeUserInput(result.payload);
+							writeInjectedInput("context-inject", result.payload);
 							sendNow(`\u001b[2m↳ relay context attached (${result.summary})\u001b[0m\n`);
 						} else {
 							sendNow("[ai-whisper] No pending relay context to inject.\n");
@@ -210,16 +235,56 @@ export function createMountSessionRuntime(input: {
 					collabId: resolvedClaim.collabId,
 					currentAgent: input.target,
 					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
-					writeUserInput: (text) => interactiveSession.writeUserInput(text),
+					writeUserInput: (text) => writeInjectedInput("mounted-inject", text),
+					submitUserInput: submitInjectedInput,
 					openComposer: async (args) => {
-						const composer = createLocalMultilineComposer({
-							prompt: args.prompt,
-							initialValue: args.initialValue,
-							writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
-							readLine,
-						});
-						return composer.run();
+						const runComposer = async () => {
+							const lineReader = createLocalModalLineReader({
+								stdin: process.stdin,
+								stdout: process.stdout,
+							});
+							closeLineReader = lineReader.close;
+							const composer = createLocalMultilineComposer({
+								prompt: args.prompt,
+								initialValue: args.initialValue,
+								writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
+								readLine: lineReader.readLine,
+							});
+							try {
+								return await composer.run();
+							} finally {
+								lineReader.close();
+								closeLineReader = () => {};
+							}
+						};
+						if (liveSession?.withPausedInput) {
+							return liveSession.withPausedInput(runComposer);
+						}
+						return runComposer();
 					},
+					captureHandbackText: async () => {
+						return captureClipboardHandback({
+							triggerCopy: () => {
+								return submitInjectedInput("/copy");
+							},
+						});
+					},
+					confirmHandbackCapture: async () => {
+						const runConfirm = async () => {
+							const confirm = createLocalModalConfirm({
+								stdin: process.stdin,
+								stdout: process.stdout,
+								message:
+									"[ai-whisper] Response copied, Enter to hand back or Esc to cancel.",
+							});
+							return confirm.run();
+						};
+						if (liveSession?.withPausedInput) {
+							return liveSession.withPausedInput(runConfirm);
+						}
+						return runConfirm();
+					},
+					prefillHandbackFromCapture: false,
 					turnCapture,
 				});
 				const mountedTurnRelay = turnRelay;

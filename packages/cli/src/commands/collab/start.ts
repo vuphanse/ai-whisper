@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import { createSessionId } from "@ai-whisper/shared";
+import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import {
 	createCliCollabId,
 	createCliSessionId,
@@ -42,6 +43,37 @@ function spawnBrokerDaemon(
 	return child.pid!;
 }
 
+async function waitForBrokerReady(input: {
+	host: string;
+	port: number;
+	pid: number;
+	assessBroker?: typeof assessBrokerDaemon;
+	sleep?: (ms: number) => Promise<void>;
+	attempts?: number;
+	delayMs?: number;
+}) {
+	const assess = input.assessBroker ?? assessBrokerDaemon;
+	const sleep =
+		input.sleep ??
+		((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const attempts = input.attempts ?? 20;
+	const delayMs = input.delayMs ?? 100;
+
+	for (let attempt = 0; attempt < attempts; attempt += 1) {
+		const health = await assess({
+			host: input.host,
+			port: input.port,
+			pid: input.pid,
+		});
+		if (health.ok) {
+			return;
+		}
+		await sleep(delayMs);
+	}
+
+	throw new Error("Broker daemon failed to become ready.");
+}
+
 export async function runCollabStart(input: {
 	workspaceRoot: string;
 	now: string;
@@ -50,6 +82,8 @@ export async function runCollabStart(input: {
 	spawn?: SpawnFn;
 	exec?: ExecFn;
 	spawnBroker?: (sqlitePath: string, host: string, port: number) => number;
+	assessBroker?: typeof assessBrokerDaemon;
+	sleep?: (ms: number) => Promise<void>;
 }) {
 	const statePath = getStateFilePath(input.workspaceRoot);
 	const existing = readCliCollabState(statePath);
@@ -86,6 +120,13 @@ export async function runCollabStart(input: {
 
 		const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
 		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
+		await waitForBrokerReady({
+			host: brokerHost,
+			port: brokerPort,
+			pid: brokerPid,
+			...(input.assessBroker ? { assessBroker: input.assessBroker } : {}),
+			...(input.sleep ? { sleep: input.sleep } : {}),
+		});
 
 		writeCliCollabState(getStateFilePath(input.workspaceRoot), {
 			version: 5,
@@ -164,6 +205,13 @@ export async function runCollabStart(input: {
 	// Spawn long-lived broker daemon
 	const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
 	const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
+	await waitForBrokerReady({
+		host: brokerHost,
+		port: brokerPort,
+		pid: brokerPid,
+		...(input.assessBroker ? { assessBroker: input.assessBroker } : {}),
+		...(input.sleep ? { sleep: input.sleep } : {}),
+	});
 
 	const launch = launchSessions({
 		launchMode: input.launchMode,

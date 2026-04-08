@@ -178,6 +178,7 @@ describe("relay UX integration", () => {
 			turnCapture: {
 				reset: vi.fn(),
 				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: () => false,
 				extractLatestAssistantTurn: () => ({ confidence: "low" as const, text: null }),
 			},
 		});
@@ -192,13 +193,14 @@ describe("relay UX integration", () => {
 			turnCapture: {
 				reset: vi.fn(),
 				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: () => true,
 				extractLatestAssistantTurn: () => ({ confidence: "high" as const, text: "Implemented the approved plan." }),
 			},
 		});
 
 		expect(codexRelay.getWaitingGate().isBlocked()).toBe(true);
 
-		await claudeRelay.acceptPendingHandoff();
+		claudeRelay.acceptPendingHandoff();
 		expect(claudeInjected.join("")).toContain("Implement the approved plan");
 
 		expect(broker.control.getRelayTurnState("collab_turn")).toMatchObject({
