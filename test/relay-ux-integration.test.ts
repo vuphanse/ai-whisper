@@ -160,6 +160,14 @@ describe("relay UX integration", () => {
 			now: "2026-04-08T00:00:05.000Z",
 		});
 
+		expect(broker.control.getRelayTurnState("collab_turn")).toEqual(
+			expect.objectContaining({
+				turnOwner: "claude",
+				waitingAgent: "codex",
+				handoffState: "pending",
+			}),
+		);
+
 		const codexRelay = createMountedTurnOwnedRelay({
 			broker,
 			collabId: "collab_turn",
