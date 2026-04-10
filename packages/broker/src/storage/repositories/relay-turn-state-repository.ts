@@ -105,7 +105,11 @@ export function upsertRelayTurnState(
 		   waiting_agent = excluded.waiting_agent,
 		   unresolved_handoff_id = excluded.unresolved_handoff_id,
 		   handoff_state = excluded.handoff_state,
-		   updated_at = excluded.updated_at`,
+		   updated_at = excluded.updated_at,
+		   orchestrator_enabled = excluded.orchestrator_enabled,
+		   current_round = excluded.current_round,
+		   max_rounds = excluded.max_rounds,
+		   chain_status = excluded.chain_status`,
 	).run(
 		input.collabId,
 		input.turnOwner,

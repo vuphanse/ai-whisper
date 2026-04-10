@@ -310,12 +310,26 @@ export function handoffBackRelayTxn(
 			throw new Error(`Unknown handoff: ${input.handoffId}`);
 		}
 
-		// Mark current as handed_back, store captureStatus on the completed record
-		db.prepare(
-			`UPDATE relay_handoff
-			    SET status = 'handed_back', resolved_at = ?, last_activity_at = ?, capture_status = ?
-			  WHERE handoff_id = ?`,
-		).run(input.now, input.now, input.captureStatus ?? null, input.handoffId);
+		const collab = getCollab(db, current.collabId);
+		const orchestratorEnabled = collab?.orchestratorEnabled ?? false;
+
+		// Mark current as handed_back, store captureStatus on the completed record.
+		// When orchestrator is enabled, also set handback_text and orchestrator_status = 'idle'
+		// so the orchestrator can claim this record.
+		if (orchestratorEnabled) {
+			db.prepare(
+				`UPDATE relay_handoff
+				    SET status = 'handed_back', resolved_at = ?, last_activity_at = ?,
+				        capture_status = ?, handback_text = ?, orchestrator_status = 'idle'
+				  WHERE handoff_id = ?`,
+			).run(input.now, input.now, input.captureStatus ?? null, input.requestText, input.handoffId);
+		} else {
+			db.prepare(
+				`UPDATE relay_handoff
+				    SET status = 'handed_back', resolved_at = ?, last_activity_at = ?, capture_status = ?
+				  WHERE handoff_id = ?`,
+			).run(input.now, input.now, input.captureStatus ?? null, input.handoffId);
+		}
 
 		// New pending handoff has no captureStatus yet
 		db.prepare(
@@ -341,6 +355,10 @@ export function handoffBackRelayTxn(
 			unresolvedHandoffId: input.nextHandoffId,
 			handoffState: "pending",
 			updatedAt: input.now,
+			orchestratorEnabled,
+			currentRound: current.roundNumber ?? 0,
+			maxRounds: current.maxRounds,
+			chainStatus: orchestratorEnabled ? "active" : "done",
 		});
 
 		return queryRelayHandoff(db, input.nextHandoffId) as RelayHandoffRecord;
@@ -418,5 +436,243 @@ export function failRelayHandoffOnDisconnectTxn(
 				updatedAt: input.now,
 			});
 		}
+	})();
+}
+
+export function claimRelayHandoffForOrchestrationTxn(
+	db: Database.Database,
+	input: { handoffId: string; claimedAt: string },
+): RelayHandoffRecord | null {
+	const result = db
+		.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'pending',
+			        orchestrator_claimed_at = ?
+			  WHERE handoff_id = ?
+			    AND status = 'handed_back'
+			    AND orchestrator_status = 'idle'`,
+		)
+		.run(input.claimedAt, input.handoffId);
+
+	return result.changes === 1 ? queryRelayHandoff(db, input.handoffId) : null;
+}
+
+export function listRelayHandoffsPendingOrchestration(
+	db: Database.Database,
+	collabId: string,
+): RelayHandoffRecord[] {
+	const rows = db
+		.prepare(
+			`SELECT h.handoff_id, h.collab_id, h.sender_agent, h.target_agent, h.request_text, h.status,
+			        h.capture_status, h.chain_id, h.parent_handoff_id, h.round_number, h.root_request_text,
+			        h.handback_text, h.orchestrator_status, h.orchestrator_verdict, h.orchestrator_reason,
+			        h.orchestrator_claimed_at, h.orchestrator_evaluated_at, h.created_at, h.accepted_at,
+			        h.deferred_at, h.resolved_at, h.last_activity_at,
+			        c.orchestrator_max_rounds AS max_rounds
+			 FROM relay_handoff h
+			 JOIN collab c ON c.collab_id = h.collab_id
+			 WHERE h.collab_id = ?
+			   AND h.status = 'handed_back'
+			   AND h.orchestrator_status = 'idle'`,
+		)
+		.all(collabId) as Array<{
+		handoff_id: string;
+		collab_id: string;
+		sender_agent: string;
+		target_agent: string;
+		request_text: string;
+		status: string;
+		capture_status: string | null;
+		chain_id: string | null;
+		parent_handoff_id: string | null;
+		round_number: number | null;
+		max_rounds: number;
+		root_request_text: string | null;
+		handback_text: string | null;
+		orchestrator_status: string | null;
+		orchestrator_verdict: string | null;
+		orchestrator_reason: string | null;
+		orchestrator_claimed_at: string | null;
+		orchestrator_evaluated_at: string | null;
+		created_at: string;
+		accepted_at: string | null;
+		deferred_at: string | null;
+		resolved_at: string | null;
+		last_activity_at: string;
+	}>;
+	return rows.map(rowToRecord);
+}
+
+export function createLoopRelayHandoffTxn(
+	db: Database.Database,
+	input: {
+		handoffId: string;
+		nextHandoffId: string;
+		requestText: string;
+		reason: string;
+		now: string;
+	},
+): RelayHandoffRecord {
+	return db.transaction(() => {
+		const current = queryRelayHandoff(db, input.handoffId);
+		if (!current) throw new Error(`Unknown handoff: ${input.handoffId}`);
+
+		const collab = getCollab(db, current.collabId);
+		const maxRounds = collab?.orchestratorMaxRounds ?? current.maxRounds;
+
+		// Insert next handoff with swapped agents
+		db.prepare(
+			`INSERT INTO relay_handoff
+			   (handoff_id, collab_id, sender_agent, target_agent, request_text,
+			    status, chain_id, parent_handoff_id, round_number, root_request_text,
+			    handback_text, orchestrator_status, orchestrator_verdict, orchestrator_reason,
+			    orchestrator_claimed_at, orchestrator_evaluated_at, created_at, accepted_at,
+			    deferred_at, resolved_at, last_activity_at, capture_status)
+			 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, NULL, 'idle', NULL, NULL, NULL, NULL, ?, NULL, NULL, NULL, ?, NULL)`,
+		).run(
+			input.nextHandoffId,
+			current.collabId,
+			current.targetAgent, // SWAPPED: previous target becomes new sender
+			current.senderAgent, // SWAPPED: previous sender becomes new target
+			input.requestText,
+			current.chainId,
+			current.handoffId,
+			(current.roundNumber ?? 1) + 1,
+			current.rootRequestText,
+			input.now,
+			input.now,
+		);
+
+		// Finalize current handoff
+		db.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'processed',
+			        orchestrator_verdict = 'loop',
+			        orchestrator_reason = ?,
+			        orchestrator_evaluated_at = ?
+			  WHERE handoff_id = ?
+			    AND orchestrator_status = 'pending'`,
+		).run(input.reason, input.now, current.handoffId);
+
+		// Update turn state
+		upsertRelayTurnState(db, {
+			collabId: current.collabId,
+			turnOwner: current.senderAgent, // new target receives ownership
+			waitingAgent: current.targetAgent, // new sender waits
+			unresolvedHandoffId: input.nextHandoffId,
+			handoffState: "pending",
+			orchestratorEnabled: true,
+			currentRound: (current.roundNumber ?? 1) + 1,
+			maxRounds,
+			chainStatus: "active",
+			updatedAt: input.now,
+		});
+
+		return queryRelayHandoff(db, input.nextHandoffId)!;
+	})();
+}
+
+export function resolveRelayChainTxn(
+	db: Database.Database,
+	input: { handoffId: string; reason: string; evaluatedAt: string },
+): void {
+	db.transaction(() => {
+		const current = queryRelayHandoff(db, input.handoffId);
+		if (!current) throw new Error(`Unknown handoff: ${input.handoffId}`);
+
+		const collab = getCollab(db, current.collabId);
+		const maxRounds = collab?.orchestratorMaxRounds ?? current.maxRounds;
+
+		db.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'processed',
+			        orchestrator_verdict = 'done',
+			        orchestrator_reason = ?,
+			        orchestrator_evaluated_at = ?
+			  WHERE handoff_id = ?`,
+		).run(input.reason, input.evaluatedAt, input.handoffId);
+
+		upsertRelayTurnState(db, {
+			collabId: current.collabId,
+			turnOwner: current.senderAgent,
+			waitingAgent: null,
+			unresolvedHandoffId: null,
+			handoffState: "idle",
+			orchestratorEnabled: true,
+			currentRound: current.roundNumber ?? 1,
+			maxRounds,
+			chainStatus: "done",
+			updatedAt: input.evaluatedAt,
+		});
+	})();
+}
+
+export function markRelayChainEscalatedTxn(
+	db: Database.Database,
+	input: { handoffId: string; reason: string; evaluatedAt: string },
+): void {
+	db.transaction(() => {
+		const current = queryRelayHandoff(db, input.handoffId);
+		if (!current) throw new Error(`Unknown handoff: ${input.handoffId}`);
+
+		const collab = getCollab(db, current.collabId);
+		const maxRounds = collab?.orchestratorMaxRounds ?? current.maxRounds;
+
+		db.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'processed',
+			        orchestrator_verdict = 'escalate',
+			        orchestrator_reason = ?,
+			        orchestrator_evaluated_at = ?
+			  WHERE handoff_id = ?`,
+		).run(input.reason, input.evaluatedAt, input.handoffId);
+
+		upsertRelayTurnState(db, {
+			collabId: current.collabId,
+			turnOwner: current.senderAgent,
+			waitingAgent: null,
+			unresolvedHandoffId: null,
+			handoffState: "idle",
+			orchestratorEnabled: true,
+			currentRound: current.roundNumber ?? 1,
+			maxRounds,
+			chainStatus: "escalated",
+			updatedAt: input.evaluatedAt,
+		});
+	})();
+}
+
+export function markRelayChainAbandonedTxn(
+	db: Database.Database,
+	input: { handoffId: string; reason: string; evaluatedAt: string },
+): void {
+	db.transaction(() => {
+		const current = queryRelayHandoff(db, input.handoffId);
+		if (!current) throw new Error(`Unknown handoff: ${input.handoffId}`);
+
+		const collab = getCollab(db, current.collabId);
+		const maxRounds = collab?.orchestratorMaxRounds ?? current.maxRounds;
+
+		db.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'processed',
+			        orchestrator_verdict = 'escalate',
+			        orchestrator_reason = ?,
+			        orchestrator_evaluated_at = ?
+			  WHERE handoff_id = ?`,
+		).run(input.reason, input.evaluatedAt, input.handoffId);
+
+		upsertRelayTurnState(db, {
+			collabId: current.collabId,
+			turnOwner: current.senderAgent,
+			waitingAgent: null,
+			unresolvedHandoffId: null,
+			handoffState: "idle",
+			orchestratorEnabled: true,
+			currentRound: current.roundNumber ?? 1,
+			maxRounds,
+			chainStatus: "abandoned",
+			updatedAt: input.evaluatedAt,
+		});
 	})();
 }

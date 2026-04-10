@@ -101,6 +101,12 @@ import {
 	failRelayHandoffOnDisconnectTxn,
 	queryRelayHandoff,
 	queryLatestHandedBackHandoff,
+	claimRelayHandoffForOrchestrationTxn,
+	listRelayHandoffsPendingOrchestration,
+	createLoopRelayHandoffTxn,
+	resolveRelayChainTxn,
+	markRelayChainEscalatedTxn,
+	markRelayChainAbandonedTxn,
 } from "../storage/repositories/relay-handoff-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
@@ -1056,6 +1062,30 @@ export function createControlService(db: Database.Database) {
 		},
 		getLatestHandedBackHandoff(collabId: string) {
 			return queryLatestHandedBackHandoff(db, collabId);
+		},
+		claimRelayHandoffForOrchestration(input: { handoffId: string; claimedAt: string }) {
+			return claimRelayHandoffForOrchestrationTxn(db, input);
+		},
+		listRelayHandoffsPendingOrchestration(collabId: string) {
+			return listRelayHandoffsPendingOrchestration(db, collabId);
+		},
+		createLoopRelayHandoff(input: {
+			handoffId: string;
+			nextHandoffId: string;
+			requestText: string;
+			reason: string;
+			now: string;
+		}) {
+			return createLoopRelayHandoffTxn(db, input);
+		},
+		resolveRelayChain(input: { handoffId: string; reason: string; evaluatedAt: string }) {
+			return resolveRelayChainTxn(db, input);
+		},
+		markRelayChainEscalated(input: { handoffId: string; reason: string; evaluatedAt: string }) {
+			return markRelayChainEscalatedTxn(db, input);
+		},
+		markRelayChainAbandoned(input: { handoffId: string; reason: string; evaluatedAt: string }) {
+			return markRelayChainAbandonedTxn(db, input);
 		},
 	};
 }
