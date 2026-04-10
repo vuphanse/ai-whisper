@@ -221,9 +221,12 @@ sleep 2
 # after the mount exits — makes the error visible in captured pane output
 # regardless of whether remain-on-exit propagated correctly.
 MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor; exec sleep 86400"
-SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
+# Source gets a very large threshold (effectively disabled) so it does not
+# auto-accept the returned handoff — keeps the "Pending handoff" card visible
+# for the probe to capture. Without this, mount-session-main defaults to 30s
+# and the source would auto-accept before the capture window.
+SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=999999 AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
 # Target receives AI_WHISPER_IDLE_THRESHOLD_MS so auto-accept and auto-handback engage.
-# Source does NOT receive it — source stays manual so the probe terminates after one round.
 TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
 
 echo "+ tmux new-session -d -s $SESSION_NAME"
@@ -357,8 +360,9 @@ logs:
   $SUMMARY_FILE
 
 Notes:
-  - AI_WHISPER_IDLE_THRESHOLD_MS=${IDLE_THRESHOLD_MS} was set on the target mount only.
-    Source stays manual so the probe terminates after one autonomous round-trip.
+  - AI_WHISPER_IDLE_THRESHOLD_MS=${IDLE_THRESHOLD_MS} was set on the target mount.
+    Source was set to 999999 (effectively disabled) so it does not auto-accept
+    the returned handoff, keeping the "Pending handoff" card visible for capture.
   - For best results mount target provider with auto-allow-permissions so permission
     prompts do not reset the idle clock: --dangerously-skip-permissions (claude) or
     auto-approve mode (codex).

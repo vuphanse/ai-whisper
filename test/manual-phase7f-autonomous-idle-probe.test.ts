@@ -29,20 +29,22 @@ describe("phase 7f autonomous idle handoff probe script", () => {
 		expect(output).toContain("--no-build");
 	});
 
-	it("sets AI_WHISPER_IDLE_THRESHOLD_MS on the target mount command only", () => {
+	it("sets AI_WHISPER_IDLE_THRESHOLD_MS on the target mount and disables it on the source", () => {
 		const script = readFileSync(
 			resolve(root, "scripts/manual/phase-7f-autonomous-idle-handoff-probe.sh"),
 			"utf8",
 		);
 
-		// Target command must carry the threshold env var
+		// Target command must carry the configurable threshold env var
 		expect(script).toContain("AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS");
-		// The target command line must include it directly before the mount call
 		expect(script).toMatch(
 			/AI_WHISPER_IDLE_THRESHOLD_MS=\$IDLE_THRESHOLD_MS.*collab mount \$TARGET/,
 		);
-		// Source command must NOT set the threshold — it stays manual
-		expect(script).toMatch(/SOURCE_CMD=.*(?!AI_WHISPER_IDLE_THRESHOLD_MS)/);
+		// Source command must set a very large threshold so it never auto-accepts
+		// the returned handoff — keeps the "Pending handoff" card visible for capture
+		expect(script).toMatch(
+			/AI_WHISPER_IDLE_THRESHOLD_MS=999999.*collab mount \$SOURCE/,
+		);
 	});
 
 	it("sends only Ctrl-C (interrupt) and no 'a' or 'h' keypresses to the target window", () => {
