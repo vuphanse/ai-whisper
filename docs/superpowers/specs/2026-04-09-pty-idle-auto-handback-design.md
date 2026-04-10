@@ -73,7 +73,14 @@ Confidence classification:
 | `"no_response_captured_confidently"` | Signals exist but overlap check fails or `turnCapture` confidence is `"low"` | `""` |
 | `"no_response_captured"` | Both `turnText` and `clipboardText` are empty/null | `""` |
 
-**Overlap check**: `clipboardText` contains a significant substring of `turnText`, or vice versa (minimum 80 chars or 50% of the shorter string, whichever is less).
+**Overlap check — ordered Jaccard:**
+1. Extract content words (length >= 4 chars) from both texts, preserving order, after normalizing (trim, collapse whitespace, lowercase)
+2. Compute base Jaccard: `|intersection| / |union|` on the word sets
+3. Compute LCS length over the word sequences
+4. Final score: `jaccard * (lcsLength / shorterSequenceLength)`
+5. Score >= 0.6 → overlap confirmed
+
+The LCS factor penalizes out-of-order matches — our case should not tolerate reordering since the same response should appear in the same word order in both signals. A perfectly ordered match scores close to 1.0; scrambled words with same vocabulary score low.
 
 `captureStatus` is a first-class field on `handoffBackRelay` — not embedded in `requestText` — so the orchestrator layer can branch on it independently of the response content.
 
