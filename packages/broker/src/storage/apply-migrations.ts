@@ -234,4 +234,11 @@ export function applyMigrations(db: Database.Database): void {
 			)`,
 		);
 	}
+
+	const relayHandoffColumns = db
+		.prepare("PRAGMA table_info(relay_handoff)")
+		.all() as Array<{ name: string }>;
+	if (!relayHandoffColumns.some((col) => col.name === "capture_status")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN capture_status TEXT");
+	}
 }

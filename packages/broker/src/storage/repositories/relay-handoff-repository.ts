@@ -8,6 +8,7 @@ export type RelayHandoffRecord = {
 	targetAgent: "codex" | "claude";
 	requestText: string;
 	status: "pending" | "deferred" | "accepted" | "declined" | "handed_back" | "failed";
+	captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 	createdAt: string;
 	acceptedAt: string | null;
 	deferredAt: string | null;
@@ -22,6 +23,7 @@ function rowToRecord(row: {
 	target_agent: string;
 	request_text: string;
 	status: string;
+	capture_status: string | null;
 	created_at: string;
 	accepted_at: string | null;
 	deferred_at: string | null;
@@ -35,6 +37,7 @@ function rowToRecord(row: {
 		targetAgent: row.target_agent as RelayHandoffRecord["targetAgent"],
 		requestText: row.request_text,
 		status: row.status as RelayHandoffRecord["status"],
+		captureStatus: row.capture_status as RelayHandoffRecord["captureStatus"],
 		createdAt: row.created_at,
 		acceptedAt: row.accepted_at,
 		deferredAt: row.deferred_at,
@@ -50,7 +53,7 @@ export function queryRelayHandoff(
 	const row = db
 		.prepare(
 			`SELECT handoff_id, collab_id, sender_agent, target_agent, request_text, status,
-			        created_at, accepted_at, deferred_at, resolved_at, last_activity_at
+			        capture_status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at
 			 FROM relay_handoff
 			 WHERE handoff_id = ?`,
 		)
@@ -62,6 +65,7 @@ export function queryRelayHandoff(
 				target_agent: string;
 				request_text: string;
 				status: string;
+				capture_status: string | null;
 				created_at: string;
 				accepted_at: string | null;
 				deferred_at: string | null;
@@ -100,8 +104,10 @@ export function createRelayHandoffTxn(
 
 		// Insert the handoff record
 		db.prepare(
-			`INSERT INTO relay_handoff (handoff_id, collab_id, sender_agent, target_agent, request_text, status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at)
-			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?)`,
+			`INSERT INTO relay_handoff
+			   (handoff_id, collab_id, sender_agent, target_agent, request_text,
+			    status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at, capture_status)
+			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?, NULL)`,
 		).run(
 			input.handoffId,
 			input.collabId,
@@ -232,6 +238,7 @@ export function handoffBackRelayTxn(
 		senderAgent: "codex" | "claude";
 		targetAgent: "codex" | "claude";
 		requestText: string;
+		captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 		now: string;
 	},
 ): RelayHandoffRecord {
@@ -241,16 +248,19 @@ export function handoffBackRelayTxn(
 			throw new Error(`Unknown handoff: ${input.handoffId}`);
 		}
 
-		// Mark the current handoff as handed_back
+		// Mark current as handed_back, store captureStatus on the completed record
 		db.prepare(
-			`UPDATE relay_handoff SET status = 'handed_back', resolved_at = ?, last_activity_at = ?
-			 WHERE handoff_id = ?`,
-		).run(input.now, input.now, input.handoffId);
+			`UPDATE relay_handoff
+			    SET status = 'handed_back', resolved_at = ?, last_activity_at = ?, capture_status = ?
+			  WHERE handoff_id = ?`,
+		).run(input.now, input.now, input.captureStatus ?? null, input.handoffId);
 
-		// Insert the new pending handoff
+		// New pending handoff has no captureStatus yet
 		db.prepare(
-			`INSERT INTO relay_handoff (handoff_id, collab_id, sender_agent, target_agent, request_text, status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at)
-			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?)`,
+			`INSERT INTO relay_handoff
+			   (handoff_id, collab_id, sender_agent, target_agent, request_text,
+			    status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at, capture_status)
+			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?, NULL)`,
 		).run(
 			input.nextHandoffId,
 			current.collabId,
@@ -273,6 +283,38 @@ export function handoffBackRelayTxn(
 
 		return queryRelayHandoff(db, input.nextHandoffId) as RelayHandoffRecord;
 	})();
+}
+
+export function queryLatestHandedBackHandoff(
+	db: Database.Database,
+	collabId: string,
+): RelayHandoffRecord | null {
+	const row = db
+		.prepare(
+			`SELECT handoff_id, collab_id, sender_agent, target_agent, request_text, status,
+			        capture_status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at
+			 FROM relay_handoff
+			 WHERE collab_id = ? AND status = 'handed_back'
+			 ORDER BY resolved_at DESC
+			 LIMIT 1`,
+		)
+		.get(collabId) as
+		| {
+				handoff_id: string;
+				collab_id: string;
+				sender_agent: string;
+				target_agent: string;
+				request_text: string;
+				status: string;
+				capture_status: string | null;
+				created_at: string;
+				accepted_at: string | null;
+				deferred_at: string | null;
+				resolved_at: string | null;
+				last_activity_at: string;
+		  }
+		| undefined;
+	return row ? rowToRecord(row) : null;
 }
 
 export function failRelayHandoffOnDisconnectTxn(

@@ -99,6 +99,7 @@ import {
 	handoffBackRelayTxn,
 	failRelayHandoffOnDisconnectTxn,
 	queryRelayHandoff,
+	queryLatestHandedBackHandoff,
 } from "../storage/repositories/relay-handoff-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
@@ -1023,6 +1024,7 @@ export function createControlService(db: Database.Database) {
 			senderAgent: "codex" | "claude";
 			targetAgent: "codex" | "claude";
 			requestText: string;
+			captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 			now: string;
 		}) {
 			return handoffBackRelayTxn(db, input);
@@ -1032,6 +1034,9 @@ export function createControlService(db: Database.Database) {
 		},
 		getRelayHandoff(handoffId: string) {
 			return queryRelayHandoff(db, handoffId);
+		},
+		getLatestHandedBackHandoff(collabId: string) {
+			return queryLatestHandedBackHandoff(db, collabId);
 		},
 	};
 }

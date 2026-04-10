@@ -115,6 +115,106 @@ describe("relay handoff repository", () => {
 		);
 	});
 
+	it("handoffBackRelay stores captureStatus on the handed-back record, not on the next pending record", () => {
+		const broker = createTestBroker();
+
+		broker.control.startCollab({
+			collabId: "collab_capture",
+			workspaceRoot: "/tmp/test",
+			displayName: "capture",
+			now: "2026-04-10T00:00:00.000Z",
+		});
+
+		broker.control.createRelayHandoff({
+			handoffId: "handoff_cs_1",
+			collabId: "collab_capture",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Do the work",
+			now: "2026-04-10T00:00:05.000Z",
+		});
+
+		broker.control.acceptRelayHandoff({
+			handoffId: "handoff_cs_1",
+			acceptedAt: "2026-04-10T00:00:10.000Z",
+		});
+
+		broker.control.handoffBackRelay({
+			handoffId: "handoff_cs_1",
+			nextHandoffId: "handoff_cs_2",
+			senderAgent: "claude",
+			targetAgent: "codex",
+			requestText: "Here is the result",
+			captureStatus: "ok",
+			now: "2026-04-10T00:01:00.000Z",
+		});
+
+		// captureStatus on the completed (handed_back) record
+		expect(broker.control.getRelayHandoff("handoff_cs_1")?.captureStatus).toBe("ok");
+		// new pending record has null captureStatus — it hasn't been worked on yet
+		expect(broker.control.getRelayHandoff("handoff_cs_2")?.captureStatus).toBeNull();
+	});
+
+	it("getLatestHandedBackHandoff returns the most recently handed-back record, not the first", () => {
+		const broker = createTestBroker();
+
+		broker.control.startCollab({
+			collabId: "collab_latest",
+			workspaceRoot: "/tmp/test",
+			displayName: "latest",
+			now: "2026-04-10T00:00:00.000Z",
+		});
+
+		broker.control.createRelayHandoff({
+			handoffId: "handoff_latest_1",
+			collabId: "collab_latest",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Do the work",
+			now: "2026-04-10T00:00:05.000Z",
+		});
+
+		broker.control.acceptRelayHandoff({
+			handoffId: "handoff_latest_1",
+			acceptedAt: "2026-04-10T00:00:10.000Z",
+		});
+
+		// First round back — captureStatus "ok"
+		broker.control.handoffBackRelay({
+			handoffId: "handoff_latest_1",
+			nextHandoffId: "handoff_latest_2",
+			senderAgent: "claude",
+			targetAgent: "codex",
+			requestText: "Here is the first result",
+			captureStatus: "ok",
+			now: "2026-04-10T00:01:00.000Z",
+		});
+
+		broker.control.acceptRelayHandoff({
+			handoffId: "handoff_latest_2",
+			acceptedAt: "2026-04-10T00:01:10.000Z",
+		});
+
+		// Second round back — captureStatus "no_response_captured_confidently"
+		broker.control.handoffBackRelay({
+			handoffId: "handoff_latest_2",
+			nextHandoffId: "handoff_latest_3",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Here is the second result",
+			captureStatus: "no_response_captured_confidently",
+			now: "2026-04-10T00:02:00.000Z",
+		});
+
+		const latest = broker.control.getLatestHandedBackHandoff("collab_latest");
+		// Must return the second (most recent) handed_back record
+		expect(latest?.handoffId).toBe("handoff_latest_2");
+		expect(latest?.captureStatus).toBe("no_response_captured_confidently");
+
+		// Unrelated collab returns null
+		expect(broker.control.getLatestHandedBackHandoff("other_collab")).toBeNull();
+	});
+
 	it("marks unresolved handoff failed on owner disconnect and releases the sender", () => {
 		const broker = createTestBroker();
 
