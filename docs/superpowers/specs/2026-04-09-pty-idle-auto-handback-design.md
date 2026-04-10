@@ -106,7 +106,7 @@ The LCS factor penalizes out-of-order matches — the same response should appea
 
 Idle detection is heuristic — it cannot distinguish "provider finished and returned to prompt" from "provider is blocked waiting on user input" (permission prompt, follow-up question, login prompt, shell prompt after failed command). In all blocked cases the session goes quiet and the idle timer fires.
 
-Accepted risk: false positives in these cases produce `"no_response_captured"` or `"no_response_captured_confidently"` status. The orchestrator treats these as failed turns and re-issues the task. No work is lost; a round-trip is wasted.
+Accepted risk: false positives in these cases produce `"no_response_captured"` or `"no_response_captured_confidently"` status, with empty `requestText`. Any partial but valuable provider output is dropped from the chain — the orchestrator re-issues the task but prior work is not preserved in the handback. This is a real loss from the user's perspective, not just a wasted round-trip.
 
 **Recommended setup for best autonomous flow**: mount with provider auto-allow-permissions enabled (e.g. `--dangerously-skip-permissions` for Claude, auto-approve for Codex). Permission prompts stop output, look idle to the detector, and produce false handbacks. With auto-allow, the provider keeps running and the idle clock stays alive until work is genuinely done.
 

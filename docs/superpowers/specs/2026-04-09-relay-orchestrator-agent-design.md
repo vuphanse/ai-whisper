@@ -87,13 +87,18 @@ The orchestrator passes the handoff record to the LLM evaluator:
 
 ```ts
 interface EvaluatorInput {
-  rootRequestText: string; // original request that started chain
-  requestText: string;     // exact task sent in current round
-  handbackText: string;    // explicit returned payload captured at handback
-  senderAgent: string;     // who sent the baton for this round
-  targetAgent: string;     // who did the work for this round
-  roundNumber: number;     // current loop iteration (1-based)
-  maxRounds: number;       // escalation cap
+  rootRequestText: string;   // original request that started chain
+  requestText: string;       // exact task sent in current round
+  handbackText: string;      // explicit returned payload captured at handback
+  senderAgent: string;       // who sent the baton for this round
+  targetAgent: string;       // who did the work for this round
+  roundNumber: number;       // current loop iteration (1-based)
+  maxRounds: number;         // escalation cap
+  captureStatus:             // how the handback payload was captured
+    | "ok"                           // high-confidence capture, handbackText is reliable
+    | "no_response_captured_confidently" // capture attempted but confidence check failed; handbackText is empty
+    | "no_response_captured"         // capture produced nothing; handbackText is empty
+    | null;                          // handback was manual (not via autonomous idle path)
 }
 ```
 
@@ -128,6 +133,8 @@ It is reviewer guidance for next round, not a replacement for durable chain cont
 |---|---|
 | Reviewer explicitly approves, or response fully satisfies request | `done` |
 | Reviewer has findings, implementer needs another pass | `loop` |
+| `captureStatus === "no_response_captured"` | `loop` (forced, skip LLM — re-issue task unchanged) |
+| `captureStatus === "no_response_captured_confidently"` | `loop` (forced, skip LLM — re-issue task unchanged; prior partial output is not preserved) |
 | `roundNumber >= maxRounds` | `escalate` (forced, overrides LLM) |
 | Ambiguous or contradictory response | `escalate` |
 | `confidence < 0.5` | `escalate` |
