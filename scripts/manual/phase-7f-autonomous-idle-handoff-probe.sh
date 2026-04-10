@@ -212,6 +212,11 @@ fi
 echo "+ node packages/cli/dist/bin/whisper.js collab start --no-launch"
 node packages/cli/dist/bin/whisper.js collab start --no-launch | tee "$LOG_DIR/start.log"
 
+# Let the broker daemon finish initialization writes before mount commands
+# issue attach claims — avoids SQLITE_BUSY on fresh databases.
+echo "+ waiting for broker daemon to settle"
+sleep 2
+
 # Each command ends with "; exec sleep 86400" so the tmux pane stays alive
 # after the mount exits — makes the error visible in captured pane output
 # regardless of whether remain-on-exit propagated correctly.
