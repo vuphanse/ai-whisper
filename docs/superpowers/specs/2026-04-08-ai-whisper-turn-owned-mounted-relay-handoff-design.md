@@ -213,6 +213,15 @@ This is intentional:
 - it preserves the baton-pass contract
 - it prevents both visible sessions from acting as if they own the workflow at once
 
+Mounted runtime may also offer an explicit owner-side force-handback shortcut for operator control.
+
+That shortcut should:
+
+- bypass readiness heuristics such as elapsed accepted time or transcript-detection confidence
+- attempt assisted capture first
+- fall back to a manual handback composer if assisted capture is empty or unusable
+- preserve the same explicit confirmation model before ownership returns
+
 ### Cancellation
 
 Cancellation semantics split into two phases:

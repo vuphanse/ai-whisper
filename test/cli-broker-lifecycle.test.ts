@@ -6,7 +6,7 @@ import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
 
 describe("broker lifecycle", () => {
 	it("start records broker PID in state file", async () => {
@@ -17,6 +17,7 @@ describe("broker lifecycle", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 
@@ -35,6 +36,7 @@ describe("broker lifecycle", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 

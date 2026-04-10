@@ -1,10 +1,11 @@
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { dirname as pathDirname } from "node:path";
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import { createSessionId } from "@ai-whisper/shared";
-import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
+import {
+	assessBrokerDaemon,
+	spawnBrokerDaemon,
+} from "../../runtime/broker-daemon.js";
 import {
 	createCliCollabId,
 	createCliSessionId,
@@ -20,28 +21,6 @@ import {
 	readCliCollabState,
 	writeCliCollabState,
 } from "../../runtime/state-file.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const brokerDaemonPath = resolve(__dirname, "../../bin/broker-daemon.js");
-
-function spawnBrokerDaemon(
-	sqlitePath: string,
-	host: string,
-	port: number,
-): number {
-	const child = spawn("node", [brokerDaemonPath], {
-		detached: true,
-		stdio: "ignore",
-		env: {
-			...process.env,
-			AI_WHISPER_BROKER_SQLITE: sqlitePath,
-			AI_WHISPER_BROKER_HOST: host,
-			AI_WHISPER_BROKER_PORT: String(port),
-		},
-	});
-	child.unref();
-	return child.pid!;
-}
 
 async function waitForBrokerReady(input: {
 	host: string;
@@ -96,7 +75,8 @@ export async function runCollabStart(input: {
 	const sqlitePath = getBrokerSqlitePath(input.workspaceRoot);
 	const brokerHost = "127.0.0.1";
 	const brokerPort = 4311;
-	mkdirSync(dirname(sqlitePath), { recursive: true });
+	const sqliteDir = pathDirname(sqlitePath);
+	mkdirSync(sqliteDir, { recursive: true });
 
 	// Use in-process broker for initial setup (create collab, register sessions)
 	const broker = createBrokerRuntime({

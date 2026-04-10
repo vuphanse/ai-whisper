@@ -124,6 +124,69 @@ The preferred workflow for inline `@@` relay support. `whisper collab mount` cla
 
 Mounted sessions keep `ai-whisper` as the terminal owner, so the live-session relay parser can intercept `@@...` input. Recovery and reconnect default to the mounted path when the previous binding was mounted.
 
+#### Baton handoff workflow
+
+Use mounted sessions when you want the visible Codex and Claude tabs to be the real workflow actors.
+
+Example real use case:
+
+- Claude reviews plan and decides Codex should implement next step
+- Claude sends handoff from visible Claude tab
+- Claude waits while Codex owns turn
+- Codex does work in visible Codex tab
+- Codex hands result back to Claude
+- Claude reviews result, amends request if needed, or sends next handoff
+
+Recommended startup:
+
+```bash
+whisper collab start --no-launch
+```
+
+Then in two normal iTerm tabs:
+
+```bash
+whisper collab mount codex
+whisper collab mount claude
+```
+
+Send work from current owner:
+
+```text
+@@codex implement phase 7e handback flow
+@@claude review mounted relay acceptance UX
+```
+
+What happens next:
+
+- ownership flips immediately to target provider
+- sender becomes waiting side and normal typing is blocked
+- owner sees local handoff card inside mounted tab
+- only one unresolved handoff is allowed at a time
+
+Owner controls inside mounted tab:
+
+- `a` accepts handoff immediately and injects original request into visible session
+- `e` opens local editor first so owner can amend request before accepting
+- `d` declines handoff and releases sender
+- `space` defers handoff but keeps sender waiting
+
+After accept, owner works normally in visible provider session. When ready to return turn:
+
+- press `h` when mounted runtime shows `Ready to hand back`
+- press `Ctrl+H` to force handback immediately if the readiness hint does not appear
+- runtime tries to capture latest visible response
+- if copied response looks right, press `Enter` to confirm handback
+- if capture is empty or not usable, local composer opens so owner can write handback text manually
+
+Practical guidance:
+
+- use `mount`, not `attach --adopt-current-tty`, for this workflow
+- think of relay as strict baton pass, not two active sessions typing at once
+- send compact, explicit tasks so owner can accept quickly or amend locally
+- use handback to return result summary or next-step request to other side
+- if handoff stays deferred, sender remains blocked until owner declines, cancels, or hands turn back
+
 ### Adopt existing provider sessions (Phase 7D)
 
 Legacy workflow for sessions started before `whisper collab mount` existed. Use when you have already started a provider and want to bind it without relaunching:

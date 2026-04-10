@@ -12,7 +12,7 @@ import {
 	getStateFilePath,
 } from "../packages/cli/src/runtime/paths.ts";
 import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli edge cases", () => {
 	// Edge case 1: double start
@@ -26,6 +26,7 @@ describe("cli edge cases", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 
@@ -35,6 +36,7 @@ describe("cli edge cases", () => {
 				now: "2026-04-03T00:00:01.000Z",
 				launchMode: "terminals",
 				spawnBroker: fakeBrokerSpawn(),
+				assessBroker: healthyBrokerAssess,
 				spawn: () => {},
 			}),
 		).rejects.toThrow(/collab.*already active|already.*collab/i);
@@ -53,6 +55,7 @@ describe("cli edge cases", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 

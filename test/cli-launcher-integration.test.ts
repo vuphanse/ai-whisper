@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli launcher integration", () => {
 	it("start returns launched session info with chosen launch mode", async () => {
@@ -18,6 +18,7 @@ describe("cli launcher integration", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 
@@ -40,6 +41,7 @@ describe("cli launcher integration", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "tmux",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 			exec: () => {},
 		});

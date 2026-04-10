@@ -11,3 +11,11 @@ export function fakeBrokerSpawn(): (
 ) => number {
 	return () => nextPid++;
 }
+
+export function healthyBrokerAssess() {
+	return Promise.resolve({
+		pidAlive: true,
+		httpReachable: true,
+		ok: true,
+	} as const);
+}

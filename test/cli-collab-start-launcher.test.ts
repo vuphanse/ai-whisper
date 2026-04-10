@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
 
 describe("cli collab start launcher integration", () => {
 	it("returns the chosen launch mode in the result", async () => {
@@ -16,6 +16,7 @@ describe("cli collab start launcher integration", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 		});
 
@@ -33,6 +34,7 @@ describe("cli collab start launcher integration", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "tmux",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 			exec: () => {},
 		});
@@ -51,6 +53,7 @@ describe("cli collab start launcher integration", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "tmux",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker: healthyBrokerAssess,
 			spawn: () => {},
 			exec: (cmd) => { executedCommands.push(cmd); },
 		});

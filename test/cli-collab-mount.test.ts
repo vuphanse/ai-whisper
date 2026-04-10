@@ -22,6 +22,7 @@ describe("mount gate — relay monitor check", () => {
 			now: "2026-04-06T10:00:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		await expect(
@@ -42,6 +43,7 @@ describe("mount gate — relay monitor check", () => {
 			now: "2026-04-06T10:00:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		// Register a fresh relay monitor so isRelayMonitorConnected returns true

@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export async function assessBrokerDaemon(input: {
 	host: string;
@@ -32,8 +35,41 @@ export async function assessBrokerDaemon(input: {
 	} as const;
 }
 
+export function resolveBrokerDaemonLaunch(metaUrl: string = import.meta.url): {
+	command: string;
+	args: string[];
+} {
+	const runtimeDir = dirname(fileURLToPath(metaUrl));
+	const directJsPath = resolve(runtimeDir, "../bin/broker-daemon.js");
+	if (existsSync(directJsPath)) {
+		return {
+			command: process.execPath,
+			args: [directJsPath],
+		};
+	}
+
+	const sourceTsPath = resolve(runtimeDir, "../bin/broker-daemon.ts");
+	if (existsSync(sourceTsPath)) {
+		return {
+			command: process.execPath,
+			args: ["--import", "tsx", sourceTsPath],
+		};
+	}
+
+	const builtJsPath = resolve(runtimeDir, "../../dist/bin/broker-daemon.js");
+	if (existsSync(builtJsPath)) {
+		return {
+			command: process.execPath,
+			args: [builtJsPath],
+		};
+	}
+
+	throw new Error("Unable to resolve broker daemon entrypoint.");
+}
+
 export function spawnBrokerDaemon(sqlitePath: string, host: string, port: number): number {
-	const child = spawn("node", [new URL("../bin/broker-daemon.js", import.meta.url).pathname], {
+	const launch = resolveBrokerDaemonLaunch();
+	const child = spawn(launch.command, launch.args, {
 		detached: true,
 		stdio: "ignore",
 		env: {

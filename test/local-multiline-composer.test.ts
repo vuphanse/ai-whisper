@@ -58,7 +58,6 @@ describe("local modal line reader", () => {
 			stdin.isRaw = mode;
 		};
 
-		const messages: string[] = [];
 		const confirm = createLocalModalConfirm({
 			stdin,
 			stdout,

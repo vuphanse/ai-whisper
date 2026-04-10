@@ -1,15 +1,95 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { createCli } from "../packages/cli/src/create-cli.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
+import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
+
+const { runCollabStartMock, runCollabStatusMock, runCollabStopMock } = vi.hoisted(
+	() => ({
+		runCollabStartMock: vi.fn(),
+		runCollabStatusMock: vi.fn(),
+		runCollabStopMock: vi.fn(),
+	}),
+);
+
+vi.mock("../packages/cli/src/commands/collab/start.ts", () => ({
+	runCollabStart: runCollabStartMock,
+}));
+
+vi.mock("../packages/cli/src/commands/collab/status.ts", () => ({
+	runCollabStatus: runCollabStatusMock,
+}));
+
+vi.mock("../packages/cli/src/commands/collab/stop.ts", () => ({
+	runCollabStop: runCollabStopMock,
+}));
+
+import { createCli } from "../packages/cli/src/create-cli.ts";
+
+type StartArgs = {
+	workspaceRoot: string;
+	now: string;
+	launchMode: "none" | "terminals" | "tmux";
+};
+
+type StopArgs = {
+	workspaceRoot: string;
+};
+
+function writeStartedState(input: StartArgs) {
+	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
+		version: 5,
+		collabId: "collab_test",
+		workspaceRoot: input.workspaceRoot,
+		broker: {
+			sqlitePath: join(
+				input.workspaceRoot,
+				".ai-whisper",
+				"runtime",
+				"broker.sqlite",
+			),
+			host: "127.0.0.1",
+			port: 4311,
+			pid: 99123,
+		},
+		launch: { mode: input.launchMode },
+		ownedSessions: {},
+		startedAt: input.now,
+		recovery: {
+			state: "normal",
+			idleAfterRecovery: false,
+			recoveredAt: null,
+		},
+		adoptedSessions: {},
+		mountedSessions: {},
+	});
+}
+
+function createStartResult(input: StartArgs) {
+	return {
+		collabId: "collab_test",
+		launchMode: input.launchMode,
+		launched: true,
+		brokerPid: 99123,
+	};
+}
+
+afterEach(() => {
+	runCollabStartMock.mockReset();
+	runCollabStatusMock.mockReset();
+	runCollabStopMock.mockReset();
+});
 
 describe("cli binary commands", () => {
 	it("collab start creates a state file when parsed", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-bin-start-"));
-		const cli = createCli();
+		runCollabStartMock.mockImplementation((input: StartArgs) => {
+			writeStartedState(input);
+			return Promise.resolve(createStartResult(input));
+		});
 
+		const cli = createCli();
 		await cli.parseAsync([
 			"node",
 			"whisper",
@@ -21,10 +101,27 @@ describe("cli binary commands", () => {
 		]);
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
+		expect(runCollabStartMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("collab status reports active after start", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-bin-status-"));
+
+		runCollabStartMock.mockImplementation((input: StartArgs) => {
+			writeStartedState(input);
+			return Promise.resolve(createStartResult(input));
+		});
+		runCollabStatusMock.mockResolvedValue({
+			active: true,
+			collabId: "collab_test",
+			roles: {
+				codex: { bindingState: "unbound" },
+				claude: { bindingState: "unbound" },
+			},
+			brokerHealth: { ok: true },
+			recovery: { state: "normal" },
+			activeThread: null,
+		});
 
 		const startCli = createCli();
 		await startCli.parseAsync([
@@ -40,7 +137,8 @@ describe("cli binary commands", () => {
 		const statusCli = createCli();
 		const originalLog = console.log;
 		const captured: string[] = [];
-		console.log = (...args: unknown[]) => captured.push(args.join(" "));
+		console.log = (...args: unknown[]) =>
+			captured.push(args.map((arg) => String(arg)).join(" "));
 		try {
 			await statusCli.parseAsync([
 				"node",
@@ -55,11 +153,22 @@ describe("cli binary commands", () => {
 		}
 
 		expect(captured.some((line) => /active/i.test(line))).toBe(true);
+		expect(runCollabStatusMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("collab stop clears state file", async () => {
-		const startCli = createCli();
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-bin-stop-"));
+
+		runCollabStartMock.mockImplementation((input: StartArgs) => {
+			writeStartedState(input);
+			return Promise.resolve(createStartResult(input));
+		});
+		runCollabStopMock.mockImplementation((input: StopArgs) => {
+			rmSync(getStateFilePath(input.workspaceRoot), { force: true });
+			return { stopped: true };
+		});
+
+		const startCli = createCli();
 		await startCli.parseAsync([
 			"node",
 			"whisper",
@@ -82,5 +191,6 @@ describe("cli binary commands", () => {
 		]);
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(false);
+		expect(runCollabStopMock).toHaveBeenCalledTimes(1);
 	});
 });

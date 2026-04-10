@@ -200,7 +200,7 @@ describe("relay UX integration", () => {
 
 		expect(codexRelay.getWaitingGate().isBlocked()).toBe(true);
 
-		claudeRelay.acceptPendingHandoff();
+		await claudeRelay.acceptPendingHandoff();
 		expect(claudeInjected.join("")).toContain("Implement the approved plan");
 
 		expect(broker.control.getRelayTurnState("collab_turn")).toMatchObject({

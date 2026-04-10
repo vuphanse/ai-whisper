@@ -22,6 +22,7 @@ describe("cli collab tell repeat", () => {
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 			spawn: () => {},
 		});
 

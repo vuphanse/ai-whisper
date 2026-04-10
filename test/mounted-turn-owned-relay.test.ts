@@ -4,7 +4,7 @@ import { createLiveSessionRuntime } from "../packages/cli/src/runtime/live-sessi
 import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 
 describe("mounted turn-owned relay", () => {
-	it("renders a pending handoff card for the owner and injects/submits the accepted request immediately", () => {
+	it("renders a pending handoff card for the owner and injects/submits the accepted request immediately", async () => {
 		const writes: string[] = [];
 		const injected: string[] = [];
 		const openComposer = vi.fn();
@@ -42,7 +42,7 @@ describe("mounted turn-owned relay", () => {
 		});
 
 		relay.refreshOwnerView();
-		relay.acceptPendingHandoff();
+		await relay.acceptPendingHandoff();
 
 		expect(writes.join("")).toContain("Pending handoff from codex");
 		expect(injected).toEqual([
@@ -50,6 +50,118 @@ describe("mounted turn-owned relay", () => {
 			"\r",
 		]);
 		expect(openComposer).not.toHaveBeenCalled();
+	});
+
+	it("renders pending handoff cards with distinct multiline local styling", () => {
+		const writes: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan\nKeep commits small.",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage(text: string) { writes.push(text); },
+			writeUserInput() {},
+			openComposer: () => Promise.resolve(null),
+		});
+
+		relay.refreshOwnerView();
+
+		const rendered = writes.join("");
+		const ownerCardBackground = "\u001b[48;5;29m";
+		const ownerCardForeground = "\u001b[38;5;250m";
+		const ansiReset = "\u001b[0m";
+		expect(rendered).toContain("\u001b[48;5;29m");
+		expect(rendered).toContain("\u001b[38;5;250m");
+		expect(rendered).toContain("[ai-whisper] Pending handoff from codex");
+		expect(rendered).toContain("Implement the approved plan");
+		expect(rendered).toContain("Keep commits small.");
+		expect(rendered).toContain("[a] accept  [e] amend  [d] decline  [space] defer");
+
+		const visibleLines = rendered
+			.split("\n")
+			.map((line) =>
+				line
+					.replaceAll(ownerCardBackground, "")
+					.replaceAll(ownerCardForeground, "")
+					.replaceAll(ansiReset, ""),
+			);
+		const widths = visibleLines.map((line) => line.length);
+		expect(new Set(widths).size).toBe(1);
+	});
+
+	it("clears the rendered pending handoff card after accept", async () => {
+		const writes: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi
+					.fn()
+					.mockReturnValueOnce({
+						collabId: "collab_turn",
+						turnOwner: "claude" as const,
+						waitingAgent: "codex" as const,
+						unresolvedHandoffId: "handoff_1",
+						handoffState: "pending" as const,
+						handoffAgeMs: 1_000,
+					})
+					.mockReturnValue({
+						collabId: "collab_turn",
+						turnOwner: "claude" as const,
+						waitingAgent: "codex" as const,
+						unresolvedHandoffId: "handoff_1",
+						handoffState: "pending" as const,
+						handoffAgeMs: 1_000,
+					}),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan\nKeep commits small.",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage(text: string) { writes.push(text); },
+			writeUserInput() {},
+			openComposer: () => Promise.resolve(null),
+		});
+
+		relay.refreshOwnerView();
+		await relay.acceptPendingHandoff();
+
+		expect(writes.join("")).toContain("Pending handoff from codex");
+		expect(writes.join("")).toContain("\r\u001b[2K");
 	});
 
 	it("opens the editor when the owner chooses amend before accepting and injects without submitting", async () => {
@@ -758,6 +870,66 @@ describe("mounted turn-owned relay", () => {
 		relay.refreshOwnerView();
 
 		expect(writes.join("")).not.toContain("Ready to hand back");
+	});
+
+	it("forces handback with Ctrl+H before readiness gates and falls back to manual composer", async () => {
+		const writes: string[] = [];
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "accepted" as const,
+				})),
+				handoffBackRelay: vi.fn(),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+			},
+		};
+		const openComposer = vi.fn(() => Promise.resolve("manual result"));
+		const confirmHandbackCapture = vi.fn(() => Promise.resolve(true));
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage(text: string) { writes.push(text); },
+			writeUserInput() {},
+			openComposer,
+			captureHandbackText: () => Promise.resolve(null),
+			confirmHandbackCapture,
+			prefillHandbackFromCapture: false,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: () => false,
+				extractLatestAssistantTurn: () => ({ confidence: "low" as const, text: null }),
+			},
+		});
+
+		await relay.handleOwnerInput("\u0008");
+
+		expect(writes.join("")).toContain("Force handback");
+		expect(openComposer).toHaveBeenCalled();
+		expect(confirmHandbackCapture).not.toHaveBeenCalled();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({
+				targetAgent: "codex",
+				requestText: "manual result",
+			}),
+		);
 	});
 
 	it("releases the sender and marks the handoff degraded when the owner session exits", () => {

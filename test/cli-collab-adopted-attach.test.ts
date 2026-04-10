@@ -104,6 +104,7 @@ describe("collab attach adopted current tty", () => {
 			now: "2026-04-06T16:30:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		const startDaemon = vi.fn(() => 99234);
@@ -139,6 +140,7 @@ describe("collab attach adopted current tty", () => {
 			now: "2026-04-06T16:30:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		const result = await runCollabAttach({

@@ -36,9 +36,23 @@ type BrokerLike = {
 	};
 };
 
+const CLEAR_LINE = "\r\u001b[2K";
+const CURSOR_UP = "\u001b[1A";
+const OWNER_CARD_BG = "\u001b[48;5;29m";
+const OWNER_CARD_FG = "\u001b[38;5;250m";
+const ANSI_RESET = "\u001b[0m";
+
 function submitInjectedInput(writeUserInput: (text: string) => void, text: string) {
 	writeUserInput(text);
 	writeUserInput("\r");
+}
+
+function styleOwnerCard(message: string) {
+	const lines = message.split("\n");
+	const width = lines.reduce((max, line) => Math.max(max, line.length), 0);
+	return lines
+		.map((line) => `${OWNER_CARD_BG}${OWNER_CARD_FG} ${line.padEnd(width, " ")} ${ANSI_RESET}`)
+		.join("\n");
 }
 
 export function createMountedTurnOwnedRelay(input: {
@@ -63,6 +77,33 @@ export function createMountedTurnOwnedRelay(input: {
 	const HAND_BACK_READY_AFTER_MS = 30_000;
 	let disconnectHandled = false;
 	let lastOwnerCardKey: string | null = null;
+	let renderedOwnerCardLines = 0;
+
+	function clearOwnerCard() {
+		if (renderedOwnerCardLines === 0) {
+			return;
+		}
+
+		let control = "";
+		for (let index = 0; index < renderedOwnerCardLines; index += 1) {
+			control += CLEAR_LINE;
+			if (index < renderedOwnerCardLines - 1) {
+				control += CURSOR_UP;
+			}
+		}
+		input.writeLocalMessage(control);
+		renderedOwnerCardLines = 0;
+	}
+
+	function renderOwnerCard(message: string, cardKey: string) {
+		if (cardKey === lastOwnerCardKey) {
+			return;
+		}
+		clearOwnerCard();
+		lastOwnerCardKey = cardKey;
+		renderedOwnerCardLines = message.split("\n").length;
+		input.writeLocalMessage(styleOwnerCard(message));
+	}
 
 	function refreshTurnState(now = new Date().toISOString()): RelayTurnState {
 		let state = input.broker.control.getRelayTurnState(input.collabId, now);
@@ -116,6 +157,10 @@ export function createMountedTurnOwnedRelay(input: {
 		return handoff;
 	}
 
+	function getAcceptedForceableHandoff(): RelayHandoff | null {
+		return getAcceptedHandoff();
+	}
+
 	async function handleOwnerInput(text: string): Promise<boolean> {
 		const handoff = getPendingHandoff();
 		if (handoff) {
@@ -135,6 +180,12 @@ export function createMountedTurnOwnedRelay(input: {
 				api.deferPendingHandoff();
 				return true;
 			}
+		}
+
+		const forceable = getAcceptedForceableHandoff();
+		if (forceable && text === "\u0008") {
+			await api.handBackTo(forceable.senderAgent, { force: true });
+			return true;
 		}
 
 		const accepted = getAcceptedReadyHandoff();
@@ -174,12 +225,9 @@ export function createMountedTurnOwnedRelay(input: {
 			if (handoff) {
 				const label = handoff.status === "deferred" ? "Deferred handoff" : "Pending handoff";
 				const cardKey = `${handoff.handoffId}|${handoff.status}|${handoff.requestText}`;
-				if (cardKey === lastOwnerCardKey) {
-					return;
-				}
-				lastOwnerCardKey = cardKey;
-				input.writeLocalMessage(
+				renderOwnerCard(
 					`[ai-whisper] ${label} from ${handoff.senderAgent}\n${handoff.requestText}\n[a] accept  [e] amend  [d] decline  [space] defer`,
+					cardKey,
 				);
 				return;
 			}
@@ -187,22 +235,22 @@ export function createMountedTurnOwnedRelay(input: {
 			const accepted = getAcceptedReadyHandoff();
 			if (accepted) {
 				const cardKey = `${accepted.handoffId}|accepted-ready|${accepted.senderAgent}`;
-				if (cardKey === lastOwnerCardKey) {
-					return;
-				}
-				lastOwnerCardKey = cardKey;
-				input.writeLocalMessage(
+				renderOwnerCard(
 					`[ai-whisper] Ready to hand back to ${accepted.senderAgent}  [h] hand back`,
+					cardKey,
 				);
 				return;
 			}
 
+			clearOwnerCard();
 			lastOwnerCardKey = null;
 		},
 
 		async acceptPendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
+			clearOwnerCard();
+			lastOwnerCardKey = null;
 			input.turnCapture?.reset();
 			if (input.submitUserInput) {
 				await input.submitUserInput(handoff.requestText);
@@ -218,6 +266,8 @@ export function createMountedTurnOwnedRelay(input: {
 		async amendPendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
+			clearOwnerCard();
+			lastOwnerCardKey = null;
 			const composed = await input.openComposer({
 				prompt: "[ai-whisper] Edit the request text before accepting:",
 				initialValue: handoff.requestText,
@@ -234,6 +284,8 @@ export function createMountedTurnOwnedRelay(input: {
 		declinePendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
+			clearOwnerCard();
+			lastOwnerCardKey = null;
 			input.broker.control.declineRelayHandoff({
 				handoffId: handoff.handoffId,
 				now: new Date().toISOString(),
@@ -243,15 +295,27 @@ export function createMountedTurnOwnedRelay(input: {
 		deferPendingHandoff() {
 			const handoff = getPendingHandoff();
 			if (!handoff) return;
+			clearOwnerCard();
+			lastOwnerCardKey = null;
 			input.broker.control.deferRelayHandoff({
 				handoffId: handoff.handoffId,
 				deferredAt: new Date().toISOString(),
 			});
 		},
 
-		async handBackTo(target: "codex" | "claude") {
+		async handBackTo(
+			target: "codex" | "claude",
+			options?: { force?: boolean },
+		) {
 			const handoff = getAcceptedHandoff();
 			if (!handoff) return;
+			clearOwnerCard();
+			lastOwnerCardKey = null;
+			if (options?.force) {
+				input.writeLocalMessage(
+					`[ai-whisper] Force handback to ${target}: attempting /copy first`,
+				);
+			}
 			let composed: string | null = null;
 			let initialValue = "";
 			if (input.captureHandbackText) {

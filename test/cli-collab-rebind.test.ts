@@ -19,6 +19,7 @@ describe("cli collab rebind", () => {
 			now: "2026-04-05T13:30:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
@@ -74,6 +75,7 @@ describe("cli collab rebind", () => {
 			now: "2026-04-05T13:30:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		await expect(
@@ -93,6 +95,7 @@ describe("cli collab rebind", () => {
 			now: "2026-04-05T13:30:00.000Z",
 			launchMode: "none",
 			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
