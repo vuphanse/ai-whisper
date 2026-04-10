@@ -31,6 +31,7 @@ type BrokerLike = {
 			senderAgent: "codex" | "claude";
 			targetAgent: "codex" | "claude";
 			requestText: string;
+			captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 			now: string;
 		}): void;
 	};
@@ -72,12 +73,17 @@ export function createMountedTurnOwnedRelay(input: {
 		hasVisibleAssistantTurn(): boolean;
 		extractLatestAssistantTurn(): { confidence: "high" | "low"; text: string | null };
 	};
+	idleThresholdMs?: number;
+	isPausedInput?: () => boolean;
+	onHandoffAccepted?: () => void;
 }) {
 	const STALE_HANDOFF_AFTER_MS = 5 * 60_000;
 	const HAND_BACK_READY_AFTER_MS = 30_000;
 	let disconnectHandled = false;
 	let lastOwnerCardKey: string | null = null;
 	let renderedOwnerCardLines = 0;
+	let autoAcceptFiredFor: string | null = null;
+	let autoHandbackFiredFor: string | null = null;
 
 	function clearOwnerCard() {
 		if (renderedOwnerCardLines === 0) {
@@ -252,6 +258,7 @@ export function createMountedTurnOwnedRelay(input: {
 			clearOwnerCard();
 			lastOwnerCardKey = null;
 			input.turnCapture?.reset();
+			autoHandbackFiredFor = null;
 			if (input.submitUserInput) {
 				await input.submitUserInput(handoff.requestText);
 			} else {
@@ -261,6 +268,7 @@ export function createMountedTurnOwnedRelay(input: {
 				handoffId: handoff.handoffId,
 				acceptedAt: new Date().toISOString(),
 			});
+			input.onHandoffAccepted?.();
 		},
 
 		async amendPendingHandoff() {
@@ -286,6 +294,7 @@ export function createMountedTurnOwnedRelay(input: {
 			if (!handoff) return;
 			clearOwnerCard();
 			lastOwnerCardKey = null;
+			autoAcceptFiredFor = null;
 			input.broker.control.declineRelayHandoff({
 				handoffId: handoff.handoffId,
 				now: new Date().toISOString(),
@@ -356,6 +365,10 @@ export function createMountedTurnOwnedRelay(input: {
 				now,
 			});
 			input.turnCapture?.reset();
+		},
+
+		async checkIdleActions() {
+			// implemented in Task 5
 		},
 
 		handleOwnerDisconnect() {
