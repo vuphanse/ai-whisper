@@ -40,6 +40,7 @@ export function createLiveSessionRuntime(input: {
 	externalInputRouter?: {
 		handleInput(text: string): Promise<boolean> | boolean;
 	};
+	onActivity?: () => void;
 }) {
 	const ttyStdin = input.stdin as NodeJS.ReadableStream & {
 		isTTY?: boolean;
@@ -174,6 +175,7 @@ export function createLiveSessionRuntime(input: {
 			clearRelayPreview();
 			if (decision.kind === "passthrough") {
 				input.interactiveSession.writeUserInput(decision.data);
+				input.onActivity?.();
 				continue;
 			}
 			if (decision.kind === "error") {
@@ -242,6 +244,9 @@ export function createLiveSessionRuntime(input: {
 			input.stdin.on("data", (chunk: Buffer | string) => {
 				void processChunk(String(chunk));
 			});
+		},
+		isPaused(): boolean {
+			return pausedInputDepth > 0;
 		},
 		async withPausedInput<T>(run: () => Promise<T>): Promise<T> {
 			pausedInputDepth += 1;
