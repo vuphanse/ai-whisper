@@ -3,16 +3,29 @@
 **Date:** 2026-04-09
 **Branch:** feat/turn-owned-mounted-relay-handoff
 
+## Relationship to Prior Specs
+
+This spec extends `2026-04-08-ai-whisper-turn-owned-mounted-relay-handoff-design.md`. It does **not** remove or replace the manual controls (`a/e/d/h`). Those remain fully functional for when a human is attending the session. This spec adds an autonomous fallback path that activates only when the session is unattended (idle). When both paths could apply, the manual flow wins (composer-open guard).
+
+The prior spec's "fall back to blank manual composer on low-confidence extraction" applies to the **manual handback** path only. The autonomous path intentionally sends an empty payload with `captureStatus` instead of opening a composer — there is no human to fill it in. Recovery is the orchestrator's responsibility, not the relay's.
+
+## Orchestrator Contract
+
+`captureStatus` must be added to the orchestrator spec (`2026-04-09-relay-orchestrator-agent-design.md`) as a first-class evaluation input. The orchestrator should branch on it:
+- `"ok"` → accept result, forward or continue
+- `"no_response_captured_confidently"` → re-issue task or request clarification
+- `"no_response_captured"` → treat as failed turn, re-issue
+
 ## Goal
 
-Make the baton-pass relay workflow fully autonomous. When a mounted session has been idle for 30s, it acts on whatever handoff state it is in — either accepting a pending handoff (if it has no active task) or handing back a completed result (if it has finished working). This closes the loop without any manual keypress.
+Make the baton-pass relay workflow fully autonomous. When a mounted session has been idle for `IDLE_THRESHOLD_MS`, it acts on whatever handoff state it is in — either accepting a pending handoff (if it has no active task) or handing back a completed result (if it has finished working). This closes the loop without any manual keypress.
 
 Full autonomous cycle:
 1. Codex sends handoff "review specs" to Claude
 2. Claude's session is idle → auto-accepts, injects request into provider
-3. Claude works on it; provider goes quiet for 30s
+3. Claude works on it; provider goes quiet for `IDLE_THRESHOLD_MS`
 4. Claude auto-handbacks with captured response + `captureStatus`
-5. Codex receives handback (orchestrator layer evaluates `captureStatus` to decide next step)
+5. Codex receives handback; orchestrator evaluates `captureStatus` to decide next step
 
 ## Idle Definition
 
@@ -22,10 +35,14 @@ Resolved at session start from env var `AI_WHISPER_IDLE_THRESHOLD_MS` (parsed as
 
 Activity resets the clock:
 - Any provider PTY output chunk (`onProviderOutput`)
-- Any user keystroke routed through `live-session.ts` (`processChunk`)
-- Handoff accept (clock resets so the 30s starts fresh per task)
+- Any user keystroke that **reaches the provider** — i.e. passes through both the `externalInputRouter` and `externalInputGate` checks without being consumed or blocked (see live-session changes below)
+- Handoff accept (clock resets so `IDLE_THRESHOLD_MS` starts fresh per task)
 
-Rationale: long-running tasks (compilations, code-gen) typically stream progress text or elapsed timers, keeping the clock alive. True idle means the provider has returned to prompt and the user is not typing.
+Keystrokes that do **not** reset the clock:
+- Keystrokes consumed by `externalInputRouter` (owner card controls: `a/e/d/h/space`)
+- Keystrokes blocked by `externalInputGate` (waiting-side blocked input)
+
+Rationale: owner card keypresses and blocked waiting-side taps are not provider activity. Resetting the clock on these would prevent autonomous flow from ever triggering during interactive or blocked sessions. Terminal noise (spinners, progress timers) does reset the clock — this is intentional, as the provider is still running.
 
 ## Auto-Accept
 
@@ -42,7 +59,7 @@ Auto-accept fires when all of the following are true:
 
 - Calls `acceptPendingHandoff()` directly (same path as pressing `a`)
 - Injects the handoff `requestText` into the provider session
-- Resets `lastActivityAt` and `autoAcceptFired` guard (accept already does this)
+- Resets `lastActivityAt` via `onHandoffAccepted` callback and clears `autoHandbackFired` guard
 - No owner card shown, no confirmation
 
 ## Auto-Handback
@@ -69,18 +86,19 @@ Confidence classification:
 
 | `captureStatus` | Condition | `requestText` |
 |-----------------|-----------|---------------|
-| `"ok"` | `turnCapture` confidence is `"high"` AND `clipboardText` non-empty AND they substantially overlap | `clipboardText` |
-| `"no_response_captured_confidently"` | Signals exist but overlap check fails or `turnCapture` confidence is `"low"` | `""` |
+| `"ok"` | `turnCapture` confidence is `"high"` AND `clipboardText` non-empty AND ordered Jaccard score >= 0.6 | `clipboardText` |
+| `"no_response_captured_confidently"` | Signals exist but score < 0.6 or `turnCapture` confidence is `"low"` | `""` |
 | `"no_response_captured"` | Both `turnText` and `clipboardText` are empty/null | `""` |
 
 **Overlap check — ordered Jaccard:**
-1. Extract content words (length >= 4 chars) from both texts, preserving order, after normalizing (trim, collapse whitespace, lowercase)
-2. Compute base Jaccard: `|intersection| / |union|` on the word sets
-3. Compute LCS length over the word sequences
-4. Final score: `jaccard * (lcsLength / shorterSequenceLength)`
-5. Score >= 0.6 → overlap confirmed
+1. Normalize both texts: trim, collapse whitespace, lowercase
+2. Extract content words (length >= 4 chars) from both, preserving order
+3. Compute base Jaccard: `|intersection| / |union|` on the word sets
+4. Compute LCS length over the word sequences
+5. Final score: `jaccard * (lcsLength / shorterSequenceLength)`
+6. Score >= 0.6 → overlap confirmed
 
-The LCS factor penalizes out-of-order matches — our case should not tolerate reordering since the same response should appear in the same word order in both signals. A perfectly ordered match scores close to 1.0; scrambled words with same vocabulary score low.
+The LCS factor penalizes out-of-order matches — the same response should appear in the same word order in both signals. A perfectly ordered match scores close to 1.0; same vocabulary but scrambled order scores low.
 
 `captureStatus` is a first-class field on `handoffBackRelay` — not embedded in `requestText` — so the orchestrator layer can branch on it independently of the response content.
 
@@ -95,7 +113,7 @@ The LCS factor penalizes out-of-order matches — our case should not tolerate r
 Both auto-accept and auto-handback are checked in the existing `ownerRefreshTimer` (1s interval) in `mount-session-main.ts`, after `refreshOwnerView()`:
 
 ```
-if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
+if (Date.now() - lastActivityAt >= idleThresholdMs) {
   await mountedTurnRelay.checkIdleActions();
 }
 ```
@@ -145,7 +163,7 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 ### `packages/cli/src/runtime/live-session.ts`
 
 - Accept optional `onActivity?: () => void` in input.
-- Call `onActivity?.()` at the top of `processChunk` when `sanitized.length > 0` (before gate checks, so even blocked input resets the clock).
+- Call `onActivity?.()` **after** both `externalInputRouter` and `externalInputGate` checks — only when the keystroke is about to be passed through to the provider. Keystrokes consumed by the router or blocked by the gate do not reset the idle clock.
 - Add `isPaused(): boolean` to return type, returning `pausedInputDepth > 0`.
 
 ### Broker schema (`@ai-whisper/broker`)
@@ -153,9 +171,13 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 - `handoffBackRelay` record: add optional `captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured"`.
 - Surface `captureStatus` in `getRelayHandoff` return type and inspect output.
 
+### `docs/superpowers/specs/2026-04-09-relay-orchestrator-agent-design.md`
+
+- Add `captureStatus` to the handback evaluation inputs.
+- Define branch logic for each status value (see Orchestrator Contract section above).
+
 ## Out of Scope
 
 - Per-session idle threshold override beyond env var (e.g. broker-level config).
-- Auto-accept for deferred handoffs — deferred means the owner explicitly postponed it, so auto-accept should not override that decision.
-- Orchestrator evaluation of `captureStatus` and forward/re-issue logic (next phase).
+- Auto-accept for deferred handoffs — deferred means the owner explicitly postponed it, so auto-accept must not override that decision.
 - Any UI feedback during autonomous actions (silent by design).
