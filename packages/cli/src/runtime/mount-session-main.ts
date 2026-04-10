@@ -248,7 +248,6 @@ export function createMountSessionRuntime(input: {
 					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
 					writeUserInput: (text) => writeInjectedInput("mounted-inject", text),
 					submitUserInput: submitInjectedInput,
-					idleThresholdMs,
 					isPausedInput: () => liveSession?.isPaused() ?? false,
 					onHandoffAccepted: () => {
 						lastActivityAt = Date.now();

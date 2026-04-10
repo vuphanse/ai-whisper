@@ -131,7 +131,6 @@ export function createMountedTurnOwnedRelay(input: {
 		hasVisibleAssistantTurn(): boolean;
 		extractLatestAssistantTurn(): { confidence: "high" | "low"; text: string | null };
 	};
-	idleThresholdMs?: number;
 	isPausedInput?: () => boolean;
 	onHandoffAccepted?: () => void;
 }) {
