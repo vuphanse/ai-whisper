@@ -102,11 +102,21 @@ The LCS factor penalizes out-of-order matches — the same response should appea
 
 `captureStatus` is a first-class field on `handoffBackRelay` — not embedded in `requestText` — so the orchestrator layer can branch on it independently of the response content.
 
+### Idle Detection Limitations and Accepted Risk
+
+Idle detection is heuristic — it cannot distinguish "provider finished and returned to prompt" from "provider is blocked waiting on user input" (permission prompt, follow-up question, login prompt, shell prompt after failed command). In all blocked cases the session goes quiet and the idle timer fires.
+
+Accepted risk: false positives in these cases produce `"no_response_captured"` or `"no_response_captured_confidently"` status. The orchestrator treats these as failed turns and re-issues the task. No work is lost; a round-trip is wasted.
+
+**Recommended setup for best autonomous flow**: mount with provider auto-allow-permissions enabled (e.g. `--dangerously-skip-permissions` for Claude, auto-approve for Codex). Permission prompts stop output, look idle to the detector, and produce false handbacks. With auto-allow, the provider keeps running and the idle clock stays alive until work is genuinely done.
+
 ### Guard Details
 
-- **Double-fire guard**: `autoHandbackFired` set true when fires. Resets when a new handoff is accepted.
-- **Race guard**: after `/copy` capture completes (async), re-check `getAcceptedHandoff()` before calling `handoffBackRelay`. If handoff was declined or cancelled during capture, abort silently.
-- **Composer guard**: check `isPausedInput?.() !== true` before firing. Manual `h` flow wins if composer already open.
+- **Double-fire guard**: `autoHandbackFired` and `autoAcceptFired` are stored as `string | null` (the `handoffId` they fired for), not plain booleans. On each `checkIdleActions()` call, a guard is only active if it matches the current handoff's id. A new handoff with a different id is always treated as fresh — no bleed between handoffs in the same mounted session, and reconnect/reload resets naturally since a new handoffId is assigned.
+- **Capture failure contract**: the entire capture + classification block in auto-handback is wrapped in try/catch. On any exception (clipboard timeout, `/copy` failure, etc.), treat `clipboardText` as null and proceed to classification normally — likely producing `"no_response_captured"`. The guard (`autoHandbackFired`) stays set to the current handoffId after an exception; no retry for the same handoff.
+- **Race guard**: after `/copy` capture completes (async), re-check `getAcceptedHandoff()` before calling `handoffBackRelay`. If handoff was declined or cancelled during capture, abort silently and do not reset guard.
+- **Composer guard**: check `isPausedInput?.() !== true` before firing. If user manually opened the composer (`h` or `e`) while idle was detected, the manual flow wins.
+- **Simultaneous manual + auto**: if auto fires and user presses a manual key at the same moment, the second action is a noop — guard is already set to current handoffId, or `getAcceptedHandoff()` / `getPendingHandoff()` returns null because state already transitioned. No duplicate handoff is possible.
 
 ## Idle Timer Loop
 
@@ -125,24 +135,25 @@ if (Date.now() - lastActivityAt >= idleThresholdMs) {
 ### `packages/cli/src/runtime/mounted-turn-owned-relay.ts`
 
 - Accept `idleThresholdMs: number` in input (no default — caller always passes it).
-- Add `autoAcceptFired` flag (per-handoff, reset on new pending handoff or decline).
-- Add `autoHandbackFired` flag (per-handoff, reset on accept).
+- Add `autoAcceptFiredFor: string | null` — stores the `handoffId` auto-accept fired for; null means not yet fired. Active guard = value equals current handoffId.
+- Add `autoHandbackFiredFor: string | null` — same pattern for auto-handback.
 - Add `isPausedInput?: () => boolean` to input type — provided by `mount-session-main.ts` via `() => liveSession.isPaused()`.
 - Add `onHandoffAccepted?: () => void` to input type — called from `acceptPendingHandoff()` so `mount-session-main.ts` can reset `lastActivityAt`.
 - Update `BrokerLike.control.handoffBackRelay` params: add `captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured"`.
 - New method `checkIdleActions()`:
-  - If `getPendingHandoff()` returns a handoff with `status === "pending"` and `autoAcceptFired === false` and not paused → call `acceptPendingHandoff()`, set `autoAcceptFired = true`, return.
-  - Else if `getAcceptedHandoff()` non-null and `autoHandbackFired === false` and not paused → run auto-handback flow.
+  - If `getPendingHandoff()` returns a handoff with `status === "pending"` and `autoAcceptFiredFor !== handoff.handoffId` and not paused → set `autoAcceptFiredFor = handoff.handoffId`, call `acceptPendingHandoff()`, return.
+  - Else if `getAcceptedHandoff()` non-null and `autoHandbackFiredFor !== handoff.handoffId` and not paused → run auto-handback flow.
 - Auto-handback flow (inside `checkIdleActions`):
-  1. Set `autoHandbackFired = true`.
-  2. Call `captureHandbackText?.()` for clipboard text.
-  3. Call `turnCapture?.extractLatestAssistantTurn()` for turn text.
-  4. Classify confidence → `captureStatus`.
-  5. Re-check `getAcceptedHandoff()` still valid; abort if null.
-  6. Call `handoffBackRelay` with `requestText` and `captureStatus`.
-  7. Call `turnCapture?.reset()`.
-- `acceptPendingHandoff()`: set `autoHandbackFired = false`, call `onHandoffAccepted?.()`.
-- `declinePendingHandoff()`: reset `autoAcceptFired = false` (allow re-evaluation if a new handoff arrives).
+  1. Set `autoHandbackFiredFor = handoff.handoffId`.
+  2. Wrap steps 3–7 in try/catch; on exception treat `clipboardText` as null and continue to step 6.
+  3. Call `captureHandbackText?.()` for clipboard text.
+  4. Call `turnCapture?.extractLatestAssistantTurn()` for turn text.
+  5. Classify confidence → `captureStatus`.
+  6. Re-check `getAcceptedHandoff()` still valid; abort silently if null (guard stays set).
+  7. Call `handoffBackRelay` with `requestText` and `captureStatus`.
+  8. Call `turnCapture?.reset()`.
+- `acceptPendingHandoff()`: set `autoHandbackFiredFor = null`, call `onHandoffAccepted?.()`.
+- `declinePendingHandoff()`: set `autoAcceptFiredFor = null`.
 
 ### `packages/cli/src/runtime/mount-session-main.ts`
 
