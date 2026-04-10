@@ -56,6 +56,64 @@ function styleOwnerCard(message: string) {
 		.join("\n");
 }
 
+function computeLcs(a: string[], b: string[]): number {
+	const m = a.length;
+	const n = b.length;
+	const dp = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+	for (let i = 1; i <= m; i++) {
+		for (let j = 1; j <= n; j++) {
+			dp[i][j] =
+				a[i - 1] === b[j - 1]
+					? dp[i - 1][j - 1] + 1
+					: Math.max(dp[i - 1][j], dp[i][j - 1]);
+		}
+	}
+	return dp[m][n];
+}
+
+export function computeOrderedJaccard(a: string, b: string): number {
+	const normalize = (t: string) => t.trim().replace(/\s+/g, " ").toLowerCase();
+	const extractWords = (t: string) =>
+		normalize(t)
+			.split(" ")
+			.filter((w) => w.length >= 4);
+
+	const wa = extractWords(a);
+	const wb = extractWords(b);
+	const setA = new Set(wa);
+	const setB = new Set(wb);
+	const intersectionSize = [...setA].filter((w) => setB.has(w)).length;
+	const unionSize = new Set([...setA, ...setB]).size;
+	if (unionSize === 0) return 0;
+
+	const jaccard = intersectionSize / unionSize;
+	const lcs = computeLcs(wa, wb);
+	const shorter = Math.min(wa.length, wb.length);
+	if (shorter === 0) return 0;
+
+	return jaccard * (lcs / shorter);
+}
+
+export function classifyCapture(
+	turnResult: { confidence: "high" | "low"; text: string | null },
+	clipboardText: string | null,
+): "ok" | "no_response_captured_confidently" | "no_response_captured" {
+	const turnText = turnResult.text ?? "";
+	const clipText = clipboardText ?? "";
+
+	if (turnText.trim().length === 0 && clipText.trim().length === 0) {
+		return "no_response_captured";
+	}
+	if (
+		turnResult.confidence === "high" &&
+		clipText.trim().length > 0 &&
+		computeOrderedJaccard(turnText, clipText) >= 0.6
+	) {
+		return "ok";
+	}
+	return "no_response_captured_confidently";
+}
+
 export function createMountedTurnOwnedRelay(input: {
 	broker: BrokerLike;
 	collabId: string;
