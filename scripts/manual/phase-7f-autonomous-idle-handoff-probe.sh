@@ -195,6 +195,12 @@ if [[ "$RESET_RUNTIME" -eq 1 ]]; then
   rm -f "$STATE_FILE" "$SQLITE_FILE"
 fi
 
+# Kill leftover probe sessions from previous runs so dead panes don't interfere
+for old_session in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^autonomous-idle-probe-'); do
+  echo "+ killing leftover tmux session: $old_session"
+  tmux kill-session -t "$old_session" 2>/dev/null || true
+done
+
 if command -v lsof >/dev/null 2>&1; then
   if lsof -n -P -iTCP:4311 -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port 4311 is still in use after collab cleanup. Kill the leftover broker first." >&2
@@ -206,11 +212,14 @@ fi
 echo "+ node packages/cli/dist/bin/whisper.js collab start --no-launch"
 node packages/cli/dist/bin/whisper.js collab start --no-launch | tee "$LOG_DIR/start.log"
 
-MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor"
-SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE"
+# Each command ends with "; exec sleep 86400" so the tmux pane stays alive
+# after the mount exits — makes the error visible in captured pane output
+# regardless of whether remain-on-exit propagated correctly.
+MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor; exec sleep 86400"
+SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
 # Target receives AI_WHISPER_IDLE_THRESHOLD_MS so auto-accept and auto-handback engage.
 # Source does NOT receive it — source stays manual so the probe terminates after one round.
-TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET"
+TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
 
 echo "+ tmux new-session -d -s $SESSION_NAME"
 tmux new-session -d -s "$SESSION_NAME" -n monitor "$MONITOR_CMD"
