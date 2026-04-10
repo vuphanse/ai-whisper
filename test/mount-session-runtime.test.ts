@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createMountSessionRuntime } from "../packages/cli/src/runtime/mount-session-main.ts";
+import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 import { createCli } from "../packages/cli/src/create-cli.ts";
 import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 
@@ -220,6 +221,115 @@ describe("mount session runtime — degradation on exit", () => {
 		} finally {
 			exitSpy.mockRestore();
 		}
+	});
+});
+
+describe("mount session runtime — idle timer", () => {
+	it("calls checkIdleActions when idle threshold is exceeded in the ownerRefreshTimer", async () => {
+		vi.useFakeTimers();
+
+		const checkIdleActions = vi.fn(() => Promise.resolve());
+		const completeAttachClaim = vi.fn(() => ({
+			collabId: "collab_idle_wire",
+			sessionId: "session_idle",
+			agentType: "codex",
+		}));
+		const fakeState: CliCollabState = {
+			version: 5,
+			collabId: "collab_idle_wire",
+			workspaceRoot: "/tmp/workspace",
+			broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: "2026-04-10T00:00:00.000Z",
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
+			mountedSessions: {},
+		};
+
+		// Relay factory injection: return a fake relay that exposes our spy
+		const createTurnRelay: typeof createMountedTurnOwnedRelay = (_relayInput) => ({
+			getWaitingGate: () => ({
+				isBlocked: () => false,
+				renderBlockedMessage: () => "",
+				onCancel: () => {},
+			}),
+			refreshOwnerView: vi.fn(),
+			checkIdleActions,
+			acceptPendingHandoff: vi.fn(),
+			amendPendingHandoff: vi.fn(),
+			declinePendingHandoff: vi.fn(),
+			deferPendingHandoff: vi.fn(),
+			handBackTo: vi.fn(),
+			handleOwnerDisconnect: vi.fn(),
+			handleOwnerInput: vi.fn(async () => false),
+		});
+
+		const runtime = createMountSessionRuntime({
+			target: "codex",
+			ttyPath: "/dev/ttys031",
+			workspaceRoot: "/tmp/workspace",
+			claimId: "claim_idle",
+			secret: "secret_idle",
+			broker: {
+				control: {
+					completeAttachClaim,
+					listSessionBindings: () => [],
+					listSessions: () => [],
+					markSessionDegraded: vi.fn(),
+					getRelayTurnState: () => ({
+						collabId: "collab_idle_wire",
+						turnOwner: "none" as const,
+						waitingAgent: null,
+						unresolvedHandoffId: null,
+						handoffState: "idle" as const,
+						handoffAgeMs: null,
+					}),
+					getRelayHandoff: () => null,
+				},
+				stop: () => Promise.resolve(),
+			} as never,
+			createInteractiveSession: () => ({
+				start: () => Promise.resolve(),
+				stop: () => Promise.resolve(),
+				writeUserInput: vi.fn(),
+				sendLocalMessage: vi.fn(),
+				onProviderOutput: vi.fn(),
+				onExit: vi.fn(),
+			}),
+			createProvider: () =>
+				({
+					getIdentity: () => ({ providerId: "codex", toolFamily: "codex", providerVersion: "1" }),
+					getCapabilities: () => ({
+						supportsDirectPackets: false,
+						supportsNormalization: false,
+						supportsRelayInterception: false,
+						supportsLocalBuffering: false,
+						supportsLaunchHooks: false,
+						extensions: {},
+					}),
+				}) as never,
+			createLiveSession: () =>
+				({
+					start: () => Promise.resolve(),
+					stop: () => Promise.resolve(),
+					withPausedInput: async <T>(fn: () => Promise<T>) => fn(),
+					isPaused: () => false,
+				}) as never,
+			runLoop: () => Promise.resolve(() => Promise.resolve()),
+			updateState: vi.fn((_: string, update: (s: CliCollabState) => CliCollabState) =>
+				update(fakeState),
+			),
+			createTurnRelay,
+		});
+
+		void runtime.start();
+		// Advance past the 30 000 ms default idle threshold + one timer tick
+		await vi.advanceTimersByTimeAsync(31_000);
+
+		expect(checkIdleActions).toHaveBeenCalled();
+
+		vi.useRealTimers();
 	});
 });
 

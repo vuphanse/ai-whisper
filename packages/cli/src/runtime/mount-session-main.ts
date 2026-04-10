@@ -34,6 +34,7 @@ export function createMountSessionRuntime(input: {
 	createInteractiveSession?: typeof createInteractiveSessionForTarget;
 	createLiveSession?: typeof createLiveSessionRuntime;
 	runLoop?: typeof runCompanionAgentLoop;
+	createTurnRelay?: typeof createMountedTurnOwnedRelay;
 }) {
 	return {
 		async start() {
@@ -109,6 +110,12 @@ export function createMountSessionRuntime(input: {
 			process.once("SIGINT", () => void stop().then(() => process.exit(0)));
 			process.once("SIGTERM", () => void stop().then(() => process.exit(0)));
 
+			const idleThresholdMs = Math.max(
+				5_000,
+				Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? "") || 30_000,
+			);
+			let lastActivityAt = Date.now();
+
 			try {
 				const turnCapture = createAssistantTurnCapture();
 				const debugLog = createRuntimeDebugLogger({
@@ -137,6 +144,7 @@ export function createMountSessionRuntime(input: {
 					});
 				};
 				interactiveSession.onProviderOutput?.((data: string) => {
+					lastActivityAt = Date.now();
 					turnCapture.recordProviderOutput(data);
 				});
 
@@ -208,6 +216,9 @@ export function createMountSessionRuntime(input: {
 						},
 					},
 					onRelay,
+					onActivity: () => {
+						lastActivityAt = Date.now();
+					},
 				});
 
 				// Start the live session — this launches the provider in the current terminal.
@@ -230,13 +241,18 @@ export function createMountSessionRuntime(input: {
 					collabId: resolvedClaim.collabId,
 				});
 
-				turnRelay = createMountedTurnOwnedRelay({
+				turnRelay = (input.createTurnRelay ?? createMountedTurnOwnedRelay)({
 					broker: input.broker,
 					collabId: resolvedClaim.collabId,
 					currentAgent: input.target,
 					writeLocalMessage: (text) => interactiveSession.sendLocalMessage(text),
 					writeUserInput: (text) => writeInjectedInput("mounted-inject", text),
 					submitUserInput: submitInjectedInput,
+					idleThresholdMs,
+					isPausedInput: () => liveSession?.isPaused() ?? false,
+					onHandoffAccepted: () => {
+						lastActivityAt = Date.now();
+					},
 					openComposer: async (args) => {
 						const runComposer = async () => {
 							const lineReader = createLocalModalLineReader({
@@ -302,7 +318,12 @@ export function createMountSessionRuntime(input: {
 					});
 
 					ownerRefreshTimer = setInterval(() => {
-						void mountedTurnRelay.refreshOwnerView();
+						void (async () => {
+							mountedTurnRelay.refreshOwnerView();
+							if (Date.now() - lastActivityAt >= idleThresholdMs) {
+								await mountedTurnRelay.checkIdleActions();
+							}
+						})();
 					}, 1000);
 					mountedTurnRelay.refreshOwnerView();
 
