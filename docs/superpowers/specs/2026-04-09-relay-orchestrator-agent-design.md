@@ -282,17 +282,23 @@ The orchestrator does not need to track fixed reviewer/implementer identities. I
 
 ## Interaction With Mounted Relay
 
-This spec builds on, and does not replace, mounted relay handoff behavior:
+This spec builds on, and does not replace, mounted relay handoff behavior.
 
-- accept / defer / decline remain explicit owner actions in mounted runtime
-- handback remains explicit human action
+**Manual mode** (default, `AI_WHISPER_IDLE_THRESHOLD_MS` not set or auto-idle disabled):
+- accept / defer / decline are explicit owner actions
+- handback is an explicit human action (`h` key or force `Ctrl+H`)
 - orchestrator begins only after explicit `handed_back`
-- forced handback shortcuts remain mounted-runtime concern, not orchestrator concern
+
+**Autonomous idle mode** (`AI_WHISPER_IDLE_THRESHOLD_MS` set, idle auto-handoff enabled):
+- accept fires automatically after idle threshold when handoff is pending and session is unattended
+- handback fires automatically after idle threshold once accepted handoff task completes (provider goes quiet)
+- orchestrator still begins only after `handed_back` — trigger source (human vs. autonomous) is transparent to the orchestrator; `captureStatus` on the handoff record distinguishes the two
+- forced handback shortcuts and manual override keys remain mounted-runtime concern, not orchestrator concern
 
 ## Out of Scope
 
 - Orchestrator accessing terminal output beyond the handoff record
-- Orchestrator making decisions before `handed_back` (e.g., auto-accept)
+- Orchestrator making decisions before `handed_back`
 - Fixed role assignments (implementer/reviewer always same agent)
 - Multi-collab orchestration (one orchestrator per collab session)
 - Local model support (Ollama, llama3, mistral) — deferred until cloud path proven
