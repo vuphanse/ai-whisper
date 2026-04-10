@@ -18,7 +18,7 @@ Full autonomous cycle:
 
 The session is considered idle when **no activity** has occurred for `IDLE_THRESHOLD_MS`. One value governs both auto-accept and auto-handback.
 
-Resolved at session start from env var `AI_WHISPER_IDLE_THRESHOLD_MS` (parsed as integer ms), falling back to 30 000. This allows test harnesses and probe scripts to use short thresholds (e.g. 2 000 ms) without changing production defaults.
+Resolved at session start from env var `AI_WHISPER_IDLE_THRESHOLD_MS` (parsed as integer ms), falling back to 30 000. Clamped to a minimum of 5 000 ms — values below this give insufficient confidence that the session is truly idle. Test harnesses should use 5 000–10 000 ms.
 
 Activity resets the clock:
 - Any provider PTY output chunk (`onProviderOutput`)
@@ -121,7 +121,7 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 
 ### `packages/cli/src/runtime/mount-session-main.ts`
 
-- Resolve `idleThresholdMs = Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? "") || 30_000` at session start.
+- Resolve `idleThresholdMs = Math.max(5_000, Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? "") || 30_000)` at session start.
 - Add `lastActivityAt: number = Date.now()`.
 - Reset `lastActivityAt` in:
   - `interactiveSession.onProviderOutput` handler
