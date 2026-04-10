@@ -130,9 +130,9 @@ function makeRelayForIdle(opts: {
 		writeLocalMessage: vi.fn(),
 		writeUserInput: vi.fn(),
 		openComposer: vi.fn(),
-		isPausedInput: opts.isPausedInput,
-		captureHandbackText: opts.captureHandbackText,
-		turnCapture: opts.turnCapture,
+		...(opts.isPausedInput !== undefined ? { isPausedInput: opts.isPausedInput } : {}),
+		...(opts.captureHandbackText !== undefined ? { captureHandbackText: opts.captureHandbackText } : {}),
+		...(opts.turnCapture !== undefined ? { turnCapture: opts.turnCapture } : {}),
 	});
 
 	return { relay, broker };

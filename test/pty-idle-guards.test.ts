@@ -22,14 +22,14 @@ function makeBrokerForGuard(handoffStatus: "pending" | "deferred" | "accepted" |
       getRelayTurnState: vi.fn(() => ({
         collabId: "collab_guard",
         turnOwner: "claude" as const,
-        waitingAgent: "codex" as const,
+        waitingAgent: "codex" as "codex" | "claude" | null,
         unresolvedHandoffId: handoff ? "handoff_guard_1" : null,
         handoffState: (handoffStatus === "none" ? "idle" : handoffStatus) as
           | "idle"
           | "pending"
           | "deferred"
           | "accepted",
-        handoffAgeMs: 5_000,
+        handoffAgeMs: 5_000 as number | null,
       })),
       getRelayHandoff: vi.fn(() => handoff),
       acceptRelayHandoff: vi.fn(),
