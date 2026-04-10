@@ -426,7 +426,63 @@ export function createMountedTurnOwnedRelay(input: {
 		},
 
 		async checkIdleActions() {
-			// implemented in Task 5
+			// Auto-accept: pending (not deferred) handoff, guard not set, not paused
+			const pending = getPendingHandoff();
+			if (
+				pending !== null &&
+				pending.status === "pending" &&
+				autoAcceptFiredFor !== pending.handoffId &&
+				!(input.isPausedInput?.() ?? false)
+			) {
+				autoAcceptFiredFor = pending.handoffId;
+				await api.acceptPendingHandoff();
+				return;
+			}
+
+			// Auto-handback: accepted handoff, guard not set, not paused
+			const accepted = getAcceptedHandoff();
+			if (
+				accepted === null ||
+				autoHandbackFiredFor === accepted.handoffId ||
+				(input.isPausedInput?.() ?? false)
+			) {
+				return;
+			}
+
+			autoHandbackFiredFor = accepted.handoffId;
+
+			// Always extract turn text before attempting clipboard capture — must run even if clipboard throws.
+			// finishAssistantTurn clears the streaming flag so extractLatestAssistantTurn
+			// can return high-confidence text; without this call it always returns low/null.
+			input.turnCapture?.finishAssistantTurn();
+			const turnResult: { confidence: "high" | "low"; text: string | null } =
+				input.turnCapture?.extractLatestAssistantTurn() ?? { confidence: "low", text: null };
+
+			let clipboardText: string | null = null;
+			try {
+				clipboardText = (await input.captureHandbackText?.()) ?? null;
+			} catch {
+				clipboardText = null;
+			}
+
+			const captureStatus = classifyCapture(turnResult, clipboardText);
+			const requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
+
+			// Race guard: original handoff must still be the accepted one after async capture.
+			// A different handoffId means the original was resolved mid-capture; abort silently.
+			if (getAcceptedHandoff()?.handoffId !== accepted.handoffId) return;
+
+			const now = new Date().toISOString();
+			input.broker.control.handoffBackRelay?.({
+				handoffId: accepted.handoffId,
+				nextHandoffId: `handoff_${now.replace(/[^0-9]/g, "")}`,
+				senderAgent: input.currentAgent,
+				targetAgent: accepted.senderAgent,
+				requestText,
+				captureStatus,
+				now,
+			});
+			input.turnCapture?.reset();
 		},
 
 		handleOwnerDisconnect() {

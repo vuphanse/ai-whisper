@@ -70,3 +70,324 @@ describe("classifyCapture", () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// checkIdleActions
+// ---------------------------------------------------------------------------
+
+function makeRelayForIdle(opts: {
+	handoffStatus: "none" | "pending" | "deferred" | "accepted";
+	isPausedInput?: () => boolean;
+	captureHandbackText?: () => Promise<string | null>;
+	turnCapture?: {
+		reset: () => void;
+		finishAssistantTurn: () => void;
+		hasVisibleAssistantTurn: () => boolean;
+		extractLatestAssistantTurn: () => { confidence: "high" | "low"; text: string | null };
+	};
+}) {
+	const { handoffStatus } = opts;
+	const handoffId = "handoff_idle_1";
+	const handoff =
+		handoffStatus === "none"
+			? null
+			: {
+					handoffId,
+					collabId: "collab_idle",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Do the work",
+					status: handoffStatus as "pending" | "deferred" | "accepted",
+				};
+
+	const broker = {
+		control: {
+			getRelayTurnState: vi.fn(() => ({
+				collabId: "collab_idle",
+				turnOwner: "claude" as const,
+				waitingAgent: "codex" as const,
+				unresolvedHandoffId: handoff ? handoffId : null,
+				handoffState: (handoffStatus === "none" ? "idle" : handoffStatus) as
+					| "idle"
+					| "pending"
+					| "deferred"
+					| "accepted",
+				handoffAgeMs: 5_000,
+			})),
+			getRelayHandoff: vi.fn(() => handoff),
+			acceptRelayHandoff: vi.fn(),
+			declineRelayHandoff: vi.fn(),
+			deferRelayHandoff: vi.fn(),
+			markRelayHandoffStale: vi.fn(),
+			handoffBackRelay: vi.fn(),
+		},
+	};
+
+	const relay = createMountedTurnOwnedRelay({
+		broker,
+		collabId: "collab_idle",
+		currentAgent: "claude",
+		writeLocalMessage: vi.fn(),
+		writeUserInput: vi.fn(),
+		openComposer: vi.fn(),
+		isPausedInput: opts.isPausedInput,
+		captureHandbackText: opts.captureHandbackText,
+		turnCapture: opts.turnCapture,
+	});
+
+	return { relay, broker };
+}
+
+describe("checkIdleActions: auto-accept", () => {
+	it("auto-accepts a pending handoff and returns without firing auto-handback on same tick", async () => {
+		const { relay, broker } = makeRelayForIdle({ handoffStatus: "pending" });
+		await relay.checkIdleActions();
+		expect(broker.control.acceptRelayHandoff).toHaveBeenCalledWith({
+			handoffId: "handoff_idle_1",
+			acceptedAt: expect.any(String),
+		});
+		expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+	});
+
+	it("does not auto-accept a deferred handoff", async () => {
+		const { relay, broker } = makeRelayForIdle({ handoffStatus: "deferred" });
+		await relay.checkIdleActions();
+		expect(broker.control.acceptRelayHandoff).not.toHaveBeenCalled();
+	});
+
+	it("does not auto-accept when isPausedInput returns true", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "pending",
+			isPausedInput: () => true,
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.acceptRelayHandoff).not.toHaveBeenCalled();
+	});
+
+	it("does not fire auto-accept twice for same handoffId", async () => {
+		const { relay, broker } = makeRelayForIdle({ handoffStatus: "pending" });
+		await relay.checkIdleActions();
+		await relay.checkIdleActions();
+		expect(broker.control.acceptRelayHandoff).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("checkIdleActions: auto-handback captureStatus", () => {
+	it("calls finishAssistantTurn before extractLatestAssistantTurn so streaming output is classified correctly", async () => {
+		const finishAssistantTurn = vi.fn();
+		const extractLatestAssistantTurn = vi.fn(() => ({
+			confidence: "low" as const,
+			text: null,
+		}));
+		const { relay } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => null,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn,
+				hasVisibleAssistantTurn: vi.fn(() => false),
+				extractLatestAssistantTurn,
+			},
+		});
+		await relay.checkIdleActions();
+		const finishCallOrder = finishAssistantTurn.mock.invocationCallOrder[0];
+		const extractCallOrder = extractLatestAssistantTurn.mock.invocationCallOrder[0];
+		expect(finishCallOrder).toBeLessThan(extractCallOrder!);
+	});
+
+	it("calls handoffBackRelay with captureStatus ok when high confidence and jaccard >= 0.6", async () => {
+		const result = "implement approved plan keep commits small verify tests pass";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => result,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "high" as const, text: result })),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ captureStatus: "ok", requestText: result }),
+		);
+	});
+
+	it("calls handoffBackRelay with no_response_captured when both signals empty", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => null,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => false),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "low" as const, text: null })),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ captureStatus: "no_response_captured", requestText: "" }),
+		);
+	});
+
+	it("calls handoffBackRelay with no_response_captured_confidently when jaccard < 0.6", async () => {
+		const turnText = "alpha beta gamma delta epsilon zeta eta theta";
+		const clipText = "theta eta zeta epsilon delta gamma beta alpha";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => clipText,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({
+					confidence: "high" as const,
+					text: turnText,
+				})),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({
+				captureStatus: "no_response_captured_confidently",
+				requestText: "",
+			}),
+		);
+	});
+
+	it("does not fire auto-handback twice for same handoffId", async () => {
+		const result = "implement approved plan keep commits small";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => result,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "high" as const, text: result })),
+			},
+		});
+		await relay.checkIdleActions();
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not call handoffBackRelay when isPausedInput returns true", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			isPausedInput: () => true,
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+	});
+
+	it("treats captureHandbackText exception as null clipboard and still calls handoffBackRelay", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => {
+				throw new Error("clipboard timeout");
+			},
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => false),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "low" as const, text: null })),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ captureStatus: "no_response_captured" }),
+		);
+	});
+
+	it("when clipboard throws and turn capture has high-confidence text, captureStatus is no_response_captured_confidently", async () => {
+		// Validates that turn extraction runs OUTSIDE the clipboard try/catch.
+		// If finishAssistantTurn/extractLatestAssistantTurn were inside the try, a clipboard
+		// exception would leave turnResult as {low, null}, producing no_response_captured instead.
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			captureHandbackText: async () => {
+				throw new Error("clipboard timeout");
+			},
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({
+					confidence: "high" as const,
+					text: "implement approved plan keep commits small verify tests pass",
+				})),
+			},
+		});
+		await relay.checkIdleActions();
+		// clipboard null → Jaccard check cannot pass → no_response_captured_confidently (not no_response_captured)
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({
+				captureStatus: "no_response_captured_confidently",
+				requestText: "",
+			}),
+		);
+	});
+
+	it("aborts silently when the accepted handoff is replaced before handback (race guard)", async () => {
+		let resolveCapture!: (v: string | null) => void;
+		const capturePromise = new Promise<string | null>((r) => {
+			resolveCapture = r;
+		});
+
+		const acceptedHandoff = {
+			handoffId: "handoff_race_1",
+			collabId: "collab_idle",
+			senderAgent: "codex" as const,
+			targetAgent: "claude" as const,
+			requestText: "work",
+			status: "accepted" as const,
+		};
+
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_idle",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_race_1",
+					handoffState: "accepted" as const,
+					handoffAgeMs: 5_000,
+				})),
+				// First call returns the accepted handoff; subsequent calls return a DIFFERENT handoff
+				// (simulating the original handoff being resolved and a new one appearing mid-capture)
+				getRelayHandoff: vi
+					.fn()
+					.mockReturnValueOnce(acceptedHandoff)
+					.mockReturnValueOnce(acceptedHandoff)
+					.mockReturnValue({
+						...acceptedHandoff,
+						handoffId: "handoff_race_2",
+						status: "accepted" as const,
+					}),
+				acceptRelayHandoff: vi.fn(),
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+				markRelayHandoffStale: vi.fn(),
+				handoffBackRelay: vi.fn(),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_idle",
+			currentAgent: "claude",
+			writeLocalMessage: vi.fn(),
+			writeUserInput: vi.fn(),
+			openComposer: vi.fn(),
+			captureHandbackText: () => capturePromise,
+		});
+
+		const actionPromise = relay.checkIdleActions();
+		resolveCapture("some result");
+		await actionPromise;
+
+		// handoffId no longer matches — must not hand back
+		expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+	});
+});
