@@ -215,6 +215,40 @@ describe("relay handoff repository", () => {
 		expect(broker.control.getLatestHandedBackHandoff("other_collab")).toBeNull();
 	});
 
+	it("stores chain metadata on the initial relay handoff", () => {
+		const broker = createTestBroker();
+		broker.control.startCollab({
+			collabId: "collab_chain",
+			workspaceRoot: "/tmp/test",
+			displayName: "chain",
+			orchestratorEnabled: true,
+			orchestratorMaxRounds: 3,
+			now: "2026-04-11T00:00:00.000Z",
+		});
+
+		broker.control.createRelayHandoff({
+			handoffId: "handoff_root",
+			collabId: "collab_chain",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Review docs/superpowers/specs/2026-04-09-relay-orchestrator-agent-design.md",
+			now: "2026-04-11T00:00:05.000Z",
+		});
+
+		expect(broker.control.getRelayHandoff("handoff_root")).toEqual(
+			expect.objectContaining({
+				chainId: "handoff_root",
+				parentHandoffId: null,
+				roundNumber: 1,
+				maxRounds: 3,
+				rootRequestText: "Review docs/superpowers/specs/2026-04-09-relay-orchestrator-agent-design.md",
+				handbackText: null,
+				orchestratorStatus: "idle",
+				orchestratorVerdict: null,
+			}),
+		);
+	});
+
 	it("marks unresolved handoff failed on owner disconnect and releases the sender", () => {
 		const broker = createTestBroker();
 

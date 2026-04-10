@@ -34,6 +34,10 @@ describe("relay turn state guardrail", () => {
 				unresolvedHandoffId: null,
 				handoffState: "idle",
 				handoffAgeMs: null,
+				orchestratorEnabled: false,
+				currentRound: 0,
+				maxRounds: 3,
+				chainStatus: "done",
 			});
 		} finally {
 			await broker.stop();

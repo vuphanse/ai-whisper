@@ -9,8 +9,10 @@ export function insertCollab(db: Database.Database, collab: Collab): void {
       display_name,
       status,
       created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
+      updated_at,
+      orchestrator_enabled,
+      orchestrator_max_rounds
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 	).run(
 		collab.collabId,
 		collab.workspaceRoot,
@@ -18,6 +20,8 @@ export function insertCollab(db: Database.Database, collab: Collab): void {
 		collab.status,
 		collab.createdAt,
 		collab.updatedAt,
+		collab.orchestratorEnabled ? 1 : 0,
+		collab.orchestratorMaxRounds,
 	);
 }
 
@@ -27,7 +31,8 @@ export function getCollab(
 ): Collab | null {
 	const row = db
 		.prepare(
-			`SELECT collab_id, workspace_root, display_name, status, created_at, updated_at
+			`SELECT collab_id, workspace_root, display_name, status, created_at, updated_at,
+			        orchestrator_enabled, orchestrator_max_rounds
        FROM collab
        WHERE collab_id = ?`,
 		)
@@ -39,6 +44,8 @@ export function getCollab(
 				status: "active" | "stopped";
 				created_at: string;
 				updated_at: string;
+				orchestrator_enabled: number;
+				orchestrator_max_rounds: number;
 		  }
 		| undefined;
 
@@ -54,5 +61,7 @@ export function getCollab(
 		status: row.status,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
+		orchestratorEnabled: row.orchestrator_enabled === 1,
+		orchestratorMaxRounds: row.orchestrator_max_rounds,
 	});
 }

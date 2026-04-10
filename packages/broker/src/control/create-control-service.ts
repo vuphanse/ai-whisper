@@ -89,6 +89,7 @@ import {
 } from "../storage/repositories/relay-event-repository.js";
 import {
 	queryRelayTurnState,
+	upsertRelayTurnState,
 } from "../storage/repositories/relay-turn-state-repository.js";
 import {
 	createRelayHandoffTxn,
@@ -120,6 +121,8 @@ export function createControlService(db: Database.Database) {
 			collabId: string;
 			workspaceRoot: string;
 			displayName: string;
+			orchestratorEnabled?: boolean;
+			orchestratorMaxRounds?: number;
 			now: string;
 		}) {
 			const collab = collabSchema.parse({
@@ -130,9 +133,25 @@ export function createControlService(db: Database.Database) {
 				status: "active",
 				createdAt: input.now,
 				updatedAt: input.now,
+				orchestratorEnabled: input.orchestratorEnabled ?? false,
+				orchestratorMaxRounds: input.orchestratorMaxRounds ?? 3,
 			});
 
 			insertCollab(db, collab);
+
+			upsertRelayTurnState(db, {
+				collabId: collab.collabId,
+				turnOwner: "none",
+				waitingAgent: null,
+				unresolvedHandoffId: null,
+				handoffState: "idle",
+				updatedAt: input.now,
+				orchestratorEnabled: collab.orchestratorEnabled,
+				currentRound: 0,
+				maxRounds: collab.orchestratorMaxRounds,
+				chainStatus: "done",
+			});
+
 			appendEvent(db, {
 				version: brokerSchemaVersion,
 				eventId: buildEventId("collab_started", collab.collabId, input.now),

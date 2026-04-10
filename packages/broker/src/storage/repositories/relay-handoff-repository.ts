@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { upsertRelayTurnState } from "./relay-turn-state-repository.js";
+import { getCollab } from "./collab-repository.js";
 
 export type RelayHandoffRecord = {
 	handoffId: string;
@@ -9,6 +10,17 @@ export type RelayHandoffRecord = {
 	requestText: string;
 	status: "pending" | "deferred" | "accepted" | "declined" | "handed_back" | "failed";
 	captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
+	chainId: string | null;
+	parentHandoffId: string | null;
+	roundNumber: number | null;
+	maxRounds: number;
+	rootRequestText: string | null;
+	handbackText: string | null;
+	orchestratorStatus: "idle" | "pending" | "processed" | null;
+	orchestratorVerdict: "done" | "loop" | "escalate" | null;
+	orchestratorReason: string | null;
+	orchestratorClaimedAt: string | null;
+	orchestratorEvaluatedAt: string | null;
 	createdAt: string;
 	acceptedAt: string | null;
 	deferredAt: string | null;
@@ -24,6 +36,17 @@ function rowToRecord(row: {
 	request_text: string;
 	status: string;
 	capture_status: string | null;
+	chain_id: string | null;
+	parent_handoff_id: string | null;
+	round_number: number | null;
+	max_rounds: number;
+	root_request_text: string | null;
+	handback_text: string | null;
+	orchestrator_status: string | null;
+	orchestrator_verdict: string | null;
+	orchestrator_reason: string | null;
+	orchestrator_claimed_at: string | null;
+	orchestrator_evaluated_at: string | null;
 	created_at: string;
 	accepted_at: string | null;
 	deferred_at: string | null;
@@ -38,6 +61,17 @@ function rowToRecord(row: {
 		requestText: row.request_text,
 		status: row.status as RelayHandoffRecord["status"],
 		captureStatus: row.capture_status as RelayHandoffRecord["captureStatus"],
+		chainId: row.chain_id,
+		parentHandoffId: row.parent_handoff_id,
+		roundNumber: row.round_number,
+		maxRounds: row.max_rounds,
+		rootRequestText: row.root_request_text,
+		handbackText: row.handback_text,
+		orchestratorStatus: row.orchestrator_status as RelayHandoffRecord["orchestratorStatus"],
+		orchestratorVerdict: row.orchestrator_verdict as RelayHandoffRecord["orchestratorVerdict"],
+		orchestratorReason: row.orchestrator_reason,
+		orchestratorClaimedAt: row.orchestrator_claimed_at,
+		orchestratorEvaluatedAt: row.orchestrator_evaluated_at,
 		createdAt: row.created_at,
 		acceptedAt: row.accepted_at,
 		deferredAt: row.deferred_at,
@@ -52,10 +86,15 @@ export function queryRelayHandoff(
 ): RelayHandoffRecord | null {
 	const row = db
 		.prepare(
-			`SELECT handoff_id, collab_id, sender_agent, target_agent, request_text, status,
-			        capture_status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at
-			 FROM relay_handoff
-			 WHERE handoff_id = ?`,
+			`SELECT h.handoff_id, h.collab_id, h.sender_agent, h.target_agent, h.request_text, h.status,
+			        h.capture_status, h.chain_id, h.parent_handoff_id, h.round_number, h.root_request_text,
+			        h.handback_text, h.orchestrator_status, h.orchestrator_verdict, h.orchestrator_reason,
+			        h.orchestrator_claimed_at, h.orchestrator_evaluated_at, h.created_at, h.accepted_at,
+			        h.deferred_at, h.resolved_at, h.last_activity_at,
+			        c.orchestrator_max_rounds AS max_rounds
+			 FROM relay_handoff h
+			 JOIN collab c ON c.collab_id = h.collab_id
+			 WHERE h.handoff_id = ?`,
 		)
 		.get(handoffId) as
 		| {
@@ -66,6 +105,17 @@ export function queryRelayHandoff(
 				request_text: string;
 				status: string;
 				capture_status: string | null;
+				chain_id: string | null;
+				parent_handoff_id: string | null;
+				round_number: number | null;
+				max_rounds: number;
+				root_request_text: string | null;
+				handback_text: string | null;
+				orchestrator_status: string | null;
+				orchestrator_verdict: string | null;
+				orchestrator_reason: string | null;
+				orchestrator_claimed_at: string | null;
+				orchestrator_evaluated_at: string | null;
 				created_at: string;
 				accepted_at: string | null;
 				deferred_at: string | null;
@@ -102,12 +152,20 @@ export function createRelayHandoffTxn(
 			);
 		}
 
-		// Insert the handoff record
+		// Read collab config to determine if orchestrator is enabled
+		const collab = getCollab(db, input.collabId);
+		const orchestratorEnabled = collab?.orchestratorEnabled ?? false;
+
+		// Insert the handoff record, populating chain metadata when orchestrator is enabled
 		db.prepare(
 			`INSERT INTO relay_handoff
 			   (handoff_id, collab_id, sender_agent, target_agent, request_text,
-			    status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at, capture_status)
-			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?, NULL)`,
+			    status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at, capture_status,
+			    chain_id, parent_handoff_id, round_number, root_request_text,
+			    handback_text, orchestrator_status)
+			 VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, NULL, ?, NULL,
+			         ?, NULL, ?, ?,
+			         NULL, ?)`,
 		).run(
 			input.handoffId,
 			input.collabId,
@@ -116,6 +174,10 @@ export function createRelayHandoffTxn(
 			input.requestText,
 			input.now,
 			input.now,
+			orchestratorEnabled ? input.handoffId : null,
+			orchestratorEnabled ? 1 : null,
+			orchestratorEnabled ? input.requestText : null,
+			orchestratorEnabled ? "idle" : null,
 		);
 
 		// Flip turn ownership to the target agent and record the unresolved handoff
@@ -291,11 +353,16 @@ export function queryLatestHandedBackHandoff(
 ): RelayHandoffRecord | null {
 	const row = db
 		.prepare(
-			`SELECT handoff_id, collab_id, sender_agent, target_agent, request_text, status,
-			        capture_status, created_at, accepted_at, deferred_at, resolved_at, last_activity_at
-			 FROM relay_handoff
-			 WHERE collab_id = ? AND status = 'handed_back'
-			 ORDER BY resolved_at DESC
+			`SELECT h.handoff_id, h.collab_id, h.sender_agent, h.target_agent, h.request_text, h.status,
+			        h.capture_status, h.chain_id, h.parent_handoff_id, h.round_number, h.root_request_text,
+			        h.handback_text, h.orchestrator_status, h.orchestrator_verdict, h.orchestrator_reason,
+			        h.orchestrator_claimed_at, h.orchestrator_evaluated_at, h.created_at, h.accepted_at,
+			        h.deferred_at, h.resolved_at, h.last_activity_at,
+			        c.orchestrator_max_rounds AS max_rounds
+			 FROM relay_handoff h
+			 JOIN collab c ON c.collab_id = h.collab_id
+			 WHERE h.collab_id = ? AND h.status = 'handed_back'
+			 ORDER BY h.resolved_at DESC
 			 LIMIT 1`,
 		)
 		.get(collabId) as
@@ -307,6 +374,17 @@ export function queryLatestHandedBackHandoff(
 				request_text: string;
 				status: string;
 				capture_status: string | null;
+				chain_id: string | null;
+				parent_handoff_id: string | null;
+				round_number: number | null;
+				max_rounds: number;
+				root_request_text: string | null;
+				handback_text: string | null;
+				orchestrator_status: string | null;
+				orchestrator_verdict: string | null;
+				orchestrator_reason: string | null;
+				orchestrator_claimed_at: string | null;
+				orchestrator_evaluated_at: string | null;
 				created_at: string;
 				accepted_at: string | null;
 				deferred_at: string | null;
