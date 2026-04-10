@@ -9,6 +9,7 @@ MESSAGE="reply with exactly the word: done"
 IDLE_THRESHOLD_MS="${AI_WHISPER_IDLE_THRESHOLD_MS:-10000}"
 WAIT_MONITOR_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_MONITOR_MS:-1500}"
 WAIT_MOUNT_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_MOUNT_MS:-8000}"
+WAIT_AFTER_INTERRUPT_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_AFTER_INTERRUPT_MS:-3000}"
 WAIT_AFTER_HANDOFF_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_AFTER_HANDOFF_MS:-15000}"
 WAIT_FOR_PROVIDER_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_FOR_PROVIDER_MS:-60000}"
 WAIT_AFTER_AUTO_HANDBACK_MS="${AI_WHISPER_AUTONOMOUS_PROBE_WAIT_AFTER_AUTO_HANDBACK_MS:-3000}"
@@ -36,6 +37,7 @@ Options:
                                   Minimum: 5000 (spec-enforced clamp).
   --wait-monitor-ms <ms>          Wait after relay-monitor starts (default: 1500)
   --wait-mount-ms <ms>            Wait after providers mount and settle (default: 8000)
+  --wait-after-interrupt-ms <ms>  Wait after Ctrl-C is sent to target to settle at prompt (default: 3000)
   --wait-after-handoff-ms <ms>    Wait after @@handoff is sent; must exceed --idle-threshold-ms
                                   so auto-accept has time to fire (default: 15000)
   --wait-for-provider-ms <ms>     Wait for the target provider to process the task and for
@@ -98,6 +100,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --wait-mount-ms)
       WAIT_MOUNT_MS="${2:-}"
+      shift 2
+      ;;
+    --wait-after-interrupt-ms)
+      WAIT_AFTER_INTERRUPT_MS="${2:-}"
       shift 2
       ;;
     --wait-after-handoff-ms)
@@ -243,6 +249,11 @@ sleep_ms "$WAIT_MOUNT_MS"
 capture_window "$SOURCE" "$SOURCE.after-mount"
 capture_window "$TARGET" "$TARGET.after-mount"
 
+echo "+ interrupting any pre-existing task in $TARGET"
+tmux send-keys -t "$SESSION_NAME:$TARGET" C-c
+sleep_ms "$WAIT_AFTER_INTERRUPT_MS"
+capture_window "$TARGET" "$TARGET.after-interrupt"
+
 echo "+ send handoff from $SOURCE to $TARGET"
 tmux send-keys -t "$SESSION_NAME:$SOURCE" "@@$TARGET $MESSAGE" Enter
 sleep_ms 1000
@@ -319,6 +330,7 @@ logs:
   $LOG_DIR/$SOURCE.after-handoff.txt
   $LOG_DIR/$SOURCE.after-auto-handback.txt
   $LOG_DIR/$TARGET.after-mount.txt
+  $LOG_DIR/$TARGET.after-interrupt.txt
   $LOG_DIR/$TARGET.after-handoff.txt
   $LOG_DIR/$TARGET.after-auto-accept.txt
   $LOG_DIR/$TARGET.after-auto-handback.txt

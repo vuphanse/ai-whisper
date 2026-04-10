@@ -22,6 +22,7 @@ describe("phase 7f autonomous idle handoff probe script", () => {
 		expect(output).toContain("--target");
 		expect(output).toContain("--message");
 		expect(output).toContain("--idle-threshold-ms");
+		expect(output).toContain("--wait-after-interrupt-ms");
 		expect(output).toContain("--wait-after-handoff-ms");
 		expect(output).toContain("--wait-for-provider-ms");
 		expect(output).toContain("--reset-runtime");
@@ -44,27 +45,35 @@ describe("phase 7f autonomous idle handoff probe script", () => {
 		expect(script).toMatch(/SOURCE_CMD=.*(?!AI_WHISPER_IDLE_THRESHOLD_MS)/);
 	});
 
-	it("does not send 'a' or 'h' keypresses to the target window", () => {
+	it("sends only Ctrl-C (interrupt) and no 'a' or 'h' keypresses to the target window", () => {
 		const script = readFileSync(
 			resolve(root, "scripts/manual/phase-7f-autonomous-idle-handoff-probe.sh"),
 			"utf8",
 		);
 
-		// The only send-keys to the source is the @@handoff message
 		const sendKeysLines = script
 			.split("\n")
 			.filter((line) => line.includes("tmux send-keys"));
 
-		// Exactly one send-keys call: the @@handoff from source
-		expect(sendKeysLines).toHaveLength(1);
-		expect(sendKeysLines[0]).toContain("$SESSION_NAME:$SOURCE");
-		expect(sendKeysLines[0]).toContain("@@$TARGET");
+		// Exactly two send-keys calls: Ctrl-C to target + @@handoff from source
+		expect(sendKeysLines).toHaveLength(2);
 
-		// No send-keys targeting the target window at all
 		const targetSendKeys = sendKeysLines.filter((line) =>
 			line.includes("$SESSION_NAME:$TARGET"),
 		);
-		expect(targetSendKeys).toHaveLength(0);
+		const sourceSendKeys = sendKeysLines.filter((line) =>
+			line.includes("$SESSION_NAME:$SOURCE"),
+		);
+
+		// Target receives only Ctrl-C to interrupt pre-existing task
+		expect(targetSendKeys).toHaveLength(1);
+		expect(targetSendKeys[0]).toContain("C-c");
+		expect(targetSendKeys[0]).not.toMatch(/\ba\b/);
+		expect(targetSendKeys[0]).not.toMatch(/\bh\b/);
+
+		// Source sends the handoff message
+		expect(sourceSendKeys).toHaveLength(1);
+		expect(sourceSendKeys[0]).toContain("@@$TARGET");
 	});
 
 	it("runs collab inspect after auto-handback and captures the output", () => {
