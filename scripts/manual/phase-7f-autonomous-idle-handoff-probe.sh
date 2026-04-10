@@ -229,7 +229,10 @@ TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS A
 echo "+ tmux new-session -d -s $SESSION_NAME"
 tmux new-session -d -s "$SESSION_NAME" -n monitor "$MONITOR_CMD"
 tmux set-option -t "$SESSION_NAME" remain-on-exit on >/dev/null
+# Stagger mounts: each issueAttachClaim writes to the broker SQLite.
+# Creating both simultaneously causes SQLITE_BUSY on fresh databases.
 tmux new-window -t "$SESSION_NAME" -n "$SOURCE" "$SOURCE_CMD"
+sleep 3
 tmux new-window -t "$SESSION_NAME" -n "$TARGET" "$TARGET_CMD"
 
 capture_window() {
