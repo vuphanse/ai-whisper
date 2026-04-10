@@ -16,6 +16,10 @@ export function buildInspectSnapshot(input: {
 	const bindings = input.broker.control.listSessionBindings(input.state.collabId);
 	const sessions = input.broker.control.listSessions(input.state.collabId);
 	const turn = input.broker.control.getRelayTurnState(input.state.collabId);
+	const lastHandedBack = input.broker.control.getLatestHandedBackHandoff(
+		input.state.collabId,
+	);
+	const lastCaptureStatus = lastHandedBack?.captureStatus ?? null;
 
 	const roles = (["codex", "claude"] as const).map((agentType) => {
 		const binding = bindings.find((candidate) => candidate.agentType === agentType);
@@ -46,6 +50,7 @@ export function buildInspectSnapshot(input: {
 			waitingAgent: turn.waitingAgent,
 			handoffState: turn.handoffState,
 			handoffAgeMs: turn.handoffAgeMs,
+			lastCaptureStatus,
 		};
 	}
 
@@ -112,6 +117,7 @@ export function buildInspectSnapshot(input: {
 		waitingAgent: turn.waitingAgent,
 		handoffState: turn.handoffState,
 		handoffAgeMs: turn.handoffAgeMs,
+		lastCaptureStatus,
 	};
 }
 
@@ -155,6 +161,7 @@ export function formatInspectSnapshot(input: {
 	waitingAgent: "codex" | "claude" | null;
 	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
 	handoffAgeMs?: number | null;
+	lastCaptureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 }) {
 	const lines = [
 		...(input.watch ? [`Live Inspect (${input.refreshedAt})`] : []),
@@ -170,6 +177,7 @@ export function formatInspectSnapshot(input: {
 		`Waiting: ${input.waitingAgent ?? "none"}`,
 		`Handoff state: ${input.handoffState ?? "idle"}`,
 		...(input.handoffAgeMs != null ? [`Handoff age: ${Math.floor(input.handoffAgeMs / 1000)}s`] : []),
+		...(input.lastCaptureStatus != null ? [`Last capture: ${input.lastCaptureStatus}`] : []),
 	];
 
 	if (!input.activeThread) {

@@ -567,6 +567,103 @@ describe("handoff age in inspect output", () => {
 	});
 });
 
+describe("lastCaptureStatus in inspect snapshot", () => {
+	it("shows lastCaptureStatus in formatted output after a handback", () => {
+		const snapshot = buildInspectSnapshot({
+			broker: {
+				control: {
+					listThreads: () => [],
+					listSessionBindings: () => [],
+					listSessions: () => [],
+					getRelayTurnState: () => ({
+						collabId: "collab_inspect_cs",
+						turnOwner: "none" as const,
+						waitingAgent: null,
+						unresolvedHandoffId: null,
+						handoffState: "idle" as const,
+						handoffAgeMs: null,
+					}),
+					getLatestHandedBackHandoff: () => ({
+						handoffId: "handoff_cs",
+						collabId: "collab_inspect_cs",
+						senderAgent: "claude" as const,
+						targetAgent: "codex" as const,
+						requestText: "here is the result",
+						status: "handed_back" as const,
+						captureStatus: "ok" as const,
+						createdAt: "2026-04-10T00:00:00.000Z",
+						acceptedAt: "2026-04-10T00:00:05.000Z",
+						deferredAt: null,
+						resolvedAt: "2026-04-10T00:01:00.000Z",
+						lastActivityAt: "2026-04-10T00:01:00.000Z",
+					}),
+					listWorkItems: () => [],
+					listReplies: () => [],
+				},
+			} as never,
+			state: {
+				version: 5,
+				collabId: "collab_inspect_cs",
+				workspaceRoot: "/tmp",
+				broker: { sqlitePath: "/tmp/b.sqlite", host: "127.0.0.1", port: 4311, pid: 1 },
+				launch: { mode: "none" },
+				ownedSessions: {},
+				startedAt: "2026-04-10T00:00:00.000Z",
+				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+				adoptedSessions: {},
+				mountedSessions: {},
+			},
+			now: "2026-04-10T00:02:00.000Z",
+		});
+
+		expect(snapshot.lastCaptureStatus).toBe("ok");
+
+		const formatted = formatInspectSnapshot({ ...snapshot, watch: false });
+		expect(formatted).toContain("Last capture: ok");
+	});
+
+	it("omits Last capture line when no handed-back handoff exists", () => {
+		const snapshot = buildInspectSnapshot({
+			broker: {
+				control: {
+					listThreads: () => [],
+					listSessionBindings: () => [],
+					listSessions: () => [],
+					getRelayTurnState: () => ({
+						collabId: "collab_inspect_no_cs",
+						turnOwner: "none" as const,
+						waitingAgent: null,
+						unresolvedHandoffId: null,
+						handoffState: "idle" as const,
+						handoffAgeMs: null,
+					}),
+					getLatestHandedBackHandoff: () => null,
+					listWorkItems: () => [],
+					listReplies: () => [],
+				},
+			} as never,
+			state: {
+				version: 5,
+				collabId: "collab_inspect_no_cs",
+				workspaceRoot: "/tmp",
+				broker: { sqlitePath: "/tmp/b.sqlite", host: "127.0.0.1", port: 4311, pid: 1 },
+				launch: { mode: "none" },
+				ownedSessions: {},
+				startedAt: "2026-04-10T00:00:00.000Z",
+				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+				adoptedSessions: {},
+				mountedSessions: {},
+			},
+			now: "2026-04-10T00:02:00.000Z",
+		});
+
+		expect(snapshot.lastCaptureStatus).toBeNull();
+
+		const formatted = formatInspectSnapshot({ ...snapshot, watch: false });
+		expect(formatted).not.toContain("Last capture:");
+	});
+});
+
 describe("mounted operator visibility", () => {
 	it("renders mounted binding source and tty path in inspect output", () => {
 		const output = formatInspectSnapshot({
