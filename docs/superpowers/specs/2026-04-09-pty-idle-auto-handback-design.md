@@ -16,7 +16,9 @@ Full autonomous cycle:
 
 ## Idle Definition
 
-The session is considered idle when **no activity** has occurred for `IDLE_THRESHOLD_MS` (default: 30 000 ms). One constant governs both auto-accept and auto-handback.
+The session is considered idle when **no activity** has occurred for `IDLE_THRESHOLD_MS`. One value governs both auto-accept and auto-handback.
+
+Resolved at session start from env var `AI_WHISPER_IDLE_THRESHOLD_MS` (parsed as integer ms), falling back to 30 000. This allows test harnesses and probe scripts to use short thresholds (e.g. 2 000 ms) without changing production defaults.
 
 Activity resets the clock:
 - Any provider PTY output chunk (`onProviderOutput`)
@@ -97,7 +99,7 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 
 ### `packages/cli/src/runtime/mounted-turn-owned-relay.ts`
 
-- Rename constant to `IDLE_THRESHOLD_MS = 30_000`.
+- Accept `idleThresholdMs: number` in input (no default — caller always passes it).
 - Add `autoAcceptFired` flag (per-handoff, reset on new pending handoff or decline).
 - Add `autoHandbackFired` flag (per-handoff, reset on accept).
 - Add `isPausedInput?: () => boolean` to input type — provided by `mount-session-main.ts` via `() => liveSession.isPaused()`.
@@ -119,6 +121,7 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 
 ### `packages/cli/src/runtime/mount-session-main.ts`
 
+- Resolve `idleThresholdMs = Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? "") || 30_000` at session start.
 - Add `lastActivityAt: number = Date.now()`.
 - Reset `lastActivityAt` in:
   - `interactiveSession.onProviderOutput` handler
@@ -126,11 +129,11 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
   - `onHandoffAccepted` callback passed into `createMountedTurnOwnedRelay`
 - In `ownerRefreshTimer`, after `refreshOwnerView()`, add:
   ```
-  if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
+  if (Date.now() - lastActivityAt >= idleThresholdMs) {
     await mountedTurnRelay.checkIdleActions();
   }
   ```
-- Pass `isPausedInput: () => liveSession.isPaused()` into `createMountedTurnOwnedRelay`.
+- Pass `isPausedInput: () => liveSession.isPaused()` and `idleThresholdMs` into `createMountedTurnOwnedRelay`.
 
 ### `packages/cli/src/runtime/live-session.ts`
 
@@ -145,7 +148,7 @@ if (Date.now() - lastActivityAt >= IDLE_THRESHOLD_MS) {
 
 ## Out of Scope
 
-- Configurable idle threshold per session (always 30s for now).
+- Per-session idle threshold override beyond env var (e.g. broker-level config).
 - Auto-accept for deferred handoffs — deferred means the owner explicitly postponed it, so auto-accept should not override that decision.
 - Orchestrator evaluation of `captureStatus` and forward/re-issue logic (next phase).
 - Any UI feedback during autonomous actions (silent by design).
