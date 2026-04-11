@@ -123,6 +123,10 @@ export function formatStatusPanel(input: {
 	turnOwner: "codex" | "claude" | "none";
 	waitingAgent: "codex" | "claude" | null;
 	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
+	orchestratorEnabled?: boolean;
+	currentRound?: number;
+	maxRounds?: number;
+	chainStatus?: "active" | "done" | "escalated" | "abandoned";
 }): string {
 	const lines: string[] = [];
 
@@ -158,6 +162,9 @@ export function formatStatusPanel(input: {
 	}
 	if (input.handoffState !== "idle") {
 		lines.push(`Handoff: ${input.handoffState.replaceAll("_", " ")}`);
+	}
+	if (input.orchestratorEnabled) {
+		lines.push(`Chain: ${input.chainStatus ?? "done"} (round ${input.currentRound ?? 0}/${input.maxRounds ?? 3})`);
 	}
 
 	return lines.join("\n");
@@ -229,6 +236,10 @@ export function createRelayMonitorRuntime(input: {
 			turnOwner: turn.turnOwner,
 			waitingAgent: turn.waitingAgent,
 			handoffState: turn.handoffState,
+			orchestratorEnabled: turn.orchestratorEnabled,
+			currentRound: turn.currentRound,
+			maxRounds: turn.maxRounds,
+			chainStatus: turn.chainStatus,
 		});
 
 		input.stdout.write(`\n${panel}\n`);

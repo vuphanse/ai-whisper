@@ -204,6 +204,12 @@ The adopted session keeps the provider's terminal surface intact. The background
 
 The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead. The two flags are mutually exclusive.
 
+### Relay Orchestrator
+
+- `AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1` enables post-handback orchestration for the collab created by `whisper collab start`
+- `AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=3` controls forced escalation after repeated loops
+- `ANTHROPIC_API_KEY` is required when orchestrator is enabled because evaluation runs in broker daemon
+
 ## Phase Roadmap
 
 - Phase 1: foundation

@@ -169,6 +169,51 @@ describe("relay monitor", () => {
 		});
 	});
 
+	describe("orchestrator fields in status panel", () => {
+		it("renders chain status and round when orchestratorEnabled is true", () => {
+			const output = formatStatusPanel({
+				providers: [
+					{ name: "claude", health: "online" },
+					{ name: "codex", health: "online" },
+				],
+				collabState: "active",
+				threadCount: 1,
+				activeThreadTitle: "orch test",
+				uptime: "1m",
+				lastRelayAge: null,
+				turnOwner: "none",
+				waitingAgent: null,
+				handoffState: "idle",
+				orchestratorEnabled: true,
+				currentRound: 1,
+				maxRounds: 3,
+				chainStatus: "active",
+			});
+
+			expect(output).toContain("Chain: active (round 1/3)");
+		});
+
+		it("omits chain info when orchestratorEnabled is false", () => {
+			const output = formatStatusPanel({
+				providers: [],
+				collabState: "active",
+				threadCount: 0,
+				activeThreadTitle: null,
+				uptime: "0m",
+				lastRelayAge: null,
+				turnOwner: "none",
+				waitingAgent: null,
+				handoffState: "idle",
+				orchestratorEnabled: false,
+				currentRound: 0,
+				maxRounds: 3,
+				chainStatus: "done",
+			});
+
+			expect(output).not.toContain("Chain:");
+		});
+	});
+
 	describe("createRelayMonitorRuntime", () => {
 		it("writes turn owner line to stdout when turn state is present", async () => {
 			const chunks: string[] = [];
