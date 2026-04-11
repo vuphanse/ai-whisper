@@ -1090,5 +1090,8 @@ export function createControlService(db: Database.Database) {
 		markRelayChainAbandoned(input: { handoffId: string; reason: string; evaluatedAt: string }) {
 			return markRelayChainAbandonedTxn(db, input);
 		},
+		getCollab(collabId: string) {
+			return getCollab(db, collabId);
+		},
 	};
 }
