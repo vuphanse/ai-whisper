@@ -16,7 +16,7 @@ export type RelayOrchestratorVerdict = {
 	verdict: "done" | "loop" | "escalate";
 	confidence: number;
 	reason: string;
-	followUpMessage?: string;
+	followUpMessage?: string | undefined;
 };
 
 const relayOrchestratorVerdictSchema = z.object({

@@ -24,7 +24,7 @@ function captureSpawnBrokerDaemon(
 	spawnBrokerDaemon(sqlitePath, host, port, collabId);
 
 	const calls = spawnMock.mock.calls;
-	const lastCall = calls[calls.length - 1];
+	const lastCall = calls[calls.length - 1]!;
 	const spawnOptions = lastCall[2] as { env: Record<string, string | undefined> };
 
 	return { env: { ...spawnOptions.env } };

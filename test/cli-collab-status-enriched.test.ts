@@ -284,10 +284,10 @@ describe("orchestrator fields in status payload", () => {
 		expect(status.active).toBe(true);
 		if (status.active) {
 			expect(status).toMatchObject({
-				orchestratorEnabled: expect.any(Boolean),
-				currentRound: expect.any(Number),
-				maxRounds: expect.any(Number),
-				chainStatus: expect.stringMatching(/^(active|done|escalated|abandoned)$/),
+				orchestratorEnabled: expect.any(Boolean) as boolean,
+				currentRound: expect.any(Number) as number,
+				maxRounds: expect.any(Number) as number,
+				chainStatus: expect.stringMatching(/^(active|done|escalated|abandoned)$/) as string,
 			});
 		}
 	});

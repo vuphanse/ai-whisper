@@ -94,7 +94,7 @@ describe("relay orchestrator", () => {
 		const broker = makeBrokerDouble({ claimable: [makeHandedBack()] });
 		const evaluate = vi.fn(() =>
 			Promise.resolve({
-				verdict: "loop",
+				verdict: "loop" as const,
 				confidence: 0.2,
 				reason: "ambiguous",
 				followUpMessage: "try again",
@@ -107,7 +107,7 @@ describe("relay orchestrator", () => {
 		expect(broker.control.markRelayChainEscalated).toHaveBeenCalledWith(
 			expect.objectContaining({
 				handoffId: "handoff_1",
-				reason: expect.stringContaining("ambiguous"),
+				reason: expect.stringContaining("ambiguous") as string,
 			}),
 		);
 	});
@@ -125,7 +125,7 @@ describe("relay orchestrator", () => {
 		expect(broker.control.markRelayChainEscalated).toHaveBeenCalledWith(
 			expect.objectContaining({
 				handoffId: "handoff_1",
-				reason: expect.stringContaining("max rounds"),
+				reason: expect.stringContaining("max rounds") as string,
 			}),
 		);
 	});
@@ -144,7 +144,7 @@ describe("relay orchestrator", () => {
 		expect(broker.control.markRelayChainEscalated).toHaveBeenCalledWith(
 			expect.objectContaining({
 				handoffId: "handoff_1",
-				reason: expect.stringContaining("LLM evaluation failed after retry"),
+				reason: expect.stringContaining("LLM evaluation failed after retry") as string,
 			}),
 		);
 	});
@@ -153,7 +153,7 @@ describe("relay orchestrator", () => {
 		const broker = makeBrokerDouble({ claimable: [makeHandedBack()] });
 		const evaluate = vi.fn(() =>
 			Promise.resolve({
-				verdict: "escalate",
+				verdict: "escalate" as const,
 				confidence: 0.9,
 				reason: "response is contradictory",
 			}),

@@ -197,7 +197,7 @@ export function createRelayOrchestrator(input: {
 		}, intervalMs);
 	}
 
-	async function stop(): Promise<void> {
+	function stop(): void {
 		if (intervalHandle !== null) {
 			clearInterval(intervalHandle);
 			intervalHandle = null;

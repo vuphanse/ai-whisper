@@ -32,10 +32,10 @@ const orchestrator =
 orchestrator?.start();
 
 async function shutdown(): Promise<void> {
-	await orchestrator?.stop();
+	orchestrator?.stop();
 	await broker.stop();
 	process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());
