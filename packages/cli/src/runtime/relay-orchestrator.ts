@@ -44,6 +44,11 @@ type BrokerLike = {
 			reason: string;
 			evaluatedAt: string;
 		}) => void;
+		cleanupOrchestration: (input: {
+			collabId: string;
+			reason: string;
+			now: string;
+		}) => void;
 	};
 };
 
@@ -165,13 +170,24 @@ export function createRelayOrchestrator(input: {
 			}
 
 			if (verdict.verdict === "loop") {
+				const followUpMessage = "followUpMessage" in verdict ? verdict.followUpMessage : undefined;
+				if (!followUpMessage) {
+					// followUpMessage is required for loop — schema should enforce this,
+					// but escalate defensively if it's absent
+					input.broker.control.markRelayChainEscalated({
+						handoffId: claimed.handoffId,
+						reason: "loop verdict missing followUpMessage",
+						evaluatedAt: now(),
+					});
+					continue;
+				}
 				input.broker.control.createLoopRelayHandoff({
 					handoffId: claimed.handoffId,
 					nextHandoffId: createHandoffId(),
 					requestText: composeLoopRequest({
 						rootRequestText: claimed.rootRequestText ?? claimed.requestText,
 						handbackText: claimed.handbackText ?? "",
-						followUpMessage: verdict.followUpMessage!,
+						followUpMessage,
 					}),
 					reason: verdict.reason,
 					now: now(),
@@ -202,6 +218,11 @@ export function createRelayOrchestrator(input: {
 			clearInterval(intervalHandle);
 			intervalHandle = null;
 		}
+		input.broker.control.cleanupOrchestration({
+			collabId: input.collabId,
+			reason: "collab ended before orchestration finished",
+			now: now(),
+		});
 	}
 
 	return { pollOnce, start, stop };

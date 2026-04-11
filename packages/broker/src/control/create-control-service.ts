@@ -107,6 +107,7 @@ import {
 	resolveRelayChainTxn,
 	markRelayChainEscalatedTxn,
 	markRelayChainAbandonedTxn,
+	cleanupOrchestrationOnShutdownTxn,
 } from "../storage/repositories/relay-handoff-repository.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
@@ -1048,7 +1049,7 @@ export function createControlService(db: Database.Database) {
 		},
 		handoffBackRelay(input: {
 			handoffId: string;
-			nextHandoffId: string;
+			nextHandoffId?: string;
 			senderAgent: "codex" | "claude";
 			targetAgent: "codex" | "claude";
 			requestText: string;
@@ -1089,6 +1090,9 @@ export function createControlService(db: Database.Database) {
 		},
 		markRelayChainAbandoned(input: { handoffId: string; reason: string; evaluatedAt: string }) {
 			return markRelayChainAbandonedTxn(db, input);
+		},
+		cleanupOrchestration(input: { collabId: string; reason: string; now: string }) {
+			return cleanupOrchestrationOnShutdownTxn(db, input);
 		},
 	};
 }

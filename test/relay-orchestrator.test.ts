@@ -54,6 +54,7 @@ function makeBrokerDouble(options: { claimable: RelayHandoffRecord[] }) {
 			markRelayChainEscalated: vi.fn(),
 			resolveRelayChain: vi.fn(),
 			markRelayChainAbandoned: vi.fn(),
+			cleanupOrchestration: vi.fn(),
 		},
 	};
 }

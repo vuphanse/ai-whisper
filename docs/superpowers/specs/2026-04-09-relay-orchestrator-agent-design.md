@@ -71,11 +71,19 @@ interface RelayHandoffOrchestratorState {
   orchestratorStatus: "idle" | "pending" | "processed";
   orchestratorVerdict: "done" | "loop" | "escalate" | null;
   orchestratorReason: string | null;
+  orchestratorClaimedAt: string | null;
   orchestratorEvaluatedAt: string | null;
 }
 ```
 
-Polling should target handed-back records whose `orchestratorStatus !== "processed"` rather than relying only on a process-local last-seen cursor.
+`orchestratorStatus` semantics:
+
+- `idle` = handed back and eligible for orchestration
+- `pending` = atomically claimed by exactly one orchestrator worker, evaluation in progress
+- `processed` = terminal orchestration decision already persisted
+
+Polling should target handed-back records whose `orchestratorStatus === "idle"` rather than relying only on a process-local last-seen cursor.
+Before any LLM call or forced re-issue path runs, the worker must atomically claim the handoff by flipping `idle -> pending` through broker API. If the compare-and-set claim fails, another worker already owns evaluation and this worker must noop.
 
 ---
 
@@ -146,7 +154,7 @@ It is reviewer guidance for next round, not a replacement for durable chain cont
 
 ### Startup
 
-Orchestrator starts alongside the relay, launched by broker daemon or `collab start` when `orchestratorEnabled=true` for the collab. Subscribes to broker handoff events on init via **polling** (broker is SQLite-backed, no native event emitter). Orchestrator polls for newly `handed_back` handoffs at a configurable interval (default 1s), filtering for records whose persisted orchestrator status is not yet `processed`.
+Orchestrator starts alongside the relay, launched by broker daemon or `collab start` when `orchestratorEnabled=true` for the collab. Subscribes to broker handoff events on init via **polling** (broker is SQLite-backed, no native event emitter). Orchestrator polls for newly `handed_back` handoffs at a configurable interval (default 1s), filtering for records whose persisted orchestrator status is `idle`, then atomically claiming them before evaluation.
 
 ### Per-Event Flow
 
@@ -154,7 +162,9 @@ Orchestrator starts alongside the relay, launched by broker daemon or `collab st
 handed_back event received
   → look up handoff record
   → check: orchestratorEnabled for this collab?
-  → call LLM evaluator (async, non-blocking to broker)
+  → broker.claimHandoffForOrchestration(handoffId)? if no → noop
+  → if captureStatus forces re-issue → skip LLM
+    else call LLM evaluator (async, non-blocking to broker)
   → on verdict:
        done      → broker.resolveChain(chainId)
        loop      → broker.createLoopHandoff(sender↔target swapped, composed follow-up request)
@@ -165,9 +175,16 @@ handed_back event received
 
 These methods do not exist today and must be added to the broker:
 
+- `broker.claimHandoffForOrchestration(handoffId)` — atomic compare-and-set claim from `orchestratorStatus: "idle"` to `"pending"`; returns claimed record on success, `null` on contention/no-op
 - `broker.resolveChain(chainId)` — marks chain as `done`, no further orchestrator action
 - `broker.markEscalated(handoffId, reason)` — marks chain as `escalated`, stores verdict metadata, and disables further automatic looping for that chain
 - `broker.createLoopHandoff(...)` — creates next handoff in same chain with incremented round metadata
+
+Any broker method that completes an orchestrator decision must also finalize the claimed handoff's orchestrator bookkeeping in the same broker transaction:
+
+- set `orchestratorStatus = "processed"`
+- persist `orchestratorVerdict`, `orchestratorReason`, and `orchestratorEvaluatedAt`
+- preserve idempotency by making duplicate finalization a noop
 
 ### New Broker State Fields
 
@@ -176,14 +193,14 @@ These methods do not exist today and must be added to the broker:
 orchestratorEnabled: boolean;
 currentRound: number;
 maxRounds: number;
-chainStatus: "active" | "done" | "escalated";
+chainStatus: "active" | "done" | "escalated" | "abandoned";
 ```
 
 `currentRound`, `maxRounds`, and `chainStatus` are read-model summaries. Source of truth for replay, restart, and auditing remains the durable handoff-chain metadata on broker records.
 
 ### Loop Message Composition
 
-When verdict is `loop`, next handoff must preserve original task truth and current review feedback together.
+When verdict is `loop`, next handoff must preserve original task truth and current review feedback together. Two loop paths exist and they are not composed the same way.
 
 The next round should persist:
 
@@ -191,6 +208,10 @@ The next round should persist:
 - `parentHandoffId` = handed-back handoff that was just evaluated
 - incremented `roundNumber`
 - unchanged `rootRequestText`
+
+**Normal LLM-reviewed loop**
+
+Use this when the evaluator returned `verdict === "loop"` with a usable `followUpMessage`.
 
 The operator-visible `requestText` for the next round should be composed in this shape:
 
@@ -206,6 +227,12 @@ Follow-up:
 ```
 
 This keeps later rounds grounded in original request while still surfacing current reviewer guidance.
+
+**Forced re-issue loop**
+
+Use this when `captureStatus === "no_response_captured"` or `captureStatus === "no_response_captured_confidently"`. In this path the orchestrator skips the LLM entirely because there is no trustworthy new deliverable to review.
+
+The operator-visible `requestText` for the next round should be the prior round's `requestText` re-issued unchanged. Do not synthesize a `Latest result` block with empty text, and do not require `followUpMessage`.
 
 ### Escalation Semantics
 
@@ -227,7 +254,7 @@ This keeps operator views read-only while avoiding a dead-end chain state.
 |---|---|
 | LLM call fails | Retry once → if still fails → `escalate` |
 | Orchestrator crashes | Broker state unchanged; human continues with normal manual baton flow |
-| Collab ends mid-chain | Orphaned chain marked `done` on next broker cleanup |
+| Collab ends mid-chain | Orphaned chain marked `abandoned` on next broker cleanup |
 | Two `handed_back` events fire rapidly | Idempotency guard on persisted orchestrator status prevents duplicate evaluation for same handoff |
 
 ---
@@ -256,9 +283,11 @@ The orchestrator does not need to track fixed reviewer/implementer identities. I
 
 - Mock broker API, feed synthetic `handed_back` events
 - Assert correct broker method called per verdict
+- Assert claim step happens before evaluation, and failed claim produces no side effects
 - Assert sender/target swapped on `loop` handoff creation
 - Assert no action when `orchestratorEnabled=false`
 - Assert duplicate polling cannot reprocess already-evaluated handoff
+- Assert forced re-issue loop reuses prior `requestText` unchanged when `captureStatus` is unusable
 - Assert loop handoff preserves `chainId`, `parentHandoffId`, `roundNumber`, and `rootRequestText`
 
 ### Integration — Full Chain
@@ -269,6 +298,7 @@ The orchestrator does not need to track fixed reviewer/implementer identities. I
 - Assert: `done` verdict → chain resolves, no new handoff
 - Assert: escalation cap → `markEscalated` called after N rounds
 - Assert: escalated chain remains visible in operator surfaces while manual relay can continue without special resume command
+- Assert: collab end cleanup marks unfinished chain `abandoned`, not `done`
 
 ### Edge Cases
 
@@ -284,12 +314,12 @@ The orchestrator does not need to track fixed reviewer/implementer identities. I
 
 This spec builds on, and does not replace, mounted relay handoff behavior.
 
-**Manual mode** (default, `AI_WHISPER_IDLE_THRESHOLD_MS` not set or auto-idle disabled):
+**Manual mode** (idle auto-handoff disabled explicitly by runtime configuration):
 - accept / defer / decline are explicit owner actions
 - handback is an explicit human action (`h` key or force `Ctrl+H`)
 - orchestrator begins only after explicit `handed_back`
 
-**Autonomous idle mode** (`AI_WHISPER_IDLE_THRESHOLD_MS` set, idle auto-handoff enabled):
+**Autonomous idle mode** (current default idle spec behavior; `AI_WHISPER_IDLE_THRESHOLD_MS` falls back to `30_000` when unset):
 - accept fires automatically after idle threshold when handoff is pending and session is unattended
 - handback fires automatically after idle threshold once accepted handoff task completes (provider goes quiet)
 - orchestrator still begins only after `handed_back` — trigger source (human vs. autonomous) is transparent to the orchestrator; `captureStatus` on the handoff record distinguishes the two

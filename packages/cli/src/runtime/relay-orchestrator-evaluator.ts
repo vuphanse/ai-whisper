@@ -12,19 +12,21 @@ export type EvaluatorInput = {
 	captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 };
 
-export type RelayOrchestratorVerdict = {
-	verdict: "done" | "loop" | "escalate";
-	confidence: number;
-	reason: string;
-	followUpMessage?: string | undefined;
-};
+export type RelayOrchestratorVerdict =
+	| { verdict: "done"; confidence: number; reason: string }
+	| { verdict: "loop"; confidence: number; reason: string; followUpMessage: string }
+	| { verdict: "escalate"; confidence: number; reason: string };
 
-const relayOrchestratorVerdictSchema = z.object({
-	verdict: z.enum(["done", "loop", "escalate"]),
+const baseFields = {
 	confidence: z.number().min(0).max(1),
 	reason: z.string(),
-	followUpMessage: z.string().optional(),
-});
+};
+
+const relayOrchestratorVerdictSchema = z.discriminatedUnion("verdict", [
+	z.object({ verdict: z.literal("done"), ...baseFields }),
+	z.object({ verdict: z.literal("loop"), ...baseFields, followUpMessage: z.string().min(1) }),
+	z.object({ verdict: z.literal("escalate"), ...baseFields }),
+]);
 
 const SYSTEM_PROMPT = `You are a neutral judge evaluating whether a relay agent has satisfactorily completed the requested task.
 
@@ -76,6 +78,8 @@ export function createRelayOrchestratorEvaluator(input: {
 			.filter((block) => block.type === "text")
 			.map((block) => (block as { type: "text"; text: string }).text)
 			.join("");
-		return relayOrchestratorVerdictSchema.parse(JSON.parse(text));
+		const jsonMatch = text.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) throw new Error("No JSON object found in evaluator response");
+		return relayOrchestratorVerdictSchema.parse(JSON.parse(jsonMatch[0]));
 	};
 }
