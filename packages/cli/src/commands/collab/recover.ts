@@ -28,6 +28,7 @@ export async function runCollabRecover(input: {
 		state.broker.sqlitePath,
 		state.broker.host,
 		state.broker.port,
+		state.collabId,
 	);
 
 	const broker = createBrokerRuntime({

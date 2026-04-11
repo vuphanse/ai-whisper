@@ -8,6 +8,7 @@ export function fakeBrokerSpawn(): (
 	_sqlitePath: string,
 	_host: string,
 	_port: number,
+	_collabId: string,
 ) => number {
 	return () => nextPid++;
 }

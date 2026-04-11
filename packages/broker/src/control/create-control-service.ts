@@ -170,6 +170,9 @@ export function createControlService(db: Database.Database) {
 
 			return collab;
 		},
+		getCollab(collabId: string) {
+			return getCollab(db, collabId);
+		},
 		registerSession(input: {
 			sessionId: string;
 			collabId: string;

@@ -5,19 +5,36 @@
  * starts the HTTP listener, and stays alive.
  */
 import { createBrokerRuntime } from "@ai-whisper/broker";
+import { createRelayOrchestrator } from "../runtime/relay-orchestrator.js";
+import { createRelayOrchestratorEvaluator } from "../runtime/relay-orchestrator-evaluator.js";
 
 const sqlitePath = process.env.AI_WHISPER_BROKER_SQLITE!;
 const host = process.env.AI_WHISPER_BROKER_HOST ?? "127.0.0.1";
 const port = Number(process.env.AI_WHISPER_BROKER_PORT ?? "4311");
+const collabId = process.env.AI_WHISPER_COLLAB_ID!;
 
 const broker = createBrokerRuntime({ sqlitePath, host, port });
 
 await broker.start();
 
-function shutdown(): void {
-	void broker.stop().then(() => {
-		process.exit(0);
-	});
+const collab = broker.control.getCollab(collabId);
+const evaluator =
+	collab?.orchestratorEnabled
+		? createRelayOrchestratorEvaluator({
+				apiKey: process.env.ANTHROPIC_API_KEY!,
+		  })
+		: null;
+const orchestrator =
+	collab?.orchestratorEnabled && evaluator
+		? createRelayOrchestrator({ broker, collabId, evaluate: evaluator })
+		: null;
+
+orchestrator?.start();
+
+async function shutdown(): Promise<void> {
+	await orchestrator?.stop();
+	await broker.stop();
+	process.exit(0);
 }
 
 process.on("SIGTERM", shutdown);

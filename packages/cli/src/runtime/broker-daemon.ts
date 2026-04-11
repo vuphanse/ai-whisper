@@ -67,7 +67,12 @@ export function resolveBrokerDaemonLaunch(metaUrl: string = import.meta.url): {
 	throw new Error("Unable to resolve broker daemon entrypoint.");
 }
 
-export function spawnBrokerDaemon(sqlitePath: string, host: string, port: number): number {
+export function spawnBrokerDaemon(
+	sqlitePath: string,
+	host: string,
+	port: number,
+	collabId: string,
+): number {
 	const launch = resolveBrokerDaemonLaunch();
 	const child = spawn(launch.command, launch.args, {
 		detached: true,
@@ -77,6 +82,7 @@ export function spawnBrokerDaemon(sqlitePath: string, host: string, port: number
 			AI_WHISPER_BROKER_SQLITE: sqlitePath,
 			AI_WHISPER_BROKER_HOST: host,
 			AI_WHISPER_BROKER_PORT: String(port),
+			AI_WHISPER_COLLAB_ID: collabId,
 		},
 	});
 	child.unref();
