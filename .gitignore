@@ -7,3 +7,5 @@ dist
 coverage
 .DS_Store
 *.tsbuildinfo
+.env
+*.sqlite

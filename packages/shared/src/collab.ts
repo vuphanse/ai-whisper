@@ -11,6 +11,8 @@ export const collabSchema = z.object({
 	status: z.enum(collabStates),
 	createdAt: z.string().datetime({ offset: true }),
 	updatedAt: z.string().datetime({ offset: true }),
+	orchestratorEnabled: z.boolean().default(false),
+	orchestratorMaxRounds: z.number().int().min(1).default(3),
 });
 
 export type Collab = z.infer<typeof collabSchema>;

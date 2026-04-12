@@ -9,6 +9,86 @@ function createTestBroker() {
 	});
 }
 
+type TestBroker = ReturnType<typeof createTestBroker>;
+
+function setupOrchestratedChain(
+	broker: TestBroker,
+	overrides: {
+		collabId?: string;
+		handoffId?: string;
+		senderAgent?: "codex" | "claude";
+		targetAgent?: "codex" | "claude";
+		requestText?: string;
+	} = {},
+) {
+	const collabId = overrides.collabId ?? "collab_chain";
+	const handoffId = overrides.handoffId ?? "handoff_root";
+	const senderAgent = overrides.senderAgent ?? "codex";
+	const targetAgent = overrides.targetAgent ?? "claude";
+	const requestText = overrides.requestText ?? "Review spec";
+
+	broker.control.startCollab({
+		collabId,
+		workspaceRoot: "/tmp/test",
+		displayName: "chain",
+		orchestratorEnabled: true,
+		orchestratorMaxRounds: 3,
+		now: "2026-04-11T00:00:00.000Z",
+	});
+
+	broker.control.createRelayHandoff({
+		handoffId,
+		collabId,
+		senderAgent,
+		targetAgent,
+		requestText,
+		now: "2026-04-11T00:00:05.000Z",
+	});
+
+	broker.control.acceptRelayHandoff({
+		handoffId,
+		acceptedAt: "2026-04-11T00:00:10.000Z",
+	});
+
+	broker.control.handoffBackRelay({
+		handoffId,
+		nextHandoffId: `${handoffId}_next_ignored`,
+		senderAgent: targetAgent,
+		targetAgent: senderAgent,
+		requestText: "Work done",
+		now: "2026-04-11T00:01:00.000Z",
+	});
+}
+
+function setupClaimedHandedBackHandoff(
+	broker: TestBroker,
+	overrides: {
+		handoffId?: string;
+		collabId?: string;
+		senderAgent?: "codex" | "claude";
+		targetAgent?: "codex" | "claude";
+		requestText?: string;
+		rootRequestText?: string;
+		handbackText?: string;
+		captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured";
+	} = {},
+) {
+	const handoffId = overrides.handoffId ?? "handoff_root";
+
+	setupOrchestratedChain(broker, {
+		collabId: overrides.collabId ?? "collab_chain",
+		handoffId,
+		senderAgent: overrides.senderAgent ?? "codex",
+		targetAgent: overrides.targetAgent ?? "claude",
+		requestText: overrides.requestText ?? "Review spec",
+	});
+
+	broker.control.claimRelayHandoffForOrchestration({
+		handoffId,
+		claimedAt: "2026-04-11T00:01:30.000Z",
+	});
+}
+
 describe("relay handoff repository", () => {
 	it("accepts, defers, marks stale, declines, and releases the sender", () => {
 		const broker = createTestBroker();
@@ -215,6 +295,40 @@ describe("relay handoff repository", () => {
 		expect(broker.control.getLatestHandedBackHandoff("other_collab")).toBeNull();
 	});
 
+	it("stores chain metadata on the initial relay handoff", () => {
+		const broker = createTestBroker();
+		broker.control.startCollab({
+			collabId: "collab_chain",
+			workspaceRoot: "/tmp/test",
+			displayName: "chain",
+			orchestratorEnabled: true,
+			orchestratorMaxRounds: 3,
+			now: "2026-04-11T00:00:00.000Z",
+		});
+
+		broker.control.createRelayHandoff({
+			handoffId: "handoff_root",
+			collabId: "collab_chain",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Review docs/superpowers/specs/2026-04-09-relay-orchestrator-agent-design.md",
+			now: "2026-04-11T00:00:05.000Z",
+		});
+
+		expect(broker.control.getRelayHandoff("handoff_root")).toEqual(
+			expect.objectContaining({
+				chainId: "handoff_root",
+				parentHandoffId: null,
+				roundNumber: 1,
+				maxRounds: 3,
+				rootRequestText: "Review docs/superpowers/specs/2026-04-09-relay-orchestrator-agent-design.md",
+				handbackText: null,
+				orchestratorStatus: "idle",
+				orchestratorVerdict: null,
+			}),
+		);
+	});
+
 	it("marks unresolved handoff failed on owner disconnect and releases the sender", () => {
 		const broker = createTestBroker();
 
@@ -241,5 +355,96 @@ describe("relay handoff repository", () => {
 
 		expect(broker.control.getRelayTurnState("collab_handoff").turnOwner).toBe("none");
 		expect(broker.control.getRelayHandoff("handoff_1")?.status).toBe("failed");
+	});
+
+	it("claims a handed-back handoff exactly once", () => {
+		const broker = createTestBroker();
+		setupOrchestratedChain(broker);
+
+		const first = broker.control.claimRelayHandoffForOrchestration({
+			handoffId: "handoff_root",
+			claimedAt: "2026-04-11T00:01:00.000Z",
+		});
+		const second = broker.control.claimRelayHandoffForOrchestration({
+			handoffId: "handoff_root",
+			claimedAt: "2026-04-11T00:01:01.000Z",
+		});
+
+		expect(first?.orchestratorStatus).toBe("pending");
+		expect(second).toBeNull();
+	});
+
+	it("re-issues unchanged request text on forced loop when captureStatus is unusable", () => {
+		const broker = createTestBroker();
+		setupClaimedHandedBackHandoff(broker, {
+			handoffId: "handoff_root",
+			requestText: "Review spec",
+		});
+
+		broker.control.createLoopRelayHandoff({
+			handoffId: "handoff_root",
+			nextHandoffId: "handoff_round_2",
+			requestText: "Review spec",
+			reason: "forced re-issue: no response captured",
+			now: "2026-04-11T00:02:00.000Z",
+		});
+
+		expect(broker.control.getRelayHandoff("handoff_round_2")).toEqual(
+			expect.objectContaining({
+				senderAgent: "claude",
+				targetAgent: "codex",
+				parentHandoffId: "handoff_root",
+				roundNumber: 2,
+				requestText: "Review spec",
+			}),
+		);
+		expect(broker.control.getRelayHandoff("handoff_root")).toEqual(
+			expect.objectContaining({
+				orchestratorStatus: "processed",
+				orchestratorVerdict: "loop",
+			}),
+		);
+	});
+
+	it("creates LLM-reviewed loop handoffs with swapped agents and composed request text", () => {
+		const broker = createTestBroker();
+		setupClaimedHandedBackHandoff(broker, {
+			handoffId: "handoff_root",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "Review spec",
+		});
+
+		broker.control.createLoopRelayHandoff({
+			handoffId: "handoff_root",
+			nextHandoffId: "handoff_round_2",
+			requestText:
+				"Original request:\nReview spec\n\nLatest result:\nFound two issues in relay-orchestrator plan.\n\nFollow-up:\nFix retry handling and max-round enforcement.",
+			reason: "reviewer found issues",
+			now: "2026-04-11T00:02:00.000Z",
+		});
+
+		expect(broker.control.getRelayHandoff("handoff_round_2")).toEqual(
+			expect.objectContaining({
+				senderAgent: "claude",
+				targetAgent: "codex",
+				requestText:
+					"Original request:\nReview spec\n\nLatest result:\nFound two issues in relay-orchestrator plan.\n\nFollow-up:\nFix retry handling and max-round enforcement.",
+			}),
+		);
+	});
+
+	it("marks unfinished chains abandoned during cleanup", () => {
+		const broker = createTestBroker();
+		setupClaimedHandedBackHandoff(broker, { handoffId: "handoff_root" });
+
+		broker.control.markRelayChainAbandoned({
+			handoffId: "handoff_root",
+			reason: "collab ended before orchestration finished",
+			evaluatedAt: "2026-04-11T00:03:00.000Z",
+		});
+
+		expect(broker.control.getRelayTurnState("collab_chain").chainStatus).toBe("abandoned");
+		expect(broker.control.getRelayHandoff("handoff_root")?.orchestratorVerdict).toBe("escalate");
 	});
 });

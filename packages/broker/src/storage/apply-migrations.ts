@@ -13,7 +13,9 @@ CREATE TABLE IF NOT EXISTS collab (
   display_name TEXT NOT NULL,
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  orchestrator_enabled INTEGER NOT NULL DEFAULT 0,
+  orchestrator_max_rounds INTEGER NOT NULL DEFAULT 3
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -168,7 +170,11 @@ CREATE TABLE IF NOT EXISTS relay_turn_state (
   waiting_agent TEXT,
   unresolved_handoff_id TEXT,
   handoff_state TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  orchestrator_enabled INTEGER NOT NULL DEFAULT 0,
+  current_round INTEGER NOT NULL DEFAULT 0,
+  max_rounds INTEGER NOT NULL DEFAULT 3,
+  chain_status TEXT NOT NULL DEFAULT 'done'
 );
 
 CREATE TABLE IF NOT EXISTS relay_handoff (
@@ -182,7 +188,18 @@ CREATE TABLE IF NOT EXISTS relay_handoff (
   accepted_at TEXT,
   deferred_at TEXT,
   resolved_at TEXT,
-  last_activity_at TEXT NOT NULL
+  last_activity_at TEXT NOT NULL,
+  capture_status TEXT,
+  chain_id TEXT,
+  parent_handoff_id TEXT,
+  round_number INTEGER,
+  root_request_text TEXT,
+  handback_text TEXT,
+  orchestrator_status TEXT,
+  orchestrator_verdict TEXT,
+  orchestrator_reason TEXT,
+  orchestrator_claimed_at TEXT,
+  orchestrator_evaluated_at TEXT
 );
 
 INSERT INTO broker_state (id, schema_version, migrated)
@@ -240,5 +257,57 @@ export function applyMigrations(db: Database.Database): void {
 		.all() as Array<{ name: string }>;
 	if (!relayHandoffColumns.some((col) => col.name === "capture_status")) {
 		db.exec("ALTER TABLE relay_handoff ADD COLUMN capture_status TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "chain_id")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN chain_id TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "parent_handoff_id")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN parent_handoff_id TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "round_number")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN round_number INTEGER");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "root_request_text")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN root_request_text TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "handback_text")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN handback_text TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_status")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_status TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_verdict")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_verdict TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_reason")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_reason TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_claimed_at")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_claimed_at TEXT");
+	}
+	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_evaluated_at")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_evaluated_at TEXT");
+	}
+
+	const collabColumns = db.prepare("PRAGMA table_info(collab)").all() as Array<{ name: string }>;
+	if (!collabColumns.some((column) => column.name === "orchestrator_enabled")) {
+		db.exec("ALTER TABLE collab ADD COLUMN orchestrator_enabled INTEGER NOT NULL DEFAULT 0");
+	}
+	if (!collabColumns.some((column) => column.name === "orchestrator_max_rounds")) {
+		db.exec("ALTER TABLE collab ADD COLUMN orchestrator_max_rounds INTEGER NOT NULL DEFAULT 3");
+	}
+
+	const relayTurnStateColumns = db.prepare("PRAGMA table_info(relay_turn_state)").all() as Array<{ name: string }>;
+	if (!relayTurnStateColumns.some((column) => column.name === "orchestrator_enabled")) {
+		db.exec("ALTER TABLE relay_turn_state ADD COLUMN orchestrator_enabled INTEGER NOT NULL DEFAULT 0");
+	}
+	if (!relayTurnStateColumns.some((column) => column.name === "current_round")) {
+		db.exec("ALTER TABLE relay_turn_state ADD COLUMN current_round INTEGER NOT NULL DEFAULT 0");
+	}
+	if (!relayTurnStateColumns.some((column) => column.name === "max_rounds")) {
+		db.exec("ALTER TABLE relay_turn_state ADD COLUMN max_rounds INTEGER NOT NULL DEFAULT 3");
+	}
+	if (!relayTurnStateColumns.some((column) => column.name === "chain_status")) {
+		db.exec("ALTER TABLE relay_turn_state ADD COLUMN chain_status TEXT NOT NULL DEFAULT 'done'");
 	}
 }

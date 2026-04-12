@@ -51,6 +51,10 @@ export function buildInspectSnapshot(input: {
 			handoffState: turn.handoffState,
 			handoffAgeMs: turn.handoffAgeMs,
 			lastCaptureStatus,
+			orchestratorEnabled: turn.orchestratorEnabled,
+			currentRound: turn.currentRound,
+			maxRounds: turn.maxRounds,
+			chainStatus: turn.chainStatus,
 		};
 	}
 
@@ -118,6 +122,10 @@ export function buildInspectSnapshot(input: {
 		handoffState: turn.handoffState,
 		handoffAgeMs: turn.handoffAgeMs,
 		lastCaptureStatus,
+		orchestratorEnabled: turn.orchestratorEnabled,
+		currentRound: turn.currentRound,
+		maxRounds: turn.maxRounds,
+		chainStatus: turn.chainStatus,
 	};
 }
 
@@ -162,6 +170,10 @@ export function formatInspectSnapshot(input: {
 	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
 	handoffAgeMs?: number | null;
 	lastCaptureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
+	orchestratorEnabled?: boolean;
+	currentRound?: number;
+	maxRounds?: number;
+	chainStatus?: "active" | "done" | "escalated" | "abandoned";
 }) {
 	const lines = [
 		...(input.watch ? [`Live Inspect (${input.refreshedAt})`] : []),
@@ -178,6 +190,9 @@ export function formatInspectSnapshot(input: {
 		`Handoff state: ${input.handoffState ?? "idle"}`,
 		...(input.handoffAgeMs != null ? [`Handoff age: ${Math.floor(input.handoffAgeMs / 1000)}s`] : []),
 		...(input.lastCaptureStatus != null ? [`Last capture: ${input.lastCaptureStatus}`] : []),
+		`Orchestrator: ${input.orchestratorEnabled ? "yes" : "no"}`,
+		...(input.orchestratorEnabled ? [`Chain status: ${input.chainStatus ?? "done"}`] : []),
+		...(input.orchestratorEnabled ? [`Round: ${input.currentRound ?? 0}/${input.maxRounds ?? 3}`] : []),
 	];
 
 	if (!input.activeThread) {

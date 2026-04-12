@@ -247,6 +247,52 @@ describe("turn-owned relay status", () => {
 	});
 });
 
+describe("orchestrator fields in status payload", () => {
+	it("includes orchestrator read-model fields in status payload", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-status-orch-"));
+		const runtimeDir = join(workspaceRoot, ".ai-whisper", "runtime");
+		mkdirSync(runtimeDir, { recursive: true });
+		const sqlitePath = join(runtimeDir, "broker.sqlite");
+		const collabId = "collab_orch_status";
+		const now = "2026-04-11T00:00:00.000Z";
+
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4333 });
+		broker.control.startCollab({
+			collabId,
+			workspaceRoot,
+			displayName: "orch status test",
+			orchestratorEnabled: true,
+			orchestratorMaxRounds: 5,
+			now,
+		});
+		await broker.stop();
+
+		writeCliCollabState(getStateFilePath(workspaceRoot), {
+			version: 5,
+			collabId,
+			workspaceRoot,
+			broker: { sqlitePath, host: "127.0.0.1", port: 4333, pid: 99123 },
+			launch: { mode: "none" },
+			ownedSessions: {},
+			startedAt: now,
+			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
+			adoptedSessions: {},
+			mountedSessions: {},
+		});
+
+		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
+		expect(status.active).toBe(true);
+		if (status.active) {
+			expect(status).toMatchObject({
+				orchestratorEnabled: expect.any(Boolean) as boolean,
+				currentRound: expect.any(Number) as number,
+				maxRounds: expect.any(Number) as number,
+				chainStatus: expect.stringMatching(/^(active|done|escalated|abandoned)$/) as string,
+			});
+		}
+	});
+});
+
 describe("phase 7c1 status output", () => {
 	it("includes per-role healthState on the status payload for bound roles", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-status-health-"));

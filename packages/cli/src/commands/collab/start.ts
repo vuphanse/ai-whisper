@@ -60,7 +60,7 @@ export async function runCollabStart(input: {
 	attachTmux?: boolean;
 	spawn?: SpawnFn;
 	exec?: ExecFn;
-	spawnBroker?: (sqlitePath: string, host: string, port: number) => number;
+	spawnBroker?: (sqlitePath: string, host: string, port: number, collabId: string) => number;
 	assessBroker?: typeof assessBrokerDaemon;
 	sleep?: (ms: number) => Promise<void>;
 }) {
@@ -87,10 +87,18 @@ export async function runCollabStart(input: {
 
 	const collabId = createCliCollabId(input.now);
 
+	const orchestratorEnabled = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED === "1";
+	const orchestratorMaxRounds = Math.max(
+		1,
+		Number(process.env.AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS ?? "3") || 3,
+	);
+
 	broker.control.startCollab({
 		collabId,
 		workspaceRoot: input.workspaceRoot,
 		displayName: "phase5",
+		orchestratorEnabled,
+		orchestratorMaxRounds,
 		now: input.now,
 	});
 
@@ -99,7 +107,7 @@ export async function runCollabStart(input: {
 		await broker.stop();
 
 		const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
-		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
+		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort, collabId);
 		await waitForBrokerReady({
 			host: brokerHost,
 			port: brokerPort,
@@ -184,7 +192,7 @@ export async function runCollabStart(input: {
 
 	// Spawn long-lived broker daemon
 	const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
-	const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort);
+	const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort, collabId);
 	await waitForBrokerReady({
 		host: brokerHost,
 		port: brokerPort,

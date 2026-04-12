@@ -20,8 +20,10 @@
 		"@ai-whisper/broker": "workspace:*",
 		"@ai-whisper/companion-core": "workspace:*",
 		"@ai-whisper/shared": "workspace:*",
+		"@anthropic-ai/sdk": "^0.88.0",
 		"commander": "^13.1.0",
 		"node-pty": "^1.1.0",
+		"ollama": "^0.6.3",
 		"zod": "^3.24.2"
 	},
 	"scripts": {

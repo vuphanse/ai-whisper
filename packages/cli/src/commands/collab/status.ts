@@ -131,5 +131,9 @@ export async function runCollabStatus(input: {
 		turnOwner: turn.turnOwner,
 		waitingAgent: turn.waitingAgent,
 		handoffState: turn.handoffState,
+		orchestratorEnabled: turn.orchestratorEnabled,
+		currentRound: turn.currentRound,
+		maxRounds: turn.maxRounds,
+		chainStatus: turn.chainStatus,
 	};
 }

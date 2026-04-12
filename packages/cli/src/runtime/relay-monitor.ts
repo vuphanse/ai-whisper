@@ -123,8 +123,12 @@ export function formatStatusPanel(input: {
 	turnOwner: "codex" | "claude" | "none";
 	waitingAgent: "codex" | "claude" | null;
 	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
+	orchestratorEnabled?: boolean;
+	currentRound?: number;
+	maxRounds?: number;
+	chainStatus?: "active" | "done" | "escalated" | "abandoned";
 }): string {
-	const lines: string[] = [];
+	const segments: string[] = [];
 
 	for (const p of input.providers) {
 		const dot =
@@ -139,28 +143,32 @@ export function formatStatusPanel(input: {
 				: p.health === "relay_work"
 					? `${ORANGE}relay work${RESET}`
 					: `${RED}${p.health}${RESET}`;
-		lines.push(`${dot} ${p.name} ${stateLabel}`);
+		segments.push(`${dot} ${p.name} ${stateLabel}`);
 	}
 
-	lines.push("");
-	lines.push(`Collab: ${input.collabState}`);
-	lines.push(`Threads: ${input.threadCount}`);
+	segments.push(`Collab: ${input.collabState}`);
+	segments.push(`Threads: ${input.threadCount}`);
 	if (input.activeThreadTitle) {
-		lines.push(`Active: ${input.activeThreadTitle}`);
+		segments.push(`Active: ${input.activeThreadTitle}`);
 	}
-	lines.push(`Uptime: ${input.uptime}`);
+	if (input.uptime) {
+		segments.push(`Uptime: ${input.uptime}`);
+	}
 	if (input.lastRelayAge) {
-		lines.push(`${GREEN}Last relay: ${input.lastRelayAge}${RESET}`);
+		segments.push(`${GREEN}Last relay: ${input.lastRelayAge}${RESET}`);
 	}
-	lines.push(`Turn owner: ${input.turnOwner}`);
+	segments.push(`Turn owner: ${input.turnOwner}`);
 	if (input.waitingAgent) {
-		lines.push(`Waiting: ${input.waitingAgent}`);
+		segments.push(`Waiting: ${input.waitingAgent}`);
 	}
 	if (input.handoffState !== "idle") {
-		lines.push(`Handoff: ${input.handoffState.replaceAll("_", " ")}`);
+		segments.push(`Handoff: ${input.handoffState.replaceAll("_", " ")}`);
+	}
+	if (input.orchestratorEnabled) {
+		segments.push(`Chain: ${input.chainStatus ?? "done"} (round ${input.currentRound ?? 0}/${input.maxRounds ?? 3})`);
 	}
 
-	return lines.join("\n");
+	return segments.join(" - ");
 }
 
 export function createRelayMonitorRuntime(input: {
@@ -202,7 +210,10 @@ export function createRelayMonitorRuntime(input: {
 			input.collabId,
 			new Date().toISOString(),
 		);
-		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}`;
+		const orchestratorSuffix = turn.orchestratorEnabled
+			? `|${turn.chainStatus}|${turn.currentRound}`
+			: "";
+		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}${orchestratorSuffix}`;
 		if (turnStateKey === previousTurnStateKey) {
 			return;
 		}
@@ -229,6 +240,10 @@ export function createRelayMonitorRuntime(input: {
 			turnOwner: turn.turnOwner,
 			waitingAgent: turn.waitingAgent,
 			handoffState: turn.handoffState,
+			orchestratorEnabled: turn.orchestratorEnabled,
+			currentRound: turn.currentRound,
+			maxRounds: turn.maxRounds,
+			chainStatus: turn.chainStatus,
 		});
 
 		input.stdout.write(`\n${panel}\n`);

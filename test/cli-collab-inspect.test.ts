@@ -664,6 +664,63 @@ describe("lastCaptureStatus in inspect snapshot", () => {
 	});
 });
 
+describe("orchestrator fields in inspect output", () => {
+	it("renders orchestrator enabled, chain status, and round in formatted output when orchestratorEnabled is true", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_orch_inspect",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [
+				{ agentType: "codex", bindingState: "bound", healthState: "healthy" },
+				{ agentType: "claude", bindingState: "bound", healthState: "healthy" },
+			],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-11T00:00:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
+			orchestratorEnabled: true,
+			currentRound: 2,
+			maxRounds: 5,
+			chainStatus: "active",
+		});
+
+		expect(output).toContain("Orchestrator: yes");
+		expect(output).toContain("Chain status: active");
+		expect(output).toContain("Round: 2/5");
+	});
+
+	it("renders orchestrator disabled when orchestratorEnabled is false", () => {
+		const output = formatInspectSnapshot({
+			collabId: "collab_orch_inspect_off",
+			recoveryState: "normal",
+			brokerHealth: "ok",
+			roles: [],
+			activeThread: null,
+			workItems: [],
+			replies: [],
+			flaggedItems: [],
+			watch: false,
+			refreshedAt: "2026-04-11T00:00:00.000Z",
+			turnOwner: "none",
+			waitingAgent: null,
+			handoffState: "idle",
+			orchestratorEnabled: false,
+			currentRound: 0,
+			maxRounds: 3,
+			chainStatus: "done",
+		});
+
+		expect(output).toContain("Orchestrator: no");
+		expect(output).not.toContain("Chain status:");
+		expect(output).not.toContain("Round:");
+	});
+});
+
 describe("mounted operator visibility", () => {
 	it("renders mounted binding source and tty path in inspect output", () => {
 		const output = formatInspectSnapshot({

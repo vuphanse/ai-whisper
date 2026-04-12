@@ -30,6 +30,35 @@ describe("relay turn state repository", () => {
 			unresolvedHandoffId: null,
 			handoffState: "idle",
 			handoffAgeMs: null,
+			orchestratorEnabled: false,
+			currentRound: 0,
+			maxRounds: 3,
+			chainStatus: "done",
+		});
+	});
+
+	it("persists orchestrator config and exposes it through relay turn state", () => {
+		const broker = createTestBroker();
+		broker.control.startCollab({
+			collabId: "collab_turn",
+			workspaceRoot: "/tmp/test",
+			displayName: "turn-owned",
+			orchestratorEnabled: true,
+			orchestratorMaxRounds: 4,
+			now: "2026-04-11T00:00:00.000Z",
+		});
+
+		expect(broker.control.getRelayTurnState("collab_turn")).toEqual({
+			collabId: "collab_turn",
+			turnOwner: "none",
+			waitingAgent: null,
+			unresolvedHandoffId: null,
+			handoffState: "idle",
+			handoffAgeMs: null,
+			orchestratorEnabled: true,
+			currentRound: 0,
+			maxRounds: 4,
+			chainStatus: "done",
 		});
 	});
 
