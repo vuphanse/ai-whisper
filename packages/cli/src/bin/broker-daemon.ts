@@ -4,7 +4,10 @@
  * Reads config from environment variables, opens the broker,
  * starts the HTTP listener, and stays alive.
  */
+import { loadDotEnv } from "../runtime/load-dot-env.js";
 import { createBrokerRuntime } from "@ai-whisper/broker";
+
+loadDotEnv();
 import { createRelayOrchestrator } from "../runtime/relay-orchestrator.js";
 import { createRelayOrchestratorEvaluator } from "../runtime/relay-orchestrator-evaluator.js";
 
