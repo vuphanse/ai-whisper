@@ -1,5 +1,18 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { Ollama } from "ollama";
 import { z } from "zod";
+
+// Minimal structural interface covering only the non-streaming chat path we use.
+// Defined here (not imported from `ollama`) so tests can pass plain mocks without
+// depending on the `ollama` package being hoisted to the root node_modules.
+export type OllamaClientLike = {
+	chat(request: {
+		model: string;
+		messages: Array<{ role: string; content: string }>;
+		format?: Record<string, unknown>;
+		options?: { temperature?: number };
+	}): Promise<{ message: { content: string } }>;
+};
 
 export type EvaluatorInput = {
 	rootRequestText: string;
@@ -53,33 +66,125 @@ Rules:
 - "loop": the agent needs another pass; include followUpMessage
 - "escalate": ambiguous, contradictory, or cannot be evaluated`;
 
-export function createRelayOrchestratorEvaluator(input: {
+// JSON Schema passed to Ollama for constrained decoding — guarantees syntactically
+// valid JSON that matches this shape. Zod validation runs afterwards for semantic checks.
+const VERDICT_JSON_SCHEMA = {
+	type: "object",
+	properties: {
+		verdict: { type: "string", enum: ["done", "loop", "escalate"] },
+		confidence: { type: "number", minimum: 0, maximum: 1 },
+		reason: { type: "string" },
+		followUpMessage: { type: "string" },
+	},
+	required: ["verdict", "confidence", "reason"],
+} as const;
+
+export type AnthropicProviderConfig = {
+	provider: "anthropic";
 	apiKey: string;
 	model?: string;
 	client?: Anthropic;
-}) {
-	const client =
-		input.client ??
-		new Anthropic({
-			apiKey: input.apiKey,
-		});
+};
 
-	return async function evaluateRelayHandoff(
-		payload: EvaluatorInput,
-	): Promise<RelayOrchestratorVerdict> {
+export type OllamaProviderConfig = {
+	provider: "ollama";
+	host?: string;
+	model?: string;
+	client?: OllamaClientLike;
+};
+
+export type EvaluatorProviderConfig = AnthropicProviderConfig | OllamaProviderConfig;
+
+function isProviderUnavailableError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const code = (error as NodeJS.ErrnoException).code;
+	if (
+		code === "ECONNREFUSED" ||
+		code === "ENOTFOUND" ||
+		code === "ETIMEDOUT" ||
+		code === "ECONNRESET"
+	)
+		return true;
+	if ("status" in error && typeof (error as { status: unknown }).status === "number") {
+		const status = (error as { status: number }).status;
+		return status === 429 || status >= 500;
+	}
+	return false;
+}
+
+function parseVerdict(raw: string): RelayOrchestratorVerdict {
+	const jsonMatch = raw.match(/\{[\s\S]*\}/);
+	if (!jsonMatch) throw new Error("No JSON object found in evaluator response");
+	return relayOrchestratorVerdictSchema.parse(JSON.parse(jsonMatch[0]));
+}
+
+function buildAnthropicEvaluator(
+	config: AnthropicProviderConfig,
+): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
+	const client = config.client ?? new Anthropic({ apiKey: config.apiKey });
+	const model = config.model ?? "claude-haiku-4-5-20251001";
+
+	return async function (payload: EvaluatorInput): Promise<RelayOrchestratorVerdict> {
 		const response = await client.messages.create({
-			model: input.model ?? "claude-haiku-4-5-20251001",
+			model,
 			max_tokens: 400,
 			system: SYSTEM_PROMPT,
 			messages: [{ role: "user", content: JSON.stringify(payload) }],
 		});
-
 		const text = response.content
 			.filter((block) => block.type === "text")
 			.map((block) => (block as { type: "text"; text: string }).text)
 			.join("");
-		const jsonMatch = text.match(/\{[\s\S]*\}/);
-		if (!jsonMatch) throw new Error("No JSON object found in evaluator response");
-		return relayOrchestratorVerdictSchema.parse(JSON.parse(jsonMatch[0]));
+		return parseVerdict(text);
+	};
+}
+
+function buildOllamaEvaluator(
+	config: OllamaProviderConfig,
+): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
+	const client: OllamaClientLike =
+		config.client ?? new Ollama({ host: config.host ?? "http://localhost:11434" });
+	const model = config.model ?? "qwen2.5:7b-instruct";
+
+	return async function (payload: EvaluatorInput): Promise<RelayOrchestratorVerdict> {
+		const response = await client.chat({
+			model,
+			messages: [
+				{ role: "system", content: SYSTEM_PROMPT },
+				{ role: "user", content: JSON.stringify(payload) },
+			],
+			format: VERDICT_JSON_SCHEMA,
+			options: { temperature: 0.3 },
+		});
+		return parseVerdict(response.message.content);
+	};
+}
+
+function buildEvaluator(
+	config: EvaluatorProviderConfig,
+): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
+	return config.provider === "anthropic"
+		? buildAnthropicEvaluator(config)
+		: buildOllamaEvaluator(config);
+}
+
+export function createRelayOrchestratorEvaluator(input: {
+	primary: EvaluatorProviderConfig;
+	fallback?: EvaluatorProviderConfig;
+}) {
+	const primaryFn = buildEvaluator(input.primary);
+	const fallbackFn = input.fallback ? buildEvaluator(input.fallback) : null;
+
+	return async function evaluateRelayHandoff(
+		payload: EvaluatorInput,
+	): Promise<RelayOrchestratorVerdict> {
+		try {
+			return await primaryFn(payload);
+		} catch (error) {
+			if (fallbackFn !== null && isProviderUnavailableError(error)) {
+				return await fallbackFn(payload);
+			}
+			throw error;
+		}
 	};
 }
