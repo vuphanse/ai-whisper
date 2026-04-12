@@ -191,7 +191,7 @@ export function createRelayHandoffTxn(
 			orchestratorEnabled,
 			currentRound: orchestratorEnabled ? 1 : 0,
 			maxRounds: collab?.orchestratorMaxRounds ?? 3,
-			chainStatus: "done",
+			chainStatus: orchestratorEnabled ? "active" : "done",
 		});
 
 		return queryRelayHandoff(db, input.handoffId) as RelayHandoffRecord;

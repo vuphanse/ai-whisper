@@ -209,7 +209,10 @@ export function createRelayMonitorRuntime(input: {
 			input.collabId,
 			new Date().toISOString(),
 		);
-		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}`;
+		const orchestratorSuffix = turn.orchestratorEnabled
+			? `|${turn.chainStatus}|${turn.currentRound}`
+			: "";
+		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}${orchestratorSuffix}`;
 		if (turnStateKey === previousTurnStateKey) {
 			return;
 		}
