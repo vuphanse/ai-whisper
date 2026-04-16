@@ -4,13 +4,13 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 6 is complete and delivers the in-session relay workflow on top of the Phase 5 CLI-first MVP: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, and concise inline acknowledgement and reply summaries inside active sessions.
+This repository is being built in incremental phases. Phase 7 is complete and delivers attach, recovery, operator monitoring, terminal-first mounted sessions, adopt workflows, and relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration.
 
 When running from this repo checkout, build first with `pnpm build` and invoke the CLI as `node packages/cli/dist/bin/whisper.js ...`. The `whisper ...` examples below assume a packaged or globally installed CLI.
 
 ## Requirements
 
-Phase 6 interactive sessions require `node-pty`, which is a native dependency. Local installs need a working native build toolchain available to `pnpm install` so the PTY binding can compile or load correctly.
+Interactive sessions (mounted and live-session surfaces) require `node-pty`, which is a native dependency. Local installs need a working native build toolchain available to `pnpm install` so the PTY binding can compile or load correctly.
 
 ## Workspace Commands
 
@@ -204,11 +204,57 @@ The adopted session keeps the provider's terminal surface intact. The background
 
 The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead. The two flags are mutually exclusive.
 
-### Relay Orchestrator
+### Relay Orchestrator (Phase 7F)
 
-- `AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1` enables post-handback orchestration for the collab created by `whisper collab start`
-- `AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=3` controls forced escalation after repeated loops
-- `ANTHROPIC_API_KEY` is required when orchestrator is enabled because evaluation runs in broker daemon
+The relay orchestrator is an opt-in daemon that automates the post-handback judgment loop. After an agent hands back a deliverable, the orchestrator evaluates whether the work satisfies the original request — without requiring human intervention for each round.
+
+#### How it works
+
+1. Agent hands back work → handoff status becomes `handed_back`
+2. Orchestrator polls and atomically claims the handoff
+3. LLM evaluator judges the deliverable against the original request
+4. Verdict determines next action:
+   - **done** — deliverable satisfies request; chain resolves, turn returns to sender
+   - **loop** — further iteration needed; orchestrator creates a new handoff with agents swapped and a composed follow-up message, incrementing the round number
+   - **escalate** — ambiguous or failed evaluation; chain marked escalated, human operator takes over
+
+The orchestrator preserves a stable `chainId` across all rounds, tracks `roundNumber`, and keeps the `rootRequestText` so each evaluation has full context. When `roundNumber` reaches `maxRounds`, the orchestrator forces escalation without calling the LLM.
+
+If the agent response was not reliably captured (PTY failure, timeout), the orchestrator skips the LLM and re-issues the same request unchanged. Verdicts with `confidence < 0.5` are automatically escalated regardless of verdict type.
+
+#### Evaluator providers
+
+The evaluator supports two providers, configurable as primary or fallback:
+
+- **Anthropic** — uses `claude-haiku-4-5-20251001` via the Anthropic API
+- **Ollama** — local models (e.g. `qwen2.5:7b-instruct`)
+
+On network or rate-limit errors, the evaluator retries once with the fallback provider if configured. Validation errors do not trigger fallback.
+
+#### Configuration
+
+```bash
+# Enable orchestrator for the collab
+AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1
+
+# Max rounds before forced escalation (default: 3)
+AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=3
+
+# Evaluator provider: "anthropic" (default) or "ollama"
+AI_WHISPER_EVALUATOR_PROVIDER=anthropic
+
+# Optional fallback provider if primary is unavailable
+AI_WHISPER_EVALUATOR_FALLBACK=ollama
+
+# Anthropic (required when provider or fallback is anthropic)
+ANTHROPIC_API_KEY=sk-...
+
+# Ollama settings
+AI_WHISPER_EVALUATOR_OLLAMA_HOST=http://localhost:11434
+AI_WHISPER_EVALUATOR_OLLAMA_MODEL=qwen2.5:7b-instruct
+```
+
+When orchestrator is disabled (default), the collab uses the traditional manual relay workflow and no LLM calls are made by the broker daemon.
 
 ## Phase Roadmap
 
@@ -217,5 +263,11 @@ The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Us
 - Phase 3: collaboration and thread engine
 - Phase 4: companion runtime and generic provider layer
 - Phase 5: CLI-first MVP
-- Phase 6: in-session relay workflow (completed)
+- Phase 6: in-session relay workflow
 - Phase 7: attach, recovery, and operator tooling
+  - 7A: attach workflow
+  - 7B: recovery workflow
+  - 7C1: operator monitoring
+  - 7D: adopt existing provider sessions
+  - 7E: terminal-first mounted sessions
+  - 7F: relay orchestrator
