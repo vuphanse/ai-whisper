@@ -2,14 +2,20 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORKSPACE="$REPO_ROOT"
+# Use the git common root as workspace so providers run in the full repo context
+# (README.md access, .env loading). In a worktree REPO_ROOT is the worktree dir;
+# git-common-dir resolves to the main repo root regardless.
+_GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
+WORKSPACE="${_GIT_COMMON_DIR%/.git}"
+WORKSPACE="${WORKSPACE:-$REPO_ROOT}"
+unset _GIT_COMMON_DIR
 SOURCE="codex"
 TARGET="claude"
 MESSAGE=""
-IDLE_THRESHOLD_MS="${AI_WHISPER_IDLE_THRESHOLD_MS:-10000}"
+IDLE_THRESHOLD_MS="${AI_WHISPER_IDLE_THRESHOLD_MS:-30000}"
 WAIT_MONITOR_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_MONITOR_MS:-1500}"
 WAIT_MOUNT_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_MOUNT_MS:-8000}"
-WAIT_AFTER_HANDOFF_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_AFTER_HANDOFF_MS:-15000}"
+WAIT_AFTER_HANDOFF_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_AFTER_HANDOFF_MS:-35000}"
 WAIT_FOR_PROVIDER_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_FOR_PROVIDER_MS:-120000}"
 WAIT_FOR_ORCHESTRATOR_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_FOR_ORCHESTRATOR_MS:-15000}"
 NO_BUILD=0
@@ -37,11 +43,11 @@ Options:
   --source <codex|claude>         Sender/initiator provider (default: claude)
   --target <codex|claude>         Receiver provider (default: codex)
   --message <text>                Handoff message (default: "reply with exactly the word: done")
-  --idle-threshold-ms <ms>        Target idle threshold (default: 10000, min 5000)
+  --idle-threshold-ms <ms>        Target idle threshold (default: 30000, min 5000)
   --wait-monitor-ms <ms>          Wait after relay-monitor starts (default: 1500)
   --wait-mount-ms <ms>            Wait after providers mount (default: 8000)
   --wait-after-handoff-ms <ms>    Wait after @@handoff; must exceed idle threshold
-                                  so auto-accept fires (default: 15000)
+                                  so auto-accept fires (default: 35000)
   --wait-for-provider-ms <ms>     Wait for provider to respond and auto-handback
                                   to fire (default: 120000)
   --wait-for-orchestrator-ms <ms> Wait after handback for orchestrator poll +
@@ -150,6 +156,16 @@ fi
 
 if [[ -z "$MESSAGE" ]]; then
   MESSAGE="Summarize the purpose of ai-whisper in 2-3 sentences based on README.md."
+fi
+
+# Load .env from workspace so ANTHROPIC_API_KEY is exported to child processes.
+# The broker daemon inherits process.env from collab start, which inherits from
+# this shell. WORKSPACE already points to the main repo root (see above).
+if [[ -f "$WORKSPACE/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$WORKSPACE/.env"
+  set +a
 fi
 
 cd "$WORKSPACE"

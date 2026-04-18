@@ -45,6 +45,19 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).not.toContain("AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=1");
 	});
 
+	it("resolves WORKSPACE to git common root so worktrees use main repo README.md and .env", () => {
+		const script = readScript();
+		// Running from a worktree: REPO_ROOT is the worktree dir. git-common-dir
+		// resolves the main repo so WORKSPACE=main repo (README.md + .env available).
+		expect(script).toContain("rev-parse --git-common-dir");
+		// WORKSPACE is set before argument parsing so --workspace can override it
+		expect(script).toContain('WORKSPACE="${_GIT_COMMON_DIR%/.git}"');
+		// .env sourced from WORKSPACE (main repo)
+		expect(script).toContain('source "$WORKSPACE/.env"');
+		expect(script).toContain("set -a");
+		expect(script).toContain("set +a");
+	});
+
 	it("defaults source=codex target=claude and requires them to differ", () => {
 		const script = readScript();
 		// claude as default target: direct answers without tool-trace chrome
