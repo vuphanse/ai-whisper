@@ -87,9 +87,9 @@ describe("classifyCapture", () => {
 	});
 
 	it("returns no_response_captured_confidently when jaccard < 0.6 and containment < 0.8", () => {
-		// reversed order → low jaccard; clipboard words not mostly in turn → low containment
-		const turnText = "alpha beta gamma delta epsilon zeta eta theta";
-		const clipText = "theta eta zeta epsilon delta gamma beta alpha";
+		// Completely different vocabulary: no words overlap between clip and turn
+		const turnText = "zebra monkey banana orange apple grape lemon melon";
+		const clipText = "implement approve commit verify tests pass done";
 		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toBe(
 			"no_response_captured_confidently",
 		);
@@ -270,9 +270,10 @@ describe("checkIdleActions: auto-handback captureStatus", () => {
 		);
 	});
 
-	it("calls handoffBackRelay with no_response_captured_confidently when jaccard < 0.6", async () => {
-		const turnText = "alpha beta gamma delta epsilon zeta eta theta";
-		const clipText = "theta eta zeta epsilon delta gamma beta alpha";
+	it("calls handoffBackRelay with no_response_captured_confidently when jaccard < 0.6 and containment < 0.8", async () => {
+		// Completely different vocabulary: no words overlap between clip and turn
+		const turnText = "zebra monkey banana orange apple grape lemon melon";
+		const clipText = "implement approve commit verify tests pass done";
 		const { relay, broker } = makeRelayForIdle({
 			handoffStatus: "accepted",
 			captureHandbackText: async () => clipText,
