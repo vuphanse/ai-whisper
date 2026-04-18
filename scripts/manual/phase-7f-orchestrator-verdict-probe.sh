@@ -149,7 +149,7 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 if [[ -z "$MESSAGE" ]]; then
-  MESSAGE="review the last three lines of README.md and confirm whether the phase roadmap is up to date"
+  MESSAGE="describe phase 7F from the README.md roadmap section in two sentences"
 fi
 
 cd "$WORKSPACE"
@@ -209,7 +209,7 @@ sleep 2
 
 MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor; exec sleep 86400"
 SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=999999 AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
-TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
+TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' AI_WHISPER_DEBUG_CAPTURE='$LOG_DIR/capture-debug.json' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
 
 echo "+ tmux new-session -d -s $SESSION_NAME"
 tmux new-session -d -s "$SESSION_NAME" -n monitor "$MONITOR_CMD"

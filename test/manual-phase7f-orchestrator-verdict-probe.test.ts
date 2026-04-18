@@ -54,14 +54,15 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).toContain("--source and --target must differ");
 	});
 
-	it("defaults message to a realistic multi-word task", () => {
+	it("defaults message to a realistic multi-word task with an unambiguous answer", () => {
 		const script = readScript();
-		// Short one-word responses ("done") produce Jaccard ~0.045 against
-		// chrome-heavy PTY output — below the 0.6 threshold, causing
-		// no_response_captured_confidently. A realistic task forces a
-		// multi-sentence response that overlaps enough with clipboard content.
+		// Message must:
+		// (a) force a substantive response (>= 100 chars) so the substantial-clipboard
+		//     fast path triggers captureStatus=ok on Claude Code's TUI output, and
+		// (b) have a definitive factual answer so the LLM evaluator returns verdict=done
+		//     rather than escalate (open-ended questions with uncertainty invoke escalate).
 		expect(script).toContain(
-			'MESSAGE="review the last three lines of README.md and confirm whether the phase roadmap is up to date"',
+			'MESSAGE="describe phase 7F from the README.md roadmap section in two sentences"',
 		);
 	});
 
