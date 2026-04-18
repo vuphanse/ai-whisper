@@ -65,7 +65,7 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		// Phase 7F descriptions always mention done/loop/escalate (orchestrator verdicts)
 		// which haiku misinterprets even with explicit prompt instructions.
 		expect(script).toContain(
-			'MESSAGE="What is the one-line tagline of this project as shown in README.md?"',
+			'MESSAGE="Summarize the purpose of ai-whisper in 2-3 sentences based on README.md."',
 		);
 	});
 

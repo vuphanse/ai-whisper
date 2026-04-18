@@ -149,7 +149,7 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 if [[ -z "$MESSAGE" ]]; then
-  MESSAGE="What is the one-line tagline of this project as shown in README.md?"
+  MESSAGE="Summarize the purpose of ai-whisper in 2-3 sentences based on README.md."
 fi
 
 cd "$WORKSPACE"
