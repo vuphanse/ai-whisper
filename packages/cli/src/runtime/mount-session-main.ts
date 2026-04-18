@@ -279,9 +279,14 @@ export function createMountSessionRuntime(input: {
 					},
 					captureHandbackText: async () => {
 						return captureClipboardHandback({
-							triggerCopy: () => {
-								return submitInjectedInput("/copy");
+							triggerCopy: () => submitInjectedInput("/copy"),
+							// Some provider versions show a picker after /copy (e.g. Claude Code's
+							// content-type picker). Send Enter to confirm the default selection
+							// if the clipboard has not changed yet after the trigger delay.
+							confirmPicker: () => {
+								writeInjectedInput("mounted-submit-picker", "\r");
 							},
+							triggerDelayMs: 300,
 						});
 					},
 					confirmHandbackCapture: async () => {

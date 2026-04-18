@@ -39,4 +39,52 @@ describe("clipboard handback capture", () => {
 			}),
 		).resolves.toBeNull();
 	});
+
+	it("calls confirmPicker then polls when clipboard has not changed after trigger delay", async () => {
+		const triggerCopy = vi.fn();
+		const confirmPicker = vi.fn();
+		// before, afterTrigger (no change), poll attempt 0 (no change), poll attempt 1 (changed)
+		const readClipboard = vi
+			.fn<() => Promise<string>>()
+			.mockResolvedValueOnce("before")
+			.mockResolvedValueOnce("before")
+			.mockResolvedValueOnce("before")
+			.mockResolvedValueOnce("picked response");
+		const sleep = vi.fn(() => Promise.resolve());
+
+		const result = await captureClipboardHandback({
+			triggerCopy,
+			confirmPicker,
+			readClipboard,
+			sleep,
+			attempts: 3,
+			delayMs: 0,
+		});
+
+		expect(result).toBe("picked response");
+		expect(confirmPicker).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not call confirmPicker when clipboard changes immediately after trigger", async () => {
+		const triggerCopy = vi.fn();
+		const confirmPicker = vi.fn();
+		// before, afterTrigger (changed immediately)
+		const readClipboard = vi
+			.fn<() => Promise<string>>()
+			.mockResolvedValueOnce("before")
+			.mockResolvedValueOnce("instant response");
+		const sleep = vi.fn(() => Promise.resolve());
+
+		const result = await captureClipboardHandback({
+			triggerCopy,
+			confirmPicker,
+			readClipboard,
+			sleep,
+			attempts: 3,
+			delayMs: 0,
+		});
+
+		expect(result).toBe("instant response");
+		expect(confirmPicker).not.toHaveBeenCalled();
+	});
 });
