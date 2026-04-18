@@ -54,15 +54,18 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).toContain("--source and --target must differ");
 	});
 
-	it("defaults message to a realistic multi-word task with an unambiguous answer", () => {
+	it("defaults message to a factual README lookup that cannot produce verdict keywords", () => {
 		const script = readScript();
 		// Message must:
 		// (a) force a substantive response (>= 100 chars) so the substantial-clipboard
 		//     fast path triggers captureStatus=ok on Claude Code's TUI output, and
-		// (b) have a definitive factual answer so the LLM evaluator returns verdict=done
-		//     rather than escalate (open-ended questions with uncertainty invoke escalate).
+		// (b) produce a response with NO verdict keywords ("done", "loop", "escalate")
+		//     so the haiku evaluator is not confused by the response content, and
+		// (c) have a clear unambiguous factual answer so evaluator returns verdict=done.
+		// Phase 7F descriptions always mention done/loop/escalate (orchestrator verdicts)
+		// which haiku misinterprets even with explicit prompt instructions.
 		expect(script).toContain(
-			'MESSAGE="describe phase 7F from the README.md roadmap section in two sentences"',
+			'MESSAGE="What is the one-line tagline of this project as shown in README.md?"',
 		);
 	});
 

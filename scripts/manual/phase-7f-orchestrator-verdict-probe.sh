@@ -149,7 +149,7 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 if [[ -z "$MESSAGE" ]]; then
-  MESSAGE="describe phase 7F from the README.md roadmap section in two sentences"
+  MESSAGE="What is the one-line tagline of this project as shown in README.md?"
 fi
 
 cd "$WORKSPACE"
