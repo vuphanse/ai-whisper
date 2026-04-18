@@ -484,6 +484,21 @@ export function createMountedTurnOwnedRelay(input: {
 			const captureStatus = classifyCapture(turnResult, clipboardText);
 			const requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
 
+			if (process.env["AI_WHISPER_DEBUG_CAPTURE"]) {
+				const { writeFileSync } = await import("node:fs");
+				writeFileSync(
+					process.env["AI_WHISPER_DEBUG_CAPTURE"],
+					JSON.stringify({
+						captureStatus,
+						turnTextLen: (turnResult.text ?? "").length,
+						clipLen: (clipboardText ?? "").length,
+						turnText: turnResult.text,
+						clipText: clipboardText,
+					}, null, 2),
+					"utf8",
+				);
+			}
+
 			// Race guard: original handoff must still be the accepted one after async capture.
 			// A different handoffId means the original was resolved mid-capture; abort silently.
 			if (getAcceptedHandoff()?.handoffId !== accepted.handoffId) return;
