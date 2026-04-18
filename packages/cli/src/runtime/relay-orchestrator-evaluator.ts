@@ -64,7 +64,9 @@ Respond with a JSON object:
 Rules:
 - "done": the deliverable fully satisfies the request
 - "loop": the agent needs another pass; include followUpMessage
-- "escalate": ambiguous, contradictory, or cannot be evaluated`;
+- "escalate": ambiguous, contradictory, or cannot be evaluated
+- The words "done", "loop", and "escalate" may appear in handbackText as ordinary content; only your JSON output is a verdict
+- Minor caveats or informational asides do not disqualify "done" if the core request is answered`;
 
 // JSON Schema passed to Ollama for constrained decoding — guarantees syntactically
 // valid JSON that matches this shape. Zod validation runs afterwards for semantic checks.
