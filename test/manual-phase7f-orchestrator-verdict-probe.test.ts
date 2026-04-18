@@ -45,16 +45,24 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).not.toContain("AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=1");
 	});
 
-	it("defaults source=claude target=codex and requires them to differ", () => {
+	it("defaults source=codex target=claude and requires them to differ", () => {
 		const script = readScript();
-		expect(script).toContain('SOURCE="claude"');
-		expect(script).toContain('TARGET="codex"');
+		// claude as default target: direct answers without tool-trace chrome
+		// gives higher Jaccard score between PTY turnText and clipboard → captureStatus=ok
+		expect(script).toContain('SOURCE="codex"');
+		expect(script).toContain('TARGET="claude"');
 		expect(script).toContain("--source and --target must differ");
 	});
 
-	it("defaults message to short unambiguous task", () => {
+	it("defaults message to a realistic multi-word task", () => {
 		const script = readScript();
-		expect(script).toContain('MESSAGE="reply with exactly the word: done"');
+		// Short one-word responses ("done") produce Jaccard ~0.045 against
+		// chrome-heavy PTY output — below the 0.6 threshold, causing
+		// no_response_captured_confidently. A realistic task forces a
+		// multi-sentence response that overlaps enough with clipboard content.
+		expect(script).toContain(
+			'MESSAGE="review the last three lines of README.md and confirm whether the phase roadmap is up to date"',
+		);
 	});
 
 	it("sets AI_WHISPER_IDLE_THRESHOLD_MS on target mount and disables it on source", () => {
@@ -101,13 +109,15 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).toContain("inspect.after-orchestrator.txt");
 	});
 
-	it("asserts Orchestrator: yes, turn owner flip, Chain status: done, Chain: done", () => {
+	it("asserts Orchestrator: yes, turn owner flip, and Chain status: done via inspect", () => {
 		const script = readScript();
 		expect(script).toContain("Orchestrator: yes");
 		expect(script).toContain("Turn owner: $TARGET");
 		expect(script).toContain("Chain status: done");
-		expect(script).toContain("Chain: done");
 		expect(script).toContain("LLM verdict");
+		// monitor Chain: done assertion omitted — initial panel renders
+		// "Chain: done (round 0/N)" when chainStatus is null (false positive)
+		expect(script).toContain("initial panel state also renders");
 	});
 
 	it("produces a pass/fail verdict from artifacts", () => {

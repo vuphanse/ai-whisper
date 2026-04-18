@@ -3,8 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKSPACE="$REPO_ROOT"
-SOURCE="claude"
-TARGET="codex"
+SOURCE="codex"
+TARGET="claude"
 MESSAGE=""
 IDLE_THRESHOLD_MS="${AI_WHISPER_IDLE_THRESHOLD_MS:-10000}"
 WAIT_MONITOR_MS="${AI_WHISPER_ORCHESTRATOR_PROBE_WAIT_MONITOR_MS:-1500}"
@@ -149,7 +149,7 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 if [[ -z "$MESSAGE" ]]; then
-  MESSAGE="reply with exactly the word: done"
+  MESSAGE="review the last three lines of README.md and confirm whether the phase roadmap is up to date"
 fi
 
 cd "$WORKSPACE"
@@ -291,7 +291,8 @@ echo "idle_threshold_ms=$IDLE_THRESHOLD_MS" | tee -a "$SUMMARY_FILE"
 check_contains "$LOG_DIR/inspect.after-orchestrator.txt" "Orchestrator: yes" "inspect reports Orchestrator: yes"
 check_contains "$LOG_DIR/monitor.after-handoff.txt" "Turn owner: $TARGET" "turn owner flips to target after handoff"
 check_contains "$LOG_DIR/inspect.after-orchestrator.txt" "Chain status: done" "inspect reports Chain status: done (LLM verdict)"
-check_contains "$LOG_DIR/monitor.after-orchestrator.txt" "Chain: done" "monitor reports Chain: done"
+# monitor assertion on Chain: done omitted — initial panel state also renders
+# "Chain: done (round 0/N)" when chainStatus is null, causing false positives.
 
 if [[ "$PROBE_OK" -eq 1 ]]; then
   echo "Probe verdict: PASS" | tee -a "$SUMMARY_FILE"
