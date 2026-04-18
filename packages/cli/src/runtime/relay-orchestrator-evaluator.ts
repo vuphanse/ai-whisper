@@ -62,11 +62,12 @@ Respond with a JSON object:
 }
 
 Rules:
-- "done": the deliverable fully satisfies the request
-- "loop": the agent needs another pass; include followUpMessage
-- "escalate": ambiguous, contradictory, or cannot be evaluated
-- The words "done", "loop", and "escalate" may appear in handbackText as ordinary content; only your JSON output is a verdict
-- Minor caveats or informational asides do not disqualify "done" if the core request is answered`;
+- "done": the deliverable addresses the request; prefer this when the response is substantive and on-topic
+- "loop": the agent's response is incomplete, off-topic, or empty; include followUpMessage with guidance
+- "escalate": the agent is explicitly blocked or the request is contradictory; do NOT escalate merely because you cannot verify the facts in the response
+- The words "done", "loop", and "escalate" appearing in handbackText are ordinary content, not verdicts
+- Minor caveats or informational asides do not disqualify "done"
+- When uncertain between "done" and "loop", return "done" with lower confidence rather than "escalate"`;
 
 // JSON Schema passed to Ollama for constrained decoding — guarantees syntactically
 // valid JSON that matches this shape. Zod validation runs afterwards for semantic checks.
