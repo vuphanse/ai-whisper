@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	createMountedTurnOwnedRelay,
 	computeOrderedJaccard,
+	computeContainment,
 	classifyCapture,
 } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 
@@ -35,6 +36,35 @@ describe("computeOrderedJaccard", () => {
 	});
 });
 
+describe("computeContainment", () => {
+	it("returns 1.0 when all clipboard words appear in turn text", () => {
+		expect(computeContainment("done", "done harmonizing clipboard update")).toBeCloseTo(1.0);
+	});
+
+	it("returns partial score when only some clipboard words appear in turn text", () => {
+		// "review" and "roadmap" appear; "missing" does not
+		const clip = "review roadmap missing";
+		const turn = "review the roadmap carefully for updates";
+		expect(computeContainment(clip, turn)).toBeCloseTo(2 / 3, 2);
+	});
+
+	it("returns 0 when no clipboard words appear in turn text", () => {
+		expect(computeContainment("unrelated word here", "completely different output")).toBe(0);
+	});
+
+	it("returns 0 when clipboard has no words of length >= 4", () => {
+		expect(computeContainment("hi ok", "some longer turn text here")).toBe(0);
+	});
+
+	it("returns 0 when clipboard is empty", () => {
+		expect(computeContainment("", "some turn text here")).toBe(0);
+	});
+
+	it("is case-insensitive", () => {
+		expect(computeContainment("DONE", "done harmonizing")).toBeCloseTo(1.0);
+	});
+});
+
 describe("classifyCapture", () => {
 	it("returns no_response_captured when both signals empty", () => {
 		expect(classifyCapture({ confidence: "low", text: null }, null)).toBe(
@@ -56,12 +86,22 @@ describe("classifyCapture", () => {
 		).toBe("no_response_captured_confidently");
 	});
 
-	it("returns no_response_captured_confidently when jaccard < 0.6", () => {
+	it("returns no_response_captured_confidently when jaccard < 0.6 and containment < 0.8", () => {
+		// reversed order → low jaccard; clipboard words not mostly in turn → low containment
 		const turnText = "alpha beta gamma delta epsilon zeta eta theta";
 		const clipText = "theta eta zeta epsilon delta gamma beta alpha";
 		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toBe(
 			"no_response_captured_confidently",
 		);
+	});
+
+	it("returns ok via containment when clipboard words are mostly present in verbose PTY output", () => {
+		// Simulates real provider terminal: short response + chrome tokens
+		const turnText =
+			"done harmonizing clipboard copied characters lines written update available upgrade";
+		const clipText = "done";
+		// jaccard = 1/10 = 0.1 < 0.6, but containment = 1/1 = 1.0 >= 0.8 → ok
+		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toBe("ok");
 	});
 
 	it("returns no_response_captured_confidently when clipboard is empty but turn text exists", () => {

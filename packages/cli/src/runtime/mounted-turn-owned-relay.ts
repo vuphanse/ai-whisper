@@ -96,6 +96,20 @@ export function computeOrderedJaccard(a: string, b: string): number {
 	return jaccard * (lcs / shorter);
 }
 
+export function computeContainment(clip: string, turn: string): number {
+	const normalize = (t: string) => t.trim().replace(/\s+/g, " ").toLowerCase();
+	const extractWords = (t: string) =>
+		normalize(t)
+			.split(" ")
+			.filter((w) => w.length >= 4);
+
+	const clipWords = extractWords(clip);
+	if (clipWords.length === 0) return 0;
+	const turnSet = new Set(extractWords(turn));
+	const matched = clipWords.filter((w) => turnSet.has(w)).length;
+	return matched / clipWords.length;
+}
+
 export function classifyCapture(
 	turnResult: { confidence: "high" | "low"; text: string | null },
 	clipboardText: string | null,
@@ -109,7 +123,8 @@ export function classifyCapture(
 	if (
 		turnResult.confidence === "high" &&
 		clipText.trim().length > 0 &&
-		computeOrderedJaccard(turnText, clipText) >= 0.6
+		(computeOrderedJaccard(turnText, clipText) >= 0.6 ||
+			computeContainment(clipText, turnText) >= 0.8)
 	) {
 		return "ok";
 	}
