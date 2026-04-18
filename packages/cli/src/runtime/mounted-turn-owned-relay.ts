@@ -120,14 +120,27 @@ export function classifyCapture(
 	if (turnText.trim().length === 0 && clipText.trim().length === 0) {
 		return "no_response_captured";
 	}
-	if (
-		turnResult.confidence === "high" &&
-		clipText.trim().length > 0 &&
-		(computeOrderedJaccard(turnText, clipText) >= 0.6 ||
-			computeContainment(clipText, turnText) >= 0.8)
-	) {
-		return "ok";
+
+	if (clipText.trim().length > 0) {
+		// Substantial clipboard (>= 100 chars): trust it as a fresh /copy capture.
+		// Full-screen TUI providers (e.g. Claude Code) produce cursor-positioned PTY
+		// output that normalizeCapturedOutput cannot reconstruct, so PTY similarity
+		// checks always fail even when the response is valid. The clipboard change
+		// detection in captureClipboardHandback already guarantees freshness.
+		if (clipText.trim().length >= 100) {
+			return "ok";
+		}
+
+		// Short clipboard: require PTY similarity to rule out stale or unrelated content.
+		if (
+			turnResult.confidence === "high" &&
+			(computeOrderedJaccard(turnText, clipText) >= 0.6 ||
+				computeContainment(clipText, turnText) >= 0.8)
+		) {
+			return "ok";
+		}
 	}
+
 	return "no_response_captured_confidently";
 }
 

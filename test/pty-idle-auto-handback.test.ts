@@ -80,7 +80,14 @@ describe("classifyCapture", () => {
 		expect(classifyCapture({ confidence: "high", text }, text)).toBe("ok");
 	});
 
-	it("returns no_response_captured_confidently when confidence is low", () => {
+	it("returns ok when clipboard is substantial (>= 100 chars) regardless of PTY confidence", () => {
+		// Simulates full-screen TUI providers (e.g. Claude Code) where PTY text
+		// normalization produces nothing but clipboard holds the real response.
+		const substantialResponse = "a".repeat(100);
+		expect(classifyCapture({ confidence: "low", text: null }, substantialResponse)).toBe("ok");
+	});
+
+	it("returns no_response_captured_confidently when confidence is low and clipboard short", () => {
 		expect(
 			classifyCapture({ confidence: "low", text: "something here" }, "something here"),
 		).toBe("no_response_captured_confidently");
