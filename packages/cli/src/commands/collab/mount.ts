@@ -6,6 +6,9 @@ import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import { resolveCurrentTty } from "../../runtime/adopted-session-target.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
 
+const MONITOR_WAIT_TIMEOUT_MS = 10_000;
+const MONITOR_POLL_INTERVAL_MS = 250;
+
 export async function runCollabMount(input: {
 	workspaceRoot: string;
 	target: "codex" | "claude";
@@ -13,7 +16,18 @@ export async function runCollabMount(input: {
 	resolveCurrentTty?: () => string;
 	createRuntime?: typeof createMountSessionRuntime;
 	assessBroker?: typeof assessBrokerDaemon;
+	sleep?: (ms: number) => Promise<void>;
+	monitorWaitTimeoutMs?: number;
+	monitorPollIntervalMs?: number;
 }) {
+	const sleep =
+		input.sleep ??
+		((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const monitorWaitTimeoutMs =
+		input.monitorWaitTimeoutMs ?? MONITOR_WAIT_TIMEOUT_MS;
+	const monitorPollIntervalMs =
+		input.monitorPollIntervalMs ?? MONITOR_POLL_INTERVAL_MS;
+
 	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
 	if (!state) {
 		throw new Error("No active collab. Run `whisper collab start` first.");
@@ -28,10 +42,15 @@ export async function runCollabMount(input: {
 	});
 	let brokerHandedOff = false;
 	try {
-		if (!broker.control.isRelayMonitorConnected(state.collabId)) {
-			throw new Error(
-				"Relay monitor not connected. Run `whisper collab relay-monitor` in a separate terminal first.",
-			);
+		let elapsed = 0;
+		while (!broker.control.isRelayMonitorConnected(state.collabId)) {
+			if (elapsed >= monitorWaitTimeoutMs) {
+				throw new Error(
+					"Relay monitor not connected. Run `whisper collab relay-monitor` in a separate terminal first.",
+				);
+			}
+			await sleep(monitorPollIntervalMs);
+			elapsed += monitorPollIntervalMs;
 		}
 
 		const current = broker.control

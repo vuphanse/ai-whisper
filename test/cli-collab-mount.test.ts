@@ -15,7 +15,7 @@ const assessBroker = vi.fn(() =>
 );
 
 describe("mount gate — relay monitor check", () => {
-	it("rejects mount when no relay monitor is connected", async () => {
+	it("rejects mount when no relay monitor connects within the timeout", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-gate-"));
 		await runCollabStart({
 			workspaceRoot,
@@ -32,6 +32,9 @@ describe("mount gate — relay monitor check", () => {
 				now: "2026-04-06T10:01:00.000Z",
 				resolveCurrentTty: () => "/dev/ttys031",
 				assessBroker,
+				sleep: () => Promise.resolve(),
+				monitorWaitTimeoutMs: 50,
+				monitorPollIntervalMs: 10,
 			}),
 		).rejects.toThrow("Relay monitor not connected");
 	});
@@ -76,6 +79,57 @@ describe("mount gate — relay monitor check", () => {
 				createRuntime: () => fakeRuntime as never,
 			}),
 		).resolves.toBeUndefined();
+	});
+
+	it("retries and succeeds when monitor registers after the first poll", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-retry-"));
+		await runCollabStart({
+			workspaceRoot,
+			now: "2026-04-06T10:00:00.000Z",
+			launchMode: "none",
+			spawnBroker: fakeBrokerSpawn(),
+			assessBroker,
+		});
+
+		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
+		let pollCount = 0;
+
+		// Register the monitor only after the second poll attempt, simulating
+		// a slow relay-monitor pane startup in default tmux launch.
+		const fakeSleep = async () => {
+			pollCount += 1;
+			if (pollCount === 2) {
+				const broker = createBrokerRuntime({
+					sqlitePath: state.broker.sqlitePath,
+					host: state.broker.host,
+					port: state.broker.port,
+				});
+				broker.control.registerRelayMonitor({
+					collabId: state.collabId,
+					monitorId: "monitor_retry_1",
+					now: new Date().toISOString(),
+				});
+				await broker.stop();
+			}
+		};
+
+		const fakeRuntime = { start: () => Promise.resolve() };
+
+		await expect(
+			runCollabMount({
+				workspaceRoot,
+				target: "codex",
+				now: "2026-04-06T10:01:00.000Z",
+				resolveCurrentTty: () => "/dev/ttys031",
+				assessBroker,
+				createRuntime: () => fakeRuntime as never,
+				sleep: fakeSleep,
+				monitorWaitTimeoutMs: 1000,
+				monitorPollIntervalMs: 10,
+			}),
+		).resolves.toBeUndefined();
+
+		expect(pollCount).toBeGreaterThanOrEqual(2);
 	});
 });
 

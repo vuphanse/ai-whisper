@@ -65,18 +65,25 @@ export function createCli(): Command {
 				forceNoTmux: !opts.tmux,
 				forceNoLaunch: !opts.launch,
 			});
+			const attachTmux =
+				launchMode === "tmux" &&
+				Boolean(process.stdin.isTTY) &&
+				Boolean(process.stdout.isTTY);
 			const result = await runCollabStart({
 				workspaceRoot: opts.workspace,
 				now: new Date().toISOString(),
 				launchMode,
-				attachTmux:
-					launchMode === "tmux" &&
-					Boolean(process.stdin.isTTY) &&
-					Boolean(process.stdout.isTTY),
+				attachTmux,
 			});
 			console.log(
 				`Collab started: ${result.collabId} (launch: ${result.launchMode})`,
 			);
+			if (launchMode === "tmux" && !attachTmux) {
+				const session = `whisper-${result.collabId}`;
+				console.log(
+					`\nNot attached (stdin/stdout is not a TTY). To view the tmux session, run:\n  tmux attach -t ${session}`,
+				);
+			}
 		});
 
 	collab
@@ -297,8 +304,8 @@ export function createCli(): Command {
 		.command("stop")
 		.description("Stop the active collaboration session")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action((opts: WorkspaceOpts) => {
-			const result = runCollabStop({ workspaceRoot: opts.workspace });
+		.action(async (opts: WorkspaceOpts) => {
+			const result = await runCollabStop({ workspaceRoot: opts.workspace });
 			if (result.stopped) {
 				console.log(`Collab stopped: ${result.collabId}`);
 			} else {

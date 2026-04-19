@@ -7,6 +7,7 @@ import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { registerLaunchedBindings } from "./helpers/register-launched-bindings.ts";
 import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
@@ -28,6 +29,10 @@ describe("cli collab status enriched", () => {
 			spawnBroker: fakeBrokerSpawn(),
 			assessBroker: healthyBroker,
 			spawn: () => {},
+		});
+		await registerLaunchedBindings({
+			workspaceRoot,
+			now: "2026-04-03T00:00:00.500Z",
 		});
 
 		await runCollabTell({
@@ -68,6 +73,10 @@ describe("cli collab status enriched", () => {
 			spawnBroker: fakeBrokerSpawn(),
 			assessBroker: healthyBroker,
 			spawn: () => {},
+		});
+		await registerLaunchedBindings({
+			workspaceRoot,
+			now: "2026-04-03T00:00:00.500Z",
 		});
 
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });
@@ -148,6 +157,10 @@ describe("cli collab status enriched", () => {
 			assessBroker: healthyBroker,
 			spawn: () => {},
 		});
+		await registerLaunchedBindings({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.500Z",
+		});
 
 		// Verify broker-down path reads last-known bindings from SQLite
 		const downBroker = vi.fn(() => Promise.resolve({ pidAlive: false as const, httpReachable: false as const, ok: false as const }));
@@ -175,6 +188,10 @@ describe("cli collab status enriched", () => {
 			assessBroker: healthyBroker,
 			spawn: () => {},
 		});
+		await registerLaunchedBindings({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.500Z",
+		});
 
 		const downBroker = vi.fn(() => Promise.resolve({ pidAlive: false as const, httpReachable: false as const, ok: false as const }));
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: downBroker });
@@ -199,6 +216,10 @@ describe("cli collab status enriched", () => {
 			spawnBroker: fakeBrokerSpawn(),
 			assessBroker: healthyBroker,
 			spawn: () => {},
+		});
+		await registerLaunchedBindings({
+			workspaceRoot,
+			now: "2026-04-05T00:00:00.500Z",
 		});
 
 		const status = await runCollabStatus({ workspaceRoot, assessBroker: healthyBroker });

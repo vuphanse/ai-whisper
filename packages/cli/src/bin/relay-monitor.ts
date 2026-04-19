@@ -2,7 +2,17 @@
 import { runCollabRelayMonitor } from "../commands/collab/relay-monitor.js";
 
 const workspaceRoot = process.env.AI_WHISPER_WORKSPACE_ROOT ?? process.cwd();
-runCollabRelayMonitor({ workspaceRoot }).catch((err: unknown) => {
+
+const sqlitePath = process.env.AI_WHISPER_BROKER_SQLITE;
+const host = process.env.AI_WHISPER_BROKER_HOST;
+const portStr = process.env.AI_WHISPER_BROKER_PORT;
+const collabId = process.env.AI_WHISPER_COLLAB_ID;
+const brokerEnv =
+	sqlitePath && host && portStr && collabId
+		? { sqlitePath, host, port: Number(portStr), collabId }
+		: undefined;
+
+runCollabRelayMonitor({ workspaceRoot, ...(brokerEnv ? { brokerEnv } : {}) }).catch((err: unknown) => {
 	console.error(err instanceof Error ? err.message : err);
 	process.exit(1);
 });

@@ -8,7 +8,7 @@ export type SpawnFn = (command: string) => number | void;
 export type ExecFn = (command: string) => void;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const companionAgentPath = resolve(__dirname, "../bin/companion-agent.js");
+const whisperBinPath = resolve(__dirname, "../bin/whisper.js");
 const relayMonitorBinPath = resolve(__dirname, "../bin/relay-monitor.js");
 
 function shellQuote(value: string): string {
@@ -19,19 +19,18 @@ export type LaunchResult = {
 	launched: true;
 	launchMode: LaunchMode;
 	tmuxSession?: string;
-	sessions: {
-		codex: { sessionId: string };
-		claude: { sessionId: string };
-	};
 	commands: {
 		codex: string;
 		claude: string;
+		relayMonitor: string;
 	};
 	runtime: {
 		codexPid?: number;
 		claudePid?: number;
+		relayMonitorPid?: number;
 		codexWindowLabel?: string;
 		claudeWindowLabel?: string;
+		relayMonitorWindowLabel?: string;
 	};
 };
 
@@ -54,19 +53,17 @@ export function chooseLaunchMode(input: {
 	return "terminals";
 }
 
-function buildEnvPrefix(input: {
+function buildBrokerEnvPrefix(input: {
 	brokerSqlitePath: string;
 	brokerHost: string;
 	brokerPort: number;
 	collabId: string;
-	sessionId: string;
 }): string {
 	const explicitEnv = {
 		AI_WHISPER_BROKER_SQLITE: input.brokerSqlitePath,
 		AI_WHISPER_BROKER_HOST: input.brokerHost,
 		AI_WHISPER_BROKER_PORT: String(input.brokerPort),
 		AI_WHISPER_COLLAB_ID: input.collabId,
-		AI_WHISPER_SESSION_ID: input.sessionId,
 	} as const;
 
 	const passthrough = Object.entries(process.env)
@@ -87,11 +84,19 @@ function buildEnvPrefix(input: {
 	].join(" ");
 }
 
-function buildAgentCommand(
+function buildMountCommand(
 	agent: "codex" | "claude",
 	envPrefix: string,
+	workspaceRoot: string,
 ): string {
-	return `${envPrefix} ${shellQuote(process.execPath)} ${shellQuote(companionAgentPath)} ${agent}`;
+	return `${envPrefix} ${shellQuote(process.execPath)} ${shellQuote(whisperBinPath)} collab mount ${agent} --workspace ${shellQuote(workspaceRoot)}`;
+}
+
+function buildRelayMonitorCommand(
+	envPrefix: string,
+	workspaceRoot: string,
+): string {
+	return `AI_WHISPER_WORKSPACE_ROOT=${shellQuote(workspaceRoot)} ${envPrefix} ${shellQuote(process.execPath)} ${shellQuote(relayMonitorBinPath)}`;
 }
 
 function defaultSpawn(command: string): number | undefined {
@@ -124,8 +129,6 @@ export function launchSessions(input: {
 	brokerSqlitePath: string;
 	brokerHost: string;
 	brokerPort: number;
-	codexSessionId: string;
-	claudeSessionId: string;
 	spawn?: SpawnFn;
 	exec?: ExecFn;
 }): LaunchResult {
@@ -136,36 +139,28 @@ export function launchSessions(input: {
 	const run = input.spawn ?? defaultSpawn;
 	const exec = input.exec ?? defaultExec;
 
-	const codexEnv = buildEnvPrefix({
+	const envPrefix = buildBrokerEnvPrefix({
 		brokerSqlitePath: input.brokerSqlitePath,
 		brokerHost: input.brokerHost,
 		brokerPort: input.brokerPort,
 		collabId: input.collabId,
-		sessionId: input.codexSessionId,
-	});
-	const claudeEnv = buildEnvPrefix({
-		brokerSqlitePath: input.brokerSqlitePath,
-		brokerHost: input.brokerHost,
-		brokerPort: input.brokerPort,
-		collabId: input.collabId,
-		sessionId: input.claudeSessionId,
 	});
 
-	const codexCmd = `cd ${shellQuote(input.workspaceRoot)} && ${buildAgentCommand("codex", codexEnv)}`;
-	const claudeCmd = `cd ${shellQuote(input.workspaceRoot)} && ${buildAgentCommand("claude", claudeEnv)}`;
+	const codexCmd = `cd ${shellQuote(input.workspaceRoot)} && ${buildMountCommand("codex", envPrefix, input.workspaceRoot)}`;
+	const claudeCmd = `cd ${shellQuote(input.workspaceRoot)} && ${buildMountCommand("claude", envPrefix, input.workspaceRoot)}`;
+	const relayMonitorCmd = buildRelayMonitorCommand(envPrefix, input.workspaceRoot);
+
 	const codexWindowLabel = "whisper-codex";
 	const claudeWindowLabel = "whisper-claude";
+	const relayMonitorWindowLabel = "whisper-relay-monitor";
 
 	const base: LaunchResult = {
 		launched: true,
 		launchMode: input.launchMode,
-		sessions: {
-			codex: { sessionId: input.codexSessionId },
-			claude: { sessionId: input.claudeSessionId },
-		},
 		commands: {
 			codex: codexCmd,
 			claude: claudeCmd,
+			relayMonitor: relayMonitorCmd,
 		},
 		runtime: {},
 	};
@@ -174,27 +169,40 @@ export function launchSessions(input: {
 		const tmuxSession = `whisper-${input.collabId}`;
 		base.tmuxSession = tmuxSession;
 
+		// Start relay-monitor first so it registers before mount panes poll for it.
+		// Mount panes retry for ~10s, so strict ordering is defensive but still preferred.
 		exec(
-			`tmux new-session -d -s ${shellQuote(tmuxSession)} -n codex sh -lc ${shellQuote(codexCmd)}`,
+			`tmux new-session -d -s ${shellQuote(tmuxSession)} -n main sh -lc ${shellQuote(relayMonitorCmd)}`,
 		);
+		if (process.env.AI_WHISPER_DEBUG_PANES === "1") {
+			exec(`tmux set-option -t ${shellQuote(tmuxSession)} remain-on-exit on`);
+		}
+		// Split vertically at the top, pushing relay-monitor to the bottom 30%.
+		// New top pane runs mount codex.
 		exec(
-			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -h sh -lc ${shellQuote(claudeCmd)}`,
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -vb -l 70% sh -lc ${shellQuote(codexCmd)}`,
 		);
-		const relayMonitorCmd = `AI_WHISPER_WORKSPACE_ROOT=${shellQuote(input.workspaceRoot)} ${shellQuote(process.execPath)} ${shellQuote(relayMonitorBinPath)}`;
+		// Split the codex pane horizontally to add mount claude on the right.
 		exec(
-			`tmux split-window -t ${shellQuote(`${tmuxSession}:0`)} -fv -l 30% sh -lc ${shellQuote(relayMonitorCmd)}`,
+			`tmux split-window -t ${shellQuote(`${tmuxSession}:0.0`)} -h sh -lc ${shellQuote(claudeCmd)}`,
 		);
-		exec(
-			`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`,
-		);
+		exec(`tmux set-option -t ${shellQuote(tmuxSession)} mouse on`);
 		if (input.attachTmux) {
 			exec(`tmux attach -t ${shellQuote(tmuxSession)}`);
 		}
 	} else {
 		base.runtime.codexWindowLabel = codexWindowLabel;
 		base.runtime.claudeWindowLabel = claudeWindowLabel;
+		base.runtime.relayMonitorWindowLabel = relayMonitorWindowLabel;
+		// Start relay-monitor first; mount windows retry until monitor registers.
+		const relayMonitorPid = run(
+			wrapForTerminalWindow(relayMonitorCmd, relayMonitorWindowLabel),
+		);
 		const codexPid = run(wrapForTerminalWindow(codexCmd, codexWindowLabel));
 		const claudePid = run(wrapForTerminalWindow(claudeCmd, claudeWindowLabel));
+		if (typeof relayMonitorPid === "number") {
+			base.runtime.relayMonitorPid = relayMonitorPid;
+		}
 		if (typeof codexPid === "number") {
 			base.runtime.codexPid = codexPid;
 		}

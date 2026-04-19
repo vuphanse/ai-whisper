@@ -1,9 +1,16 @@
 import { execSync } from "node:child_process";
 import { getStateFilePath } from "../../runtime/paths.js";
 import {
+	findPortOwnerPid as defaultFindPortOwnerPid,
+	isPortFree as defaultIsPortFree,
+} from "../../runtime/port-utils.js";
+import {
 	clearCliCollabState,
 	readCliCollabState,
 } from "../../runtime/state-file.js";
+
+const DEFAULT_BROKER_PORT = 4311;
+const SIGTERM_GRACE_MS = 1_000;
 
 function closeTerminalWindow(label: string): void {
 	if (process.platform === "darwin") {
@@ -19,7 +26,42 @@ function closeTerminalWindow(label: string): void {
 	execSync(`pkill -f ${escapedLabel}`, { stdio: "ignore" });
 }
 
-export function runCollabStop(input: { workspaceRoot: string }) {
+function defaultPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function defaultKill(pid: number, signal: NodeJS.Signals): void {
+	try {
+		process.kill(pid, signal);
+	} catch {
+		// Already dead or permission — callers treat as best-effort.
+	}
+}
+
+function defaultSleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function runCollabStop(input: {
+	workspaceRoot: string;
+	killProcess?: (pid: number, signal: NodeJS.Signals) => void;
+	pidAlive?: (pid: number) => boolean;
+	isPortFree?: (port: number) => Promise<boolean>;
+	findPortOwnerPid?: (port: number) => number | null;
+	sleep?: (ms: number) => Promise<void>;
+}) {
+	const kill = input.killProcess ?? defaultKill;
+	const pidAlive = input.pidAlive ?? defaultPidAlive;
+	const isPortFree = input.isPortFree ?? defaultIsPortFree;
+	const findPortOwnerPid =
+		input.findPortOwnerPid ?? defaultFindPortOwnerPid;
+	const sleep = input.sleep ?? defaultSleep;
+
 	const statePath = getStateFilePath(input.workspaceRoot);
 	const state = readCliCollabState(statePath);
 
@@ -40,7 +82,10 @@ export function runCollabStop(input: { workspaceRoot: string }) {
 		}
 	}
 
-	for (const session of [state.ownedSessions.codex, state.ownedSessions.claude]) {
+	for (const session of [
+		state.ownedSessions.codex,
+		state.ownedSessions.claude,
+	]) {
 		if (!session) continue;
 		if (session.windowLabel) {
 			try {
@@ -51,40 +96,46 @@ export function runCollabStop(input: { workspaceRoot: string }) {
 		}
 
 		if (session.pid) {
-			try {
-				process.kill(session.pid, "SIGTERM");
-			} catch {
-				// Process may already be dead.
-			}
+			kill(session.pid, "SIGTERM");
 		}
 	}
 
-	// Kill any running adopted-session daemons
-	for (const session of [state.adoptedSessions.codex, state.adoptedSessions.claude]) {
+	for (const session of [
+		state.adoptedSessions.codex,
+		state.adoptedSessions.claude,
+	]) {
 		if (!session) continue;
-		try {
-			process.kill(session.daemonPid, "SIGTERM");
-		} catch {
-			// Daemon may already be gone.
-		}
+		kill(session.daemonPid, "SIGTERM");
 	}
 
-	// Kill any running mounted-session foreground runtimes
-	for (const session of [state.mountedSessions.codex, state.mountedSessions.claude]) {
+	for (const session of [
+		state.mountedSessions.codex,
+		state.mountedSessions.claude,
+	]) {
 		if (!session) continue;
-		try {
-			process.kill(session.sessionPid, "SIGTERM");
-		} catch {
-			// Session may already be gone.
+		kill(session.sessionPid, "SIGTERM");
+	}
+
+	const brokerPort = state.broker.port ?? DEFAULT_BROKER_PORT;
+	const brokerPid = state.broker.pid;
+
+	if (brokerPid) {
+		kill(brokerPid, "SIGTERM");
+		await sleep(SIGTERM_GRACE_MS);
+		if (pidAlive(brokerPid)) {
+			kill(brokerPid, "SIGKILL");
+			await sleep(100);
 		}
 	}
 
-	// Kill the broker daemon if still running
-	if (state.broker.pid) {
-		try {
-			process.kill(state.broker.pid, "SIGTERM");
-		} catch {
-			// Process may already be dead — that's fine
+	// Port fallback: if :4311 still held after pid kill attempts, find the
+	// owner and SIGKILL it. Covers leaked broker daemons whose pid no longer
+	// matches the state file (e.g. earlier start that crashed without clearing state).
+	if (!(await isPortFree(brokerPort))) {
+		const ownerPid = findPortOwnerPid(brokerPort);
+		if (ownerPid !== null && ownerPid !== brokerPid) {
+			kill(ownerPid, "SIGKILL");
+			await sleep(100);
 		}
 	}
 

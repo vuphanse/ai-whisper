@@ -1,15 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { dirname as pathDirname } from "node:path";
 import { createBrokerRuntime } from "@ai-whisper/broker";
-import { createSessionId } from "@ai-whisper/shared";
 import {
 	assessBrokerDaemon,
 	spawnBrokerDaemon,
 } from "../../runtime/broker-daemon.js";
-import {
-	createCliCollabId,
-	createCliSessionId,
-} from "../../runtime/id-factory.js";
+import { createCliCollabId } from "../../runtime/id-factory.js";
 import {
 	launchSessions,
 	type ExecFn,
@@ -17,6 +13,10 @@ import {
 	type SpawnFn,
 } from "../../runtime/launcher.js";
 import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
+import {
+	findPortOwnerPid as defaultFindPortOwnerPid,
+	isPortFree as defaultIsPortFree,
+} from "../../runtime/port-utils.js";
 import {
 	readCliCollabState,
 	writeCliCollabState,
@@ -63,6 +63,8 @@ export async function runCollabStart(input: {
 	spawnBroker?: (sqlitePath: string, host: string, port: number, collabId: string) => number;
 	assessBroker?: typeof assessBrokerDaemon;
 	sleep?: (ms: number) => Promise<void>;
+	isPortFree?: (port: number) => Promise<boolean>;
+	findPortOwnerPid?: (port: number) => number | null;
 }) {
 	const statePath = getStateFilePath(input.workspaceRoot);
 	const existing = readCliCollabState(statePath);
@@ -75,6 +77,17 @@ export async function runCollabStart(input: {
 	const sqlitePath = getBrokerSqlitePath(input.workspaceRoot);
 	const brokerHost = "127.0.0.1";
 	const brokerPort = 4311;
+
+	const isPortFree = input.isPortFree ?? defaultIsPortFree;
+	const findPortOwnerPid =
+		input.findPortOwnerPid ?? defaultFindPortOwnerPid;
+	if (!(await isPortFree(brokerPort))) {
+		const ownerPid = findPortOwnerPid(brokerPort);
+		const ownerHint = ownerPid !== null ? ` (pid ${ownerPid})` : "";
+		throw new Error(
+			`Port ${brokerPort} is already in use${ownerHint}. A stale broker daemon may be running. Run \`whisper collab stop\` first, or kill the process manually.`,
+		);
+	}
 	const sqliteDir = pathDirname(sqlitePath);
 	mkdirSync(sqliteDir, { recursive: true });
 
@@ -102,95 +115,9 @@ export async function runCollabStart(input: {
 		now: input.now,
 	});
 
-	if (input.launchMode === "none") {
-		// No sessions to register — close in-process broker and spawn daemon
-		await broker.stop();
-
-		const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
-		const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort, collabId);
-		await waitForBrokerReady({
-			host: brokerHost,
-			port: brokerPort,
-			pid: brokerPid,
-			...(input.assessBroker ? { assessBroker: input.assessBroker } : {}),
-			...(input.sleep ? { sleep: input.sleep } : {}),
-		});
-
-		writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-			version: 5,
-			collabId,
-			workspaceRoot: input.workspaceRoot,
-			broker: {
-				sqlitePath,
-				host: brokerHost,
-				port: brokerPort,
-				pid: brokerPid,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: input.now,
-			recovery: {
-				state: "normal",
-				idleAfterRecovery: false,
-				recoveredAt: null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-		console.log(
-			"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
-		);
-		return {
-			collabId,
-			launchMode: "none" as const,
-			launched: false as const,
-			brokerPid,
-		};
-	}
-
-	const codexSessionId = createSessionId(
-		createCliSessionId("codex", input.now),
-	);
-	const claudeSessionId = createSessionId(
-		createCliSessionId("claude", input.now),
-	);
-
-	broker.control.registerSession({
-		sessionId: codexSessionId,
-		collabId,
-		agentType: "codex",
-		capabilities: { supportsDirectPackets: true },
-		now: input.now,
-	});
-
-	broker.control.registerSession({
-		sessionId: claudeSessionId,
-		collabId,
-		agentType: "claude",
-		capabilities: { supportsDirectPackets: true },
-		now: input.now,
-	});
-
-	broker.control.setSessionBinding({
-		collabId,
-		agentType: "codex",
-		sessionId: codexSessionId,
-		bindingSource: "launched",
-		now: input.now,
-	});
-
-	broker.control.setSessionBinding({
-		collabId,
-		agentType: "claude",
-		sessionId: claudeSessionId,
-		bindingSource: "launched",
-		now: input.now,
-	});
-
 	// Close in-process broker so the daemon can claim the SQLite file and port
 	await broker.stop();
 
-	// Spawn long-lived broker daemon
 	const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
 	const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort, collabId);
 	await waitForBrokerReady({
@@ -201,20 +128,10 @@ export async function runCollabStart(input: {
 		...(input.sleep ? { sleep: input.sleep } : {}),
 	});
 
-	const launch = launchSessions({
-		launchMode: input.launchMode,
-		...(input.attachTmux !== undefined ? { attachTmux: input.attachTmux } : {}),
-		collabId,
-		workspaceRoot: input.workspaceRoot,
-		brokerSqlitePath: sqlitePath,
-		brokerHost,
-		brokerPort,
-		codexSessionId,
-		claudeSessionId,
-		...(input.spawn ? { spawn: input.spawn } : {}),
-		...(input.exec ? { exec: input.exec } : {}),
-	});
+	const tmuxSession =
+		input.launchMode === "tmux" ? `whisper-${collabId}` : undefined;
 
+	// Write state file BEFORE launching panes so mount/relay-monitor panes can read it.
 	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
 		version: 5,
 		collabId,
@@ -227,28 +144,9 @@ export async function runCollabStart(input: {
 		},
 		launch: {
 			mode: input.launchMode,
-			...(launch.tmuxSession ? { tmuxSession: launch.tmuxSession } : {}),
+			...(tmuxSession ? { tmuxSession } : {}),
 		},
-		ownedSessions: {
-			codex: {
-				sessionId: codexSessionId,
-				providerId: "openai-codex-cli",
-				launchMode: input.launchMode,
-				...(launch.runtime.codexPid ? { pid: launch.runtime.codexPid } : {}),
-				...(launch.runtime.codexWindowLabel
-					? { windowLabel: launch.runtime.codexWindowLabel }
-					: {}),
-			},
-			claude: {
-				sessionId: claudeSessionId,
-				providerId: "anthropic-claude-cli",
-				launchMode: input.launchMode,
-				...(launch.runtime.claudePid ? { pid: launch.runtime.claudePid } : {}),
-				...(launch.runtime.claudeWindowLabel
-					? { windowLabel: launch.runtime.claudeWindowLabel }
-					: {}),
-			},
-		},
+		ownedSessions: {},
 		startedAt: input.now,
 		recovery: {
 			state: "normal",
@@ -259,12 +157,34 @@ export async function runCollabStart(input: {
 		mountedSessions: {},
 	});
 
+	if (input.launchMode === "none") {
+		console.log(
+			"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
+		);
+		return {
+			collabId,
+			launchMode: "none" as const,
+			launched: false as const,
+			brokerPid,
+		};
+	}
+
+	const launch = launchSessions({
+		launchMode: input.launchMode,
+		...(input.attachTmux !== undefined ? { attachTmux: input.attachTmux } : {}),
+		collabId,
+		workspaceRoot: input.workspaceRoot,
+		brokerSqlitePath: sqlitePath,
+		brokerHost,
+		brokerPort,
+		...(input.spawn ? { spawn: input.spawn } : {}),
+		...(input.exec ? { exec: input.exec } : {}),
+	});
+
 	return {
 		collabId,
 		launchMode: launch.launchMode,
 		launched: launch.launched,
 		brokerPid,
-		codexSessionId: codexSessionId as string,
-		claudeSessionId: claudeSessionId as string,
 	};
 }

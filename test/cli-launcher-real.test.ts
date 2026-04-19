@@ -10,8 +10,6 @@ const baseLaunchInput = {
 	workspaceRoot: "/tmp/test-workspace",
 	brokerHost: "127.0.0.1",
 	brokerPort: 4311,
-	codexSessionId: "session_codex_20260403000000000",
-	claudeSessionId: "session_claude_20260403000000000",
 };
 
 describe("launcher real behavior", () => {
@@ -22,8 +20,8 @@ describe("launcher real behavior", () => {
 		});
 	});
 
-	describe("agent command identity binding", () => {
-		it("commands include broker endpoint, sqlite path, and session identity as env vars", () => {
+	describe("mount command identity binding", () => {
+		it("commands include broker endpoint, sqlite path, and collab id as env vars, and invoke mount", () => {
 			const result = launchSessions({
 				launchMode: "terminals",
 				...baseLaunchInput,
@@ -32,7 +30,9 @@ describe("launcher real behavior", () => {
 				spawn: () => {},
 			});
 
-			expect(result.commands.codex).toContain("companion-agent.js");
+			expect(result.commands.codex).toContain("collab mount codex");
+			expect(result.commands.claude).toContain("collab mount claude");
+			expect(result.commands.relayMonitor).toContain("relay-monitor");
 			expect(result.commands.codex).toContain(
 				"AI_WHISPER_BROKER_HOST='127.0.0.1'",
 			);
@@ -43,13 +43,8 @@ describe("launcher real behavior", () => {
 			expect(result.commands.codex).toContain(
 				"AI_WHISPER_COLLAB_ID='collab_20260403000000000'",
 			);
-			expect(result.commands.codex).toContain(
-				"AI_WHISPER_SESSION_ID='session_codex_20260403000000000'",
-			);
-
-			expect(result.commands.claude).toContain(
-				"AI_WHISPER_SESSION_ID='session_claude_20260403000000000'",
-			);
+			// Mount resolves bindings via broker at runtime — no session id needed at launch.
+			expect(result.commands.codex).not.toContain("AI_WHISPER_SESSION_ID=");
 		});
 
 		it("passes through additional AI_WHISPER environment variables to launched sessions", () => {
@@ -82,7 +77,7 @@ describe("launcher real behavior", () => {
 	});
 
 	describe("terminals mode", () => {
-		it("spawns two terminal processes via osascript on darwin", () => {
+		it("spawns three terminal processes: relay-monitor + mount codex + mount claude", () => {
 			const spawned: string[] = [];
 			const fakeSpawn: SpawnFn = (command) => {
 				spawned.push(command);
@@ -98,9 +93,14 @@ describe("launcher real behavior", () => {
 
 			expect(result.launched).toBe(true);
 			expect(result.launchMode).toBe("terminals");
-			expect(spawned).toHaveLength(2);
+			expect(spawned).toHaveLength(3);
 			expect(result.runtime.codexWindowLabel).toBe("whisper-codex");
 			expect(result.runtime.claudeWindowLabel).toBe("whisper-claude");
+			expect(result.runtime.relayMonitorWindowLabel).toBe("whisper-relay-monitor");
+			// relay-monitor must start first so mount panes find the monitor on their first poll
+			expect(spawned[0]).toMatch(/relay-monitor/);
+			expect(spawned[1]).toMatch(/collab mount codex/);
+			expect(spawned[2]).toMatch(/collab mount claude/);
 			for (const cmd of spawned) {
 				if (process.platform === "darwin") {
 					expect(cmd).toMatch(/osascript/);
@@ -108,7 +108,6 @@ describe("launcher real behavior", () => {
 				} else {
 					expect(cmd).toMatch(/x-terminal-emulator|xterm/);
 				}
-				expect(cmd).toMatch(/companion-agent\.js/);
 			}
 		});
 	});
@@ -134,12 +133,14 @@ describe("launcher real behavior", () => {
 			expect(result.launched).toBe(true);
 			expect(result.launchMode).toBe("tmux");
 			expect(execed).toHaveLength(4);
+			// relay-monitor starts first as the initial pane so it registers
+			// before the mount panes poll for the monitor connection.
 			expect(execed[0]).toContain("tmux new-session");
+			expect(execed[0]).toContain("relay-monitor");
 			expect(execed[1]).toContain("tmux split-window");
-			expect(execed[1]).toContain(":0");
-			expect(execed[1]).not.toContain(":codex");
+			expect(execed[1]).toContain("collab mount codex");
 			expect(execed[2]).toContain("tmux split-window");
-			expect(execed[2]).toContain("relay-monitor");
+			expect(execed[2]).toContain("collab mount claude");
 			expect(execed[3]).toContain("tmux set-option");
 			expect(execed[3]).toContain("mouse on");
 		});

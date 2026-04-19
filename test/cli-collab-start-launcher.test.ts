@@ -44,7 +44,7 @@ describe("cli collab start launcher integration", () => {
 		});
 	});
 
-	it("creates relay monitor pane in tmux layout", async () => {
+	it("starts relay-monitor as the initial tmux pane so mount panes find it", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-start-tmux-relay-"));
 		const executedCommands: string[] = [];
 
@@ -58,18 +58,24 @@ describe("cli collab start launcher integration", () => {
 			exec: (cmd) => { executedCommands.push(cmd); },
 		});
 
-		// Should have a split-window -v for the relay monitor bottom pane
-		const relayPaneCmd = executedCommands.find((cmd) => cmd.includes("relay-monitor"));
-		expect(relayPaneCmd).toBeDefined();
-
 		// Single relay pane only
 		const relayPaneCmds = executedCommands.filter((cmd) => cmd.includes("relay-monitor"));
 		expect(relayPaneCmds).toHaveLength(1);
 
-		// Relay pane should be full-width vertical split at bottom
-		expect(relayPaneCmd).toContain("split-window");
-		expect(relayPaneCmd).toContain("-fv");
-		expect(relayPaneCmd).toContain("-l 30%");
-		expect(relayPaneCmd).toContain("AI_WHISPER_WORKSPACE_ROOT=");
+		// The relay pane is spawned as the initial tmux session so it heartbeats
+		// before mount panes poll isRelayMonitorConnected().
+		const initialSession = executedCommands.find((cmd) =>
+			cmd.startsWith("tmux new-session"),
+		);
+		expect(initialSession).toBeDefined();
+		expect(initialSession).toContain("relay-monitor");
+		expect(initialSession).toContain("AI_WHISPER_WORKSPACE_ROOT=");
+
+		// Mount panes are created via split-window after relay-monitor is up.
+		const splits = executedCommands.filter((cmd) =>
+			cmd.startsWith("tmux split-window"),
+		);
+		expect(splits.some((cmd) => cmd.includes("collab mount codex"))).toBe(true);
+		expect(splits.some((cmd) => cmd.includes("collab mount claude"))).toBe(true);
 	});
 });

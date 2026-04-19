@@ -25,13 +25,15 @@ describe("cli launcher integration", () => {
 		expect(result).toMatchObject({
 			collabId: expect.stringMatching(/^collab_/) as unknown,
 			launchMode: "terminals",
-			codexSessionId: expect.stringMatching(/^session_/) as unknown,
-			claudeSessionId: expect.stringMatching(/^session_/) as unknown,
 			launched: true,
 		});
+		// Start no longer pre-registers sessions — mount runtime binds them when
+		// the mount panes finish claiming their TTY.
+		expect(result).not.toHaveProperty("codexSessionId");
+		expect(result).not.toHaveProperty("claudeSessionId");
 	});
 
-	it("state file records the launch mode for each session", async () => {
+	it("state file records the launch mode and broker info with empty ownedSessions", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-launcher-state-"),
 		);
@@ -47,7 +49,10 @@ describe("cli launcher integration", () => {
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));
-		expect(state?.ownedSessions.codex?.launchMode).toBe("tmux");
-		expect(state?.ownedSessions.claude?.launchMode).toBe("tmux");
+		expect(state?.launch.mode).toBe("tmux");
+		expect(state?.launch.tmuxSession).toMatch(/^whisper-collab_/);
+		// ownedSessions stays empty — mountedSessions is populated when mount
+		// panes complete their attach claim.
+		expect(state?.ownedSessions).toEqual({});
 	});
 });

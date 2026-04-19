@@ -40,7 +40,7 @@ describe("broker lifecycle", () => {
 			spawn: () => {},
 		});
 
-		const result = runCollabStop({ workspaceRoot });
+		const result = await runCollabStop({ workspaceRoot });
 		expect(result.stopped).toBe(true);
 		expect(readCliCollabState(getStateFilePath(workspaceRoot))).toBeNull();
 	});

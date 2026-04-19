@@ -25,7 +25,7 @@ describe("cli collab lifecycle", () => {
 			workspaceRoot,
 		});
 
-		expect(runCollabStop({ workspaceRoot })).toMatchObject({
+		expect(await runCollabStop({ workspaceRoot })).toMatchObject({
 			stopped: true,
 		});
 	});

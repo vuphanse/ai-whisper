@@ -72,12 +72,12 @@ describe("cli edge cases", () => {
 	});
 
 	// Edge case 3: stop when no collab is active
-	it("stop returns stopped:false when no collab is active", () => {
+	it("stop returns stopped:false when no collab is active", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-edge-stop-empty-"),
 		);
 
-		const result = runCollabStop({ workspaceRoot });
+		const result = await runCollabStop({ workspaceRoot });
 
 		expect(result).toEqual({ stopped: false, message: "No active collab." });
 	});
