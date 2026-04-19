@@ -222,6 +222,145 @@ The orchestrator preserves a stable `chainId` across all rounds, tracks `roundNu
 
 If the agent response was not reliably captured (PTY failure, timeout), the orchestrator skips the LLM and re-issues the same request unchanged. Verdicts with `confidence < 0.5` are automatically escalated regardless of verdict type.
 
+#### Automated handoff cycle in mounted sessions
+
+Mounted sessions drive the orchestrated loop without operator keypresses. Two idle-triggered behaviours fire based on `AI_WHISPER_IDLE_THRESHOLD_MS` (default 30 s):
+
+**Auto-accept** — when a pending handoff arrives and the provider has been idle for the threshold, the mounted runtime injects the request text into the active provider session as if the operator had pressed `a`. The provider starts working immediately.
+
+**Auto-handback** — when the provider finishes and goes idle again for the threshold, the mounted runtime triggers `/copy` to capture the response from the provider's clipboard, then hands it back automatically. No `h` keypress needed.
+
+The threshold must be longer than the LLM's typical response-start latency. If auto-handback fires before the provider has produced any output, the capture is empty and the orchestrator re-issues the request unchanged (see [Capture status](#capture-status)).
+
+To disable auto-accept or auto-handback on a specific mount, set the threshold very high (`AI_WHISPER_IDLE_THRESHOLD_MS=999999`) so the automation never fires; the operator can then accept and hand back manually with `a` and `h` as usual.
+
+#### Complete end-to-end walkthrough
+
+Startup (three panes recommended):
+
+```bash
+# pane 1 — operator monitor
+whisper collab relay-monitor
+
+# pane 2 — codex tab
+whisper collab mount codex
+
+# pane 3 — claude tab
+whisper collab mount claude
+```
+
+Initiate the chain from codex:
+
+```text
+@@claude implement the logging helper described in docs/spec.md
+```
+
+What you see in the relay-monitor pane as the cycle runs:
+
+```
+08:46:03  [codex] → [claude]:
+  implement the logging helper described in docs/spec.md
+08:46:03  [ai-whisper] Handed turn to claude.
+
+● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: pending - Chain: active (round 1/3)
+
+  (claude's idle threshold passes — auto-accept fires)
+
+● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: accepted - Chain: active (round 1/3)
+
+  (claude works, goes idle — auto-handback fires, clipboard captured, orchestrator evaluates)
+
+● codex online - ● claude online - Turn owner: codex - Chain: active (round 1/3)
+
+  (haiku returns verdict=done)
+
+● codex online - ● claude online - Turn owner: codex - Chain: done (round 1/3)
+```
+
+If haiku returns `loop`, the monitor shows a new round starting:
+
+```
+● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: pending - Chain: active (round 2/3)
+```
+
+The composed follow-up message (combining original request + claude's partial result + haiku's guidance) is injected into the new handoff. Codex's waiting gate re-blocks and the cycle repeats.
+
+#### Reading chain state
+
+Use `whisper collab inspect` at any point:
+
+```
+Collab: collab_20260418084548371
+Recovery: normal
+Broker: ok
+Roles:
+  - codex: bound (healthy) [mounted] tty=/dev/ttys001
+  - claude: bound (healthy) [mounted] tty=/dev/ttys015
+Turn owner: codex
+Waiting: none
+Handoff state: idle
+Last capture: ok
+Orchestrator: yes
+Chain status: done
+Round: 1/3
+Active Thread: none
+```
+
+Key fields when orchestrator is enabled:
+
+| Field | Meaning |
+|-------|---------|
+| `Orchestrator: yes` | Broker daemon has the evaluator running for this collab |
+| `Chain status: active` | A round is in progress or handoff is pending orchestrator claim |
+| `Chain status: done` | Haiku returned `done`; chain resolved; no further action needed |
+| `Chain status: escalated` | Orchestrator could not resolve; human operator must intervene |
+| `Round: N/M` | Current round number / `maxRounds` ceiling |
+| `Last capture: ok` | Most recent handback was captured reliably and sent to LLM |
+| `Last capture: no_response_captured` | Provider produced nothing; request will be re-issued |
+
+#### Capture status
+
+Before calling the LLM, the orchestrator checks whether the provider's response was reliably captured from the PTY or clipboard. The capture status is set during auto-handback and stored on the handoff record:
+
+| Status | What happened | Orchestrator action |
+|--------|--------------|---------------------|
+| `ok` | Clipboard change detected and content is ≥ 100 chars, or PTY similarity confirms the clipboard matches the visible turn | Sends captured text to LLM evaluator |
+| `no_response_captured_confidently` | Clipboard changed but content is too short or does not match PTY output (possible stale clipboard) | Skips LLM; re-issues original request unchanged (increments round) |
+| `no_response_captured` | Provider produced no clipboard content and PTY captured nothing | Skips LLM; re-issues original request unchanged (increments round) |
+
+Forced re-issues count toward `maxRounds`. If the provider consistently fails to produce capturable output (e.g. verbose tool-trace output that confuses the similarity check), the chain will exhaust its rounds and escalate.
+
+#### When the chain escalates
+
+`Chain status: escalated` means the orchestrator stopped the automated loop. This happens when:
+
+- `maxRounds` was reached before haiku returned `done`
+- Haiku returned `verdict=escalate` (agent reported being blocked or contradictory request)
+- Haiku returned any verdict with `confidence < 0.5`
+- The LLM evaluator threw an error on both the primary attempt and retry
+
+When escalation occurs:
+- Turn ownership returns to the **original sender** (the agent who sent the first `@@` in the chain)
+- Both agents are unblocked; no pending handoff remains
+- The relay-monitor pane shows `Chain: escalated (round N/M)`
+
+**Operator recovery steps:**
+
+1. Run `whisper collab inspect` to see which round it escalated on and the reason (stored as the chain status detail in the broker)
+2. Open the relay-monitor log to review what each round attempted
+3. Decide whether to:
+   - Fix the request and resend: from the sender's mounted tab, type `@@<target> <revised request>` — this starts a fresh chain
+   - Check the target provider's state manually: switch to the target's tab, review what it produced, and copy the relevant output yourself before sending the next handoff
+   - Increase `maxRounds` in `.env` if the task legitimately needs more iterations
+
+There is no automatic resume from escalation. The operator must initiate the next action.
+
+#### API cost
+
+Each `done` or `escalate` verdict calls the LLM evaluator once (plus one retry on network/rate-limit error). A `loop` verdict also calls once. Forced re-issues due to capture failure call the LLM zero times.
+
+With `maxRounds=3` and haiku as the evaluator, a chain that loops twice and resolves on round 3 costs three haiku calls. Chains that exhaust all rounds via forced re-issues (capture always fails) cost zero LLM calls but may still escalate.
+
 #### Evaluator providers
 
 The evaluator supports two providers, configurable as primary or fallback:
@@ -252,6 +391,10 @@ ANTHROPIC_API_KEY=sk-...
 # Ollama settings
 AI_WHISPER_EVALUATOR_OLLAMA_HOST=http://localhost:11434
 AI_WHISPER_EVALUATOR_OLLAMA_MODEL=qwen2.5:7b-instruct
+
+# Idle threshold controlling auto-accept and auto-handback in mounted sessions
+# Must exceed the LLM's response-start latency (default: 30000 ms)
+AI_WHISPER_IDLE_THRESHOLD_MS=30000
 ```
 
 When orchestrator is disabled (default), the collab uses the traditional manual relay workflow and no LLM calls are made by the broker daemon.
