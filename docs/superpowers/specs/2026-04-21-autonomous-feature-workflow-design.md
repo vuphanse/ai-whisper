@@ -110,7 +110,7 @@ CREATE UNIQUE INDEX workflows_one_running_per_collab
   ON workflows(collabId) WHERE status = 'running';
 ```
 
-**Workflow context shape** — the JSON blob in `workflow_context` is written only by `applyOrchestratorVerdict` (see broker API). Known keys:
+**Workflow context shape** — the JSON blob in `workflow_context` is written only by broker control methods, specifically `beginPhaseRun` for `baseBeforeExecution` and `applyOrchestratorVerdict` for execution/code-review commit metadata. Known keys:
 
 ```jsonc
 {
