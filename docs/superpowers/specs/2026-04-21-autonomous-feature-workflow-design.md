@@ -35,7 +35,7 @@ This spec introduces a `WorkflowDriver` component that sits above chains and adv
 - PR / branching / merge orchestration.
 - Web UI or operator dashboard.
 - Cost metering.
-- Changing the fundamental `done | loop | escalate` verdict vocabulary.
+- Changing verdict vocabulary for **legacy (non-workflow) chains** — they continue to use `done | loop | escalate`. Workflow-owned chains use a new structured step vocabulary (`approve | findings | delivered | execution-pass | execution-fail | escalate`); see "RelayOrchestrator Contract".
 
 ---
 
@@ -100,7 +100,7 @@ This spec introduces a `WorkflowDriver` component that sits above chains and adv
 | `status` | TEXT | `running` \| `done` \| `halted` \| `canceled` |
 | `currentPhaseIndex` | INT | 0-based index into phase config |
 | `haltReason` | TEXT NULL | populated when `status IN ('halted','canceled')` |
-| `workflow_context` | TEXT (JSON) | carry-forward outputs across phases (e.g. `{"commitRange":"abc..def"}`); default `'{}'` |
+| `workflow_context` | TEXT (JSON) | carry-forward outputs across phases (see "Workflow context shape" below); default `'{}'` |
 | `createdAt` | TEXT | ISO |
 | `updatedAt` | TEXT | ISO |
 
@@ -109,6 +109,20 @@ This spec introduces a `WorkflowDriver` component that sits above chains and adv
 CREATE UNIQUE INDEX workflows_one_running_per_collab
   ON workflows(collabId) WHERE status = 'running';
 ```
+
+**Workflow context shape** — the JSON blob in `workflow_context` is written only by `applyOrchestratorVerdict` (see broker API). Known keys:
+
+```jsonc
+{
+  "baseBeforeExecution": "<sha>",      // captured when plan-execution phase starts
+  "headAfterExecution":  "<sha>",      // captured when plan-execution ends
+  "commitRange":         "<base>..<head>",   // git-valid range (excludes base, includes head)
+  "executionCommitShas": ["<sha>", ...],     // parsed from execute handback
+  "codeReviewFixShas":   ["<sha>", ...]      // additional SHAs from code-review fix-delivered rounds
+}
+```
+
+The range `<base>..<head>` is used as-is wherever `{commitRange}` appears in templates. On each code-review `fix + delivered`, broker re-reads HEAD, appends new SHAs to `codeReviewFixShas`, advances `headAfterExecution` to the new HEAD, and recomputes `commitRange = baseBeforeExecution..headAfterExecution`. The range is always cumulative — the reviewer sees the full feature branch on recheck so fix commits are verified in context. The commit-list keys are informational for audit; templates read only `commitRange`.
 
 ### New table `workflow_phases`
 
@@ -264,7 +278,7 @@ Phase configs reference abstract roles (`"implementer"`, `"reviewer"`). Workflow
 
 - `{specPath}` — supplied at kickoff.
 - `{planPath}` — derived by driver: `docs/superpowers/plans/YYYY-MM-DD-<spec-slug>.md`; `YYYY-MM-DD` = workflow `createdAt` date; slug = spec filename without `-design` suffix and extension.
-- `{commitRange}` — the commit SHA range produced by the `plan-execution` phase handback (populated into workflow context on execution completion; available to `code-review` phase's templates).
+- `{commitRange}` — read from `workflow_context.commitRange`. Populated by broker when the plan-execution chain resolves (captures base-before-execution + head-after-execution). Re-computed on each code-review `fix + delivered` so recheck rounds cover the updated range. Format is always `<base>..<head>` (git-valid: excludes base, includes head).
 - `{lastFindings}` — the text of the most recent reviewer handback that requested changes.
 
 ---
@@ -296,9 +310,12 @@ Orchestrator emits a structured verdict. Driver (via broker) applies the transit
 | `execute` | `execution-pass` | resolve chain `done` |
 | `execute` | `execution-fail` | mark chain `escalated` |
 
-**Round counting:** `currentRound` in `relay_chains` increments when a new `review`, `implement`, or `execute` step handoff is created. `fix` steps do NOT increment the round counter. `maxRounds` is compared against `currentRound` at the start of each `review`/`implement`/`execute` step.
+**Round counting:** `currentRound` in `relay_chains` starts at 1 when the phase's initial handoff is created. Subsequent `review`, `implement`, or `execute` step handoffs increment `currentRound`. `fix` steps do NOT increment. (Under the current registry, only `review` steps occur after round 1 for review-loop phases; `implement`/`execute` steps only occur as round-1 initial handoffs.)
 
-**maxRounds escalation rule:** if `currentRound >= maxRounds` when a `review` would otherwise fire with verdict=`findings`, orchestrator forces `escalate`.
+**maxRounds enforcement:** the check fires at exactly one decision point — when `applyOrchestratorVerdict` is about to create the next `review` handoff after a `review + findings → fix + delivered` cycle.
+- If `currentRound + 1 > maxRounds` at that point → the verdict is forced to `escalate` before any new handoff is created.
+- For phases with `reviewerRole=null` (execution-gate), `maxRounds=1` enforces single-shot execution: there is no `review` step and therefore no second round — the comparison is effectively a no-op but the value must still be 1 for schema sanity.
+- For review-loop phases, `maxRounds` counts the maximum number of `review` handoffs (including the initial one at round 1).
 
 ---
 
@@ -381,84 +398,68 @@ In-process `EventEmitter`, single instance owned by the broker runtime. Same-pro
 | `workflow.done` | `{ workflowId }` |
 | `workflow.resumed` | `{ workflowId, phaseIndex }` |
 
-### Fire sites
+### Emission ownership rule
 
-- `broker.control.resolveChain` → `chain.resolved`
-- `broker.control.markEscalated` → `chain.escalated`
-- `broker.control.createWorkflow` → `workflow.created`
-- `broker.control.createHandoff` (when `workflowOwner` metadata present; see below) → `workflow.round-started`
-- `WorkflowDriver.kickoffPhase` → `workflow.phase-started` (after durable phase-run + chain + initial handoff exist)
-- `WorkflowDriver.advancePhaseIfOwned` → `workflow.phase-done`
-- `WorkflowDriver.haltWorkflowIfOwned` → `workflow.halted`
-- `WorkflowDriver` on workflow completion → `workflow.done`
-- `broker.control.resumeWorkflow` → `workflow.resumed`
-- `broker.control.cancelWorkflow` → `workflow.canceled`
+**All durable-state events are emitted by broker methods after their transaction commits.** `WorkflowDriver` never emits events directly. This prevents double-emission and guarantees no event fires for a state change that was rolled back.
 
-`workflow.round-started` fires on every `createHandoff` for workflow-owned chains, including round 1. Relay-monitor suppresses the `↻` render for round 1 because `▶ phase-started` already covers it; programmatic consumers still receive the event.
+### Fire sites (single owner per event)
+
+| Event | Owning broker method | Notes |
+|---|---|---|
+| `workflow.created` | `createWorkflow` | |
+| `workflow.phase-started` | `beginPhaseRun` | fires with sibling `workflow.round-started` for round 1 |
+| `workflow.round-started` | `beginPhaseRun` (round 1) **or** `applyOrchestratorVerdict` (round 2+) | not emitted by `createHandoff`; workflow-owned continuations route through `applyOrchestratorVerdict` |
+| `workflow.phase-done` | `applyOrchestratorVerdict` | only when verdict closes the chain |
+| `workflow.halted` | `applyOrchestratorVerdict` | fires with sibling `workflow.phase-done` (outcome=escalated) |
+| `workflow.done` | `applyOrchestratorVerdict` | fires after the last phase's `phase-done`; no `phase-started` follows |
+| `workflow.resumed` | `resumeWorkflow` | driver reacts by calling `beginPhaseRun` |
+| `workflow.canceled` | `cancelWorkflow` | |
+| `chain.resolved` | `applyOrchestratorVerdict` (workflow-owned) **or** `resolveChain` (legacy) | |
+| `chain.escalated` | `applyOrchestratorVerdict` (workflow-owned) **or** `markEscalated` (legacy) | |
+
+Relay-monitor suppresses the `↻` render for round 1 because `▶ phase-started` already covers it; programmatic consumers still receive the event.
 
 ---
 
 ## WorkflowDriver Loop
 
-Event-driven primary path + recovery sweep fallback.
+With `applyOrchestratorVerdict` doing all per-verdict state transitions atomically (see broker API), the driver's remaining responsibilities are narrow: kick off the first phase, react to resume, and run a crash-recovery sweep.
 
 ### Subscribers
 
 ```ts
-bus.on('workflow.created', (e) => kickoffPhase(e.workflowId));
-bus.on('chain.resolved',   (e) => advancePhaseIfOwned(e.chainId));
-bus.on('chain.escalated',  (e) => haltWorkflowIfOwned(e.chainId, e.reason));
-bus.on('workflow.resumed', (e) => kickoffPhase(e.workflowId));
+bus.on('workflow.created', (e) => kickoffCurrentPhase(e.workflowId));
+bus.on('workflow.resumed', (e) => kickoffCurrentPhase(e.workflowId));
 ```
 
-### `kickoffPhase(workflowId)`
+The driver does NOT subscribe to `chain.resolved` or `chain.escalated` — those are handled inside `applyOrchestratorVerdict`, which already advances the phase or halts the workflow in the same transaction.
 
-All work happens inside a **single broker transaction** via `broker.control.beginPhaseRun`:
+### `kickoffCurrentPhase(workflowId)`
 
-1. Load workflow record. Validate `status='running'`.
+1. Load workflow. If `status !== 'running'` → skip (no-op, guards against racey double-fire).
 2. Read `PhaseConfig` from registry via `workflowType` + `currentPhaseIndex`.
-3. Resolve template placeholders + roles.
-4. Assert both bound agents are present on the collab. If not → `haltWorkflow(reason: "target agent <x> not bound")`.
-5. Call `broker.control.beginPhaseRun({ workflowId, phaseIndex, phaseName, initialHandoffStep, kickoffText, sender, target, maxRounds })`. Broker in one transaction:
-   - Inserts `relay_chains` row (`status='active'`, `currentRound=1`, `maxRounds=phase.maxRounds`).
-   - Inserts `workflow_phases` row tying the new chain to the workflow+phaseIndex.
-   - Inserts `relay_handoff` row with `handoffStep`, `workflowId`, `phaseRunId`, `senderAgent`, `targetAgent`, `requestText`.
-   - Returns `{ phaseRunId, chainId, handoffId }`.
-6. Emit `workflow.phase-started` + `workflow.round-started`.
-7. Update `workflows.updatedAt`.
+3. Resolve template placeholders (including `{commitRange}` from `workflow_context` for code-review) and role bindings.
+4. Assert both bound agents are present on the collab. If not → call `broker.control.haltWorkflow(workflowId, reason: "target agent <x> not bound")` (which emits `workflow.halted`).
+5. **If this is the plan-execution phase:** call `broker.control.captureExecutionBase(workflowId, headSha)` before `beginPhaseRun`. The broker stores `workflow_context.baseBeforeExecution = headSha` in the same transaction as the subsequent `beginPhaseRun` (the two calls are composed by the driver but the broker method should be a single transaction per call; ordering in the driver is deterministic).
+6. Call `broker.control.beginPhaseRun({ workflowId, phaseIndex, phaseName, initialHandoffStep, kickoffText, sender, target, maxRounds, now })`. Broker in one transaction: inserts `relay_chains`, `workflow_phases`, and the round-1 `relay_handoff`; updates `workflows.updatedAt`; emits `workflow.phase-started` + `workflow.round-started` post-commit.
 
-### `advancePhaseIfOwned(chainId)`
-
-Only acts if the chain is workflow-owned and workflow is `status='running'`.
-
-1. Close current `workflow_phases` row: `endedAt = now`, `outcome='done'`.
-2. Emit `workflow.phase-done`.
-3. For execute phase: extract commit SHAs from the evaluator's accepted handback, merge into `workflows.workflow_context` JSON as `{"commitRange":"<first>..<last>"}`. These feed `{commitRange}` for subsequent phases.
-4. Increment `workflows.currentPhaseIndex`.
-5. If past last phase → `workflows.status='done'`, emit `workflow.done`.
-6. Else → call `kickoffPhase`.
-
-### `haltWorkflowIfOwned(chainId, reason)`
-
-1. Guard: chain workflow-owned + workflow `status='running'`.
-2. Close current phase run: `endedAt = now`, `outcome='escalated'`.
-3. `workflows.status='halted'`, `haltReason=reason`.
-4. Emit `workflow.halted`.
+The driver itself emits no events.
 
 ### Recovery sweep
+
+Because all per-verdict state transitions (chain + phase-run + workflow status + next-phase kickoff) happen inside a single `applyOrchestratorVerdict` transaction, SQLite state is always internally consistent after crash. The sweep only has to catch **missed kickoff events** (`workflow.created` / `workflow.resumed` dropped across a broker restart).
 
 Every 30s, for each workflow with `status='running'`:
 
 - Read latest `workflow_phases` row for `currentPhaseIndex`.
-- Read the linked `relay_chains.status` (durable per-chain terminal state).
-- If terminal (`done`) but workflow hasn't advanced → `advancePhaseIfOwned`.
-- If terminal (`escalated`) but workflow hasn't halted → `haltWorkflowIfOwned`.
-- If no phase run exists for current index → `kickoffPhase` (covers missed events during crash).
+- If no phase run exists for current index → call `kickoffCurrentPhase` (covers missed `workflow.created` / `workflow.resumed` during crash).
+- Otherwise: no action. Active chains naturally resume via the orchestrator polling loop; terminal chains already wrote their advance/halt effects in the same txn.
 
 ### Concurrency
 
-- Driver uses `BEGIN IMMEDIATE` around each event handler's workflow row read + state transition.
-- Idempotency: `advancePhaseIfOwned` checks whether a phase row for the next index already exists with a live chain before calling kickoff.
+- All state transitions live inside broker methods wrapped in `BEGIN IMMEDIATE`. The driver holds no locks.
+- `kickoffCurrentPhase` is idempotent: `beginPhaseRun` rejects if an open phase run for `currentPhaseIndex` already exists.
+- `applyOrchestratorVerdict` is idempotent on `handoffId` (see below).
 
 ### Execution phase sender
 
@@ -491,7 +492,46 @@ interface BrokerControl {
     now: string;
   }): { phaseRunId: string; chainId: string; handoffId: string };
 
-  // Standard handoff gains workflowOwner metadata
+  // Single atomic state-transition method for workflow-owned chains.
+  // Orchestrator calls this (not createHandoff / resolveChain / markEscalated
+  // directly) after emitting a verdict. All per-verdict effects happen here.
+  applyOrchestratorVerdict(input: {
+    handoffId: string;              // the handoff being evaluated
+    verdict:
+      | "approve"
+      | "findings"
+      | "delivered"
+      | "execution-pass"
+      | "execution-fail"
+      | "escalate";
+    confidence: number;             // 0.0–1.0
+    reason: string;
+    followUpMessage?: string;       // used to build next handoff requestText
+    extractedCommitShas?: string[]; // provided by orchestrator for execute-pass + code-review fix-delivered
+    now: string;
+  }): {
+    action:
+      | "chain-continued"           // next fix/review handoff created
+      | "phase-advanced"            // chain resolved done, next phase kicked off
+      | "workflow-done"             // chain resolved done, last phase complete
+      | "workflow-halted"           // chain escalated, workflow halted
+      | "noop-already-applied";     // idempotency hit
+    chainId: string;
+    nextHandoffId?: string;
+    nextPhaseRunId?: string;
+  };
+
+  // Captures HEAD sha into workflow_context.baseBeforeExecution before plan-execution phase starts.
+  captureExecutionBase(input: {
+    workflowId: string;
+    headSha: string;
+    now: string;
+  }): void;
+
+  // Standard handoff gains workflowOwner metadata.
+  // NOTE: for workflow-owned chains, round-2+ handoffs are created by
+  // applyOrchestratorVerdict, not by external callers. This method is public
+  // for legacy chains and for the orchestrator's internal use.
   createHandoff(input: {
     collabId: string;
     sender: "claude" | "codex";
@@ -519,6 +559,7 @@ interface BrokerControl {
 
   resumeWorkflow(workflowId: string, now: string): void;
   cancelWorkflow(workflowId: string, now: string): void;
+  haltWorkflow(workflowId: string, reason: string, now: string): void;
 
   getWorkflow(workflowId: string): WorkflowRecord | null;
   listWorkflows(filter?: {
@@ -529,15 +570,43 @@ interface BrokerControl {
 }
 ```
 
+### `applyOrchestratorVerdict` — atomic semantics
+
+Wrapped in `BEGIN IMMEDIATE`. Idempotent on `handoffId` (second call returns `action: "noop-already-applied"`).
+
+Within the transaction:
+
+1. **Load + validate.** Read the handoff, its chain, phase-run, and workflow. Reject if: handoff not workflow-owned, workflow not `status='running'`, chain not `active`, or `handoffStep` + `verdict` pair illegal per the step-transition table (illegal pair forces `verdict='escalate'`). Reject if `confidence < 0.5` (forces `verdict='escalate'`).
+2. **Record evaluator bookkeeping.** Write verdict + reason + confidence + evaluatedAt to the existing evaluator log table (extended with `verdict` column; legacy `done|loop|escalate` values remain valid for non-workflow rows).
+3. **Apply per-verdict state change:**
+   - `approve` (review step): set `relay_chains.status='done'`, `terminalHandoffId=handoffId`. Close `workflow_phases` row (`outcome='done'`). Advance: if last phase → set `workflows.status='done'`; else increment `currentPhaseIndex`, call internal `kickoffNextPhase` (composes `beginPhaseRun` in the same transaction).
+   - `findings` (review step): compute `nextRound = currentRound + 1`; if `nextRound > maxRounds` → treat as `escalate` (see below). Else insert new `relay_handoff` with `handoffStep='fix'`, `senderAgent=reviewer`, `targetAgent=implementer`, `requestText` built from `followUpMessage`. Do NOT increment `currentRound` (fix steps don't count).
+   - `delivered` (fix step): insert new `relay_handoff` with `handoffStep='review'`, `senderAgent=implementer`, `targetAgent=reviewer`. Increment `currentRound`. **Code-review special case:** if phase is `code-review`, also append `input.extractedCommitShas` to `workflow_context.codeReviewFixShas`, set `headAfterExecution` to the latest SHA, recompute `commitRange = baseBeforeExecution..headAfterExecution`. The rebuilt `requestText` uses the updated `commitRange`.
+   - `delivered` (implement step): insert new `relay_handoff` with `handoffStep='review'`, `senderAgent=implementer`, `targetAgent=reviewer`. Increment `currentRound`.
+   - `execution-pass` (execute step): set `relay_chains.status='done'`. Extract SHAs from `input.extractedCommitShas`, write to `workflow_context.executionCommitShas`, set `headAfterExecution=last SHA`, compute `commitRange=baseBeforeExecution..headAfterExecution`. Advance phase (same as `approve`).
+   - `execution-fail` (execute step): set `relay_chains.status='escalated'`, `terminalReason=reason`. Close `workflow_phases` row (`outcome='escalated'`). Set `workflows.status='halted'`, `haltReason=reason`.
+   - `escalate` (any step): same as `execution-fail` treatment of chain + phase-run + workflow.
+4. **Post-commit emissions** (in order, after successful COMMIT):
+   - For `chain-continued`: emit `workflow.round-started`.
+   - For `phase-advanced`: emit `chain.resolved`, `workflow.phase-done`, then `workflow.phase-started` + `workflow.round-started` (round 1 of next phase).
+   - For `workflow-done`: emit `chain.resolved`, `workflow.phase-done`, `workflow.done`.
+   - For `workflow-halted`: emit `chain.escalated`, `workflow.phase-done` (outcome=escalated), `workflow.halted`.
+
+**maxRounds enforcement** fires in step 3 under `findings`: if the next review would push `currentRound` past `maxRounds`, the verdict is rewritten to `escalate` before any new row is inserted. The orchestrator log records both the original and the forced verdict.
+
+**Commit SHA extraction.** The orchestrator parses SHAs from the handback during evaluation (see `execution-gate` template rules) and passes them in `extractedCommitShas`. `applyOrchestratorVerdict` is the single site that writes them into `workflow_context`. Driver code, recovery sweep, and advancePhase logic never touch commit metadata directly.
+
 ### Validation rules
 
-- `createWorkflow` rejects if collab has another workflow with `status='running'` (enforced by partial unique index + pre-check).
+- `createWorkflow` rejects if collab has another workflow with `status='running'` (enforced by partial unique index + explicit pre-check that returns a friendly error before the index raises `SQLITE_CONSTRAINT`).
 - `createWorkflow` rejects if `collab.orchestratorEnabled=false`. Error: `"workflow requires orchestrator-enabled collab; enable AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED and restart broker"`.
 - `createWorkflow` rejects if any `roleBindings` value names an agent not bound on the collab.
-- `resumeWorkflow` accepts only `status='halted'`. Rejects `status='canceled'` with `"canceled workflows cannot be resumed; start a new workflow"`.
+- `resumeWorkflow` accepts only `status='halted'`. Rejects `status='canceled'` with `"canceled workflows cannot be resumed; start a new workflow"`. **Additionally checks** that no other workflow on the same collab is currently `status='running'` before flipping this one back to `running`; on violation raises `"another workflow is already running on this collab"` (prevents the partial unique index from raising a less-friendly error mid-transaction).
 - `cancelWorkflow` accepts `status IN ('running','halted')`; sets `status='canceled'`, `haltReason='canceled by operator'`.
+- `haltWorkflow` accepts `status='running'`; used by the driver when a bound agent disappears or another non-verdict precondition fails.
 - `beginPhaseRun` asserts workflow exists + `status='running'`, and no open phase run for `currentPhaseIndex`.
-- `createHandoff` with `workflowOwner` set asserts the `phaseRunId` exists, belongs to the workflow, and chain is still active.
+- `createHandoff` with `workflowOwner` set is rejected **unless called from within `applyOrchestratorVerdict` or `beginPhaseRun`** (enforced by an internal caller token). External callers that try to create workflow-owned handoffs directly get an error; this guarantees the single fire-site rule for `workflow.round-started`.
+- `applyOrchestratorVerdict` asserts handoff is workflow-owned + chain is still `active` + workflow `status='running'`. Already-terminal handoffs return `"noop-already-applied"`.
 
 ---
 
@@ -651,7 +720,7 @@ Rules:
 - `execution-fail` when tests failed, not run, or no commits created.
 - `escalate` on ambiguous / malformed handback / `confidence<0.5`.
 
-Extracted commit SHAs are captured into `workflows.workflow_context.commitRange` by the broker when chain resolves.
+The orchestrator parses commit SHAs from the handback as part of evaluation and passes them to `applyOrchestratorVerdict` via `extractedCommitShas`. That method is the single site that writes `workflow_context.commitRange`, `executionCommitShas`, `headAfterExecution`, and (on code-review fix-delivered) `codeReviewFixShas`.
 
 ---
 
@@ -663,7 +732,7 @@ Extracted commit SHAs are captured into `workflows.workflow_context.commitRange`
 2. `whisper collab start` with orchestrator enabled.
 3. `whisper workflow start --type superpowers-feature-development --spec <path>`.
 4. Broker validates (orchestrator enabled, agents bound, no other running workflow), inserts workflow, emits `workflow.created`.
-5. Driver handles `workflow.created` → `kickoffPhase(phase=spec-refining, initialStep=review)` → calls `beginPhaseRun` (atomic) → emits `workflow.phase-started` + `workflow.round-started`.
+5. Driver handles `workflow.created` → `kickoffCurrentPhase(phase=spec-refining, initialStep=review)` → calls `beginPhaseRun` (atomic); broker emits `workflow.phase-started` + `workflow.round-started` post-commit.
 6. Mount panes' auto-accept / auto-handback carries rounds.
 7. Operator walks away.
 
@@ -682,9 +751,10 @@ Extracted commit SHAs are captured into `workflows.workflow_context.commitRange`
 `whisper workflow resume <workflow-id>`
 
 1. Assert `status='halted'` (not `canceled`).
-2. Broker clears `haltReason`, sets `status='running'`, emits `workflow.resumed`.
-3. Driver kicks off fresh chain for current phase.
-4. Prior escalated `workflow_phases` row preserved; new row inserted for fresh attempt.
+2. Assert no other workflow on this collab is currently `status='running'` (friendly pre-check before the partial unique index).
+3. Broker clears `haltReason`, sets `status='running'`, emits `workflow.resumed` post-commit.
+4. Driver kicks off fresh chain for current phase via `kickoffCurrentPhase`.
+5. Prior escalated `workflow_phases` row preserved; new row inserted for fresh attempt.
 
 ### Cancel
 
@@ -718,7 +788,7 @@ While a handoff chain is owned by a `status='running'` workflow, mount panes ope
 
 - Card renderer checks `handoff.workflowId != null`. If set → render autonomous variant.
 - Key input handlers for `a/d/h/space/Ctrl+H` are no-ops when the current handoff has `workflowId`.
-- Local composer does NOT open on capture failure for workflow-owned chains. Handback retries once; on second failure, orchestrator escalates.
+- Local composer does NOT open on capture failure for workflow-owned chains. Any capture failure on a workflow-owned handoff immediately escalates the chain: the mount pane calls `broker.control.applyOrchestratorVerdict(handoffId, verdict='escalate', reason='capture-failure: <details>', confidence=1.0)` which halts the workflow atomically. The simpler immediate-escalate rule avoids needing a per-handoff retry counter in the schema; the operator recovers via `whisper workflow resume`.
 
 ### Manual override
 
@@ -747,30 +817,42 @@ Recommended default for workflow runs: `AI_WHISPER_IDLE_THRESHOLD_MS=15000`.
 - `execute + execution-fail` → escalate.
 - `fix + approve` → rejected (illegal verdict for step), forced escalate.
 
-**WorkflowDriver.kickoffPhase**
+**WorkflowDriver.kickoffCurrentPhase**
 - `beginPhaseRun` is called transactionally; on broker failure no orphan rows remain.
-- `implementerRole=null` phase uses reviewer-bound agent as sender (execution handoff).
-- Target agent unbound → halts workflow without inserting phase run.
+- `reviewerRole=null` phase (plan-execution) uses reviewer-bound agent as nominal sender for the execute handoff.
+- Plan-execution phase kickoff calls `captureExecutionBase` with current HEAD before `beginPhaseRun`.
+- Target agent unbound → `broker.control.haltWorkflow` invoked; no phase run inserted.
+- Driver does not emit any events directly; every emission tested here comes from the broker method.
 
-**WorkflowDriver.advancePhaseIfOwned**
-- Last phase → `workflow.status='done'`, emits `workflow.done`.
-- Middle phase → next phase kickoff fires.
-- Execution phase → extracts commit SHAs into `workflow_context.commitRange`.
-- Idempotent under duplicate events.
+**BrokerControl.applyOrchestratorVerdict**
+- `review + approve` → chain done, phase-run closed, next phase kicked off atomically; emits `chain.resolved`, `workflow.phase-done`, `workflow.phase-started`, `workflow.round-started` in order.
+- `review + approve` on last phase → emits `workflow.done` (no phase-started follows).
+- `review + findings` below maxRounds → new `fix` handoff, `currentRound` unchanged, emits `workflow.round-started`.
+- `review + findings` at maxRounds → forced escalate; emits `chain.escalated`, `workflow.phase-done`, `workflow.halted`.
+- `fix + delivered` → new `review` handoff, `currentRound` incremented.
+- `fix + delivered` in code-review phase → new SHAs appended, `commitRange` recomputed, next review request text includes updated range.
+- `implement + delivered` → new `review` handoff with sender=implementer, target=reviewer.
+- `execute + execution-pass` → `commitRange = baseBeforeExecution..headAfterExecution`; phase-advanced.
+- `execute + execution-fail` → workflow-halted.
+- `fix + approve` → illegal verdict, forced escalate.
+- Second call with same `handoffId` → `action='noop-already-applied'`, no new rows, no new events.
+- `confidence < 0.5` → forced escalate regardless of verdict.
 
-**WorkflowDriver.haltWorkflowIfOwned**
-- Sets status + reason atomically.
-- Emits `workflow.halted`.
+**BrokerControl.haltWorkflow**
+- Sets status + reason atomically, emits `workflow.halted`.
 
 **BrokerEventBus**
 - Each emission fires exactly once per source-method call.
+- No event fires on transaction rollback (transaction boundaries integration-tested).
 - Subscribers added/removed don't affect others.
 
 **Validations**
 - `createWorkflow` rejects when another running workflow exists for collab.
 - `createWorkflow` rejects when `orchestratorEnabled=false`.
 - `resumeWorkflow` rejects `status='canceled'`.
+- `resumeWorkflow` rejects when another workflow on the same collab is `status='running'` — friendly error raised before the partial unique index would fire.
 - Partial unique index prevents concurrent running workflows even under race.
+- `createHandoff` with `workflowOwner` set rejects external callers (must be invoked via `beginPhaseRun` / `applyOrchestratorVerdict`'s internal caller token).
 
 **Evaluator template selection**
 - `review-loop` enforces step-scoped allowed verdicts.
@@ -781,6 +863,7 @@ Recommended default for workflow runs: `AI_WHISPER_IDLE_THRESHOLD_MS=15000`.
 - Workflow-owned handoff hides hotkey hints.
 - `a/d/h/space/Ctrl+H` no-op when `workflowId` set.
 - Local composer suppressed on capture failure.
+- Capture failure on workflow-owned handoff calls `applyOrchestratorVerdict` with `verdict='escalate'`, halting the workflow (no retry counter).
 
 ### Integration
 
