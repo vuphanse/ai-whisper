@@ -166,8 +166,14 @@ New columns (additive, nullable for legacy rows):
 | `handoffStep` | TEXT NULL | one of `review` \| `fix` \| `implement` \| `execute` \| `null` (legacy) |
 | `workflowId` | TEXT FK NULL | set when handoff belongs to workflow-owned chain |
 | `phaseRunId` | TEXT FK NULL | set when handoff belongs to workflow-owned chain |
+| `evaluatorVerdict` | TEXT NULL | orchestrator verdict applied to this handoff; workflow chains use structured vocabulary, legacy chains store `done \| loop \| escalate` |
+| `evaluatorConfidence` | REAL NULL | 0.0–1.0 |
+| `evaluatorReason` | TEXT NULL | free-text; also carries normalization reason (`"max-rounds-reached"`, `"low-confidence: ..."`, `"illegal-step-verdict: ..."`) when applicable |
+| `evaluatorEvaluatedAt` | TEXT NULL | ISO timestamp |
 
 `senderAgent` remains non-nullable. System-initiated execution handoffs use the reviewer-bound agent as nominal sender (see "Execution phase sender" below).
+
+> Orchestrator bookkeeping lives on `relay_handoff` — no separate audit table. This matches the existing Phase 7F implementation.
 
 ---
 
@@ -371,9 +377,9 @@ interface EvaluatorVerdict {
 
 - `done` outcome only derives from `verdict='approve'` (review-loop) or `verdict='execution-pass'` (execution-gate). `delivered` never closes the chain.
 - `confidence < 0.5` forces `escalate` regardless of verdict.
-- `currentRound >= maxRounds` on a review step with `verdict='findings'` forces `escalate`.
+- On `review + findings`: if `currentRound + 1 > maxRounds`, the verdict is forced to `escalate` before any new handoff is created. (Applied inside `applyOrchestratorVerdict`; see "Atomic semantics".)
 - Verdict set must match phase's `allowedVerdicts` (derived from `evaluatorPromptKey`); mismatch forces `escalate`.
-- Orchestrator logs every verdict for audit.
+- Orchestrator logs every verdict for audit. Bookkeeping columns are added to `relay_handoff` (`evaluatorVerdict`, `evaluatorConfidence`, `evaluatorReason`, `evaluatorEvaluatedAt`); terminal chain details remain on `relay_chains` (`terminalHandoffId`, `terminalReason`). No separate evaluator-log table.
 
 Legacy chains: orchestrator falls back to the existing `done | loop | escalate` vocabulary.
 
@@ -440,10 +446,18 @@ The driver does NOT subscribe to `chain.resolved` or `chain.escalated` — those
 2. Read `PhaseConfig` from registry via `workflowType` + `currentPhaseIndex`.
 3. Resolve template placeholders (including `{commitRange}` from `workflow_context` for code-review) and role bindings.
 4. Assert both bound agents are present on the collab. If not → call `broker.control.haltWorkflow(workflowId, reason: "target agent <x> not bound")` (which emits `workflow.halted`).
-5. **If this is the plan-execution phase:** call `broker.control.captureExecutionBase(workflowId, headSha)` before `beginPhaseRun`. The broker stores `workflow_context.baseBeforeExecution = headSha` in the same transaction as the subsequent `beginPhaseRun` (the two calls are composed by the driver but the broker method should be a single transaction per call; ordering in the driver is deterministic).
-6. Call `broker.control.beginPhaseRun({ workflowId, phaseIndex, phaseName, initialHandoffStep, kickoffText, sender, target, maxRounds, now })`. Broker in one transaction: inserts `relay_chains`, `workflow_phases`, and the round-1 `relay_handoff`; updates `workflows.updatedAt`; emits `workflow.phase-started` + `workflow.round-started` post-commit.
+5. **If this is the plan-execution phase:** read current workspace HEAD via `git rev-parse HEAD` in `collab.workspaceRoot` and pass it as `executionBaseHeadSha` to `beginPhaseRun`. If the git read fails → halt workflow with reason `"failed to read workspace HEAD for plan-execution: <error>"`.
+6. Call `broker.control.beginPhaseRun({ workflowId, phaseIndex, phaseName, initialHandoffStep, kickoffText, sender, target, maxRounds, executionBaseHeadSha?, now })`. Broker in one transaction:
+   - Validates workflow state.
+   - If `initialHandoffStep='execute'` and `executionBaseHeadSha` is missing, rejects with `"beginPhaseRun(execute) requires executionBaseHeadSha"`.
+   - If `executionBaseHeadSha` is provided, writes it to `workflow_context.baseBeforeExecution`.
+   - Inserts `relay_chains`, `workflow_phases`, and the round-1 `relay_handoff`.
+   - Updates `workflows.updatedAt`.
+   - Emits `workflow.phase-started` + `workflow.round-started` post-commit.
 
 The driver itself emits no events.
+
+> There is no separate `captureExecutionBase` method; folding the base-SHA capture into `beginPhaseRun` keeps it inside the same transaction as the rest of the phase-run insert, and guarantees every plan-execution start — whether triggered externally by the driver (phase index 0 / resume) or internally by `applyOrchestratorVerdict` (phase advance) — captures the base SHA atomically.
 
 ### Recovery sweep
 
@@ -479,7 +493,10 @@ interface BrokerControl {
   // Chain terminal state
   getRelayChain(chainId: string): RelayChainRecord | null;
 
-  // Workflow-aware handoff creation (atomic phase-run + chain + handoff)
+  // Workflow-aware handoff creation (atomic phase-run + chain + handoff).
+  // For plan-execution phase starts (initialHandoffStep='execute'),
+  // executionBaseHeadSha is required and is written to
+  // workflow_context.baseBeforeExecution in the same transaction.
   beginPhaseRun(input: {
     workflowId: string;
     phaseIndex: number;
@@ -489,6 +506,7 @@ interface BrokerControl {
     sender: "claude" | "codex";
     target: "claude" | "codex";
     maxRounds: number;
+    executionBaseHeadSha?: string;  // required when initialHandoffStep='execute'
     now: string;
   }): { phaseRunId: string; chainId: string; handoffId: string };
 
@@ -508,6 +526,8 @@ interface BrokerControl {
     reason: string;
     followUpMessage?: string;       // used to build next handoff requestText
     extractedCommitShas?: string[]; // provided by orchestrator for execute-pass + code-review fix-delivered
+    workspaceHeadSha?: string;      // required when the verdict may advance into plan-execution;
+                                    // the orchestrator reads HEAD before calling
     now: string;
   }): {
     action:
@@ -520,13 +540,6 @@ interface BrokerControl {
     nextHandoffId?: string;
     nextPhaseRunId?: string;
   };
-
-  // Captures HEAD sha into workflow_context.baseBeforeExecution before plan-execution phase starts.
-  captureExecutionBase(input: {
-    workflowId: string;
-    headSha: string;
-    now: string;
-  }): void;
 
   // Standard handoff gains workflowOwner metadata.
   // NOTE: for workflow-owned chains, round-2+ handoffs are created by
@@ -576,10 +589,10 @@ Wrapped in `BEGIN IMMEDIATE`. Idempotent on `handoffId` (second call returns `ac
 
 Within the transaction:
 
-1. **Load + validate.** Read the handoff, its chain, phase-run, and workflow. Reject if: handoff not workflow-owned, workflow not `status='running'`, chain not `active`, or `handoffStep` + `verdict` pair illegal per the step-transition table (illegal pair forces `verdict='escalate'`). Reject if `confidence < 0.5` (forces `verdict='escalate'`).
-2. **Record evaluator bookkeeping.** Write verdict + reason + confidence + evaluatedAt to the existing evaluator log table (extended with `verdict` column; legacy `done|loop|escalate` values remain valid for non-workflow rows).
+1. **Load + normalize.** Read the handoff, its chain, phase-run, and workflow. Hard rejections (throw; caller is buggy, not recoverable): handoff not workflow-owned, workflow not `status='running'`, chain not `active`. **Soft normalizations (rewrite the verdict before applying):** if `handoffStep` + `verdict` pair is illegal per the step-transition table → rewrite to `verdict='escalate'` with `reason='illegal-step-verdict: <original>'`. If `confidence < 0.5` → rewrite to `verdict='escalate'` with `reason='low-confidence: <original-reason>'`. On `review + findings`, if `currentRound + 1 > maxRounds` → rewrite to `verdict='escalate'` with `reason='max-rounds-reached (<n>/<max>)'`. After normalization, step 3 always sees a legal step/verdict pair.
+2. **Record evaluator bookkeeping on `relay_handoff`.** The existing orchestrator writes its bookkeeping to `relay_handoff`; this spec extends it with three additive, nullable columns: `evaluatorVerdict TEXT`, `evaluatorConfidence REAL`, `evaluatorReason TEXT`, plus `evaluatorEvaluatedAt TEXT`. Legacy `done | loop | escalate` values remain valid for non-workflow rows. No new audit table is introduced. Terminal chain details (which handoff closed the chain and why) continue to live on `relay_chains.terminalHandoffId` / `terminalReason`.
 3. **Apply per-verdict state change:**
-   - `approve` (review step): set `relay_chains.status='done'`, `terminalHandoffId=handoffId`. Close `workflow_phases` row (`outcome='done'`). Advance: if last phase → set `workflows.status='done'`; else increment `currentPhaseIndex`, call internal `kickoffNextPhase` (composes `beginPhaseRun` in the same transaction).
+   - `approve` (review step): set `relay_chains.status='done'`, `terminalHandoffId=handoffId`. Close `workflow_phases` row (`outcome='done'`). Advance: if last phase → set `workflows.status='done'`; else increment `currentPhaseIndex`, call internal `kickoffNextPhase` (composes the same insert logic as `beginPhaseRun`, in this transaction). If the next phase's `initialHandoffStep='execute'`, the broker uses `input.workspaceHeadSha` to populate `workflow_context.baseBeforeExecution` atomically. If `workspaceHeadSha` is missing on a transition that requires it, the transaction aborts with `"applyOrchestratorVerdict: workspaceHeadSha required for advance into plan-execution"` and no state changes. Orchestrator policy: always read HEAD before calling `applyOrchestratorVerdict` on plan-writing review handoffs.
    - `findings` (review step): compute `nextRound = currentRound + 1`; if `nextRound > maxRounds` → treat as `escalate` (see below). Else insert new `relay_handoff` with `handoffStep='fix'`, `senderAgent=reviewer`, `targetAgent=implementer`, `requestText` built from `followUpMessage`. Do NOT increment `currentRound` (fix steps don't count).
    - `delivered` (fix step): insert new `relay_handoff` with `handoffStep='review'`, `senderAgent=implementer`, `targetAgent=reviewer`. Increment `currentRound`. **Code-review special case:** if phase is `code-review`, also append `input.extractedCommitShas` to `workflow_context.codeReviewFixShas`, set `headAfterExecution` to the latest SHA, recompute `commitRange = baseBeforeExecution..headAfterExecution`. The rebuilt `requestText` uses the updated `commitRange`.
    - `delivered` (implement step): insert new `relay_handoff` with `handoffStep='review'`, `senderAgent=implementer`, `targetAgent=reviewer`. Increment `currentRound`.
@@ -605,8 +618,10 @@ Within the transaction:
 - `cancelWorkflow` accepts `status IN ('running','halted')`; sets `status='canceled'`, `haltReason='canceled by operator'`.
 - `haltWorkflow` accepts `status='running'`; used by the driver when a bound agent disappears or another non-verdict precondition fails.
 - `beginPhaseRun` asserts workflow exists + `status='running'`, and no open phase run for `currentPhaseIndex`.
+- `beginPhaseRun` with `initialHandoffStep='execute'` rejects if `executionBaseHeadSha` is missing or malformed (regex `/^[0-9a-f]{7,40}$/`).
 - `createHandoff` with `workflowOwner` set is rejected **unless called from within `applyOrchestratorVerdict` or `beginPhaseRun`** (enforced by an internal caller token). External callers that try to create workflow-owned handoffs directly get an error; this guarantees the single fire-site rule for `workflow.round-started`.
 - `applyOrchestratorVerdict` asserts handoff is workflow-owned + chain is still `active` + workflow `status='running'`. Already-terminal handoffs return `"noop-already-applied"`.
+- `applyOrchestratorVerdict` on a verdict that would advance into plan-execution rejects if `workspaceHeadSha` is missing or malformed (same regex).
 
 ---
 
@@ -722,6 +737,14 @@ Rules:
 
 The orchestrator parses commit SHAs from the handback as part of evaluation and passes them to `applyOrchestratorVerdict` via `extractedCommitShas`. That method is the single site that writes `workflow_context.commitRange`, `executionCommitShas`, `headAfterExecution`, and (on code-review fix-delivered) `codeReviewFixShas`.
 
+### Caller-side git reads
+
+The two git-read sites are:
+- **Driver** (`kickoffCurrentPhase`): reads HEAD before external-path plan-execution kickoff (phase index start or resume), passes it to `beginPhaseRun.executionBaseHeadSha`.
+- **Orchestrator**: reads HEAD before `applyOrchestratorVerdict` on any `plan-writing` review-step evaluation that could approve (and thus advance into plan-execution), passes it as `workspaceHeadSha`. For all other verdicts the parameter may be omitted.
+
+Both callers already live inside the broker process and share access to `collab.workspaceRoot`. Keeping git reads at the caller (and out of SQL transactions) keeps the broker's `BEGIN IMMEDIATE` blocks fast and deterministic. Evaluator prompt templates that embed git metadata (`Workspace diff summary`, `Most recent commits on HEAD`) already rely on orchestrator-side git reads today; this extends that pattern.
+
 ---
 
 ## Kickoff / Handback / Resume / Cancel
@@ -820,23 +843,32 @@ Recommended default for workflow runs: `AI_WHISPER_IDLE_THRESHOLD_MS=15000`.
 **WorkflowDriver.kickoffCurrentPhase**
 - `beginPhaseRun` is called transactionally; on broker failure no orphan rows remain.
 - `reviewerRole=null` phase (plan-execution) uses reviewer-bound agent as nominal sender for the execute handoff.
-- Plan-execution phase kickoff calls `captureExecutionBase` with current HEAD before `beginPhaseRun`.
+- Plan-execution phase kickoff reads `git rev-parse HEAD` and passes it as `executionBaseHeadSha`.
+- `git rev-parse HEAD` failure → workflow halted with a descriptive reason, no phase run inserted.
 - Target agent unbound → `broker.control.haltWorkflow` invoked; no phase run inserted.
 - Driver does not emit any events directly; every emission tested here comes from the broker method.
 
 **BrokerControl.applyOrchestratorVerdict**
 - `review + approve` → chain done, phase-run closed, next phase kicked off atomically; emits `chain.resolved`, `workflow.phase-done`, `workflow.phase-started`, `workflow.round-started` in order.
+- `review + approve` on plan-writing phase with `workspaceHeadSha` provided → next phase (plan-execution) starts with `workflow_context.baseBeforeExecution` populated; emissions as above.
+- `review + approve` on plan-writing phase WITHOUT `workspaceHeadSha` → transaction aborts, no state change, no emissions.
 - `review + approve` on last phase → emits `workflow.done` (no phase-started follows).
 - `review + findings` below maxRounds → new `fix` handoff, `currentRound` unchanged, emits `workflow.round-started`.
-- `review + findings` at maxRounds → forced escalate; emits `chain.escalated`, `workflow.phase-done`, `workflow.halted`.
+- `review + findings` at maxRounds → forced escalate; emits `chain.escalated`, `workflow.phase-done`, `workflow.halted`. `evaluatorReason` on the handoff records the normalization (`"max-rounds-reached (5/5)"`).
 - `fix + delivered` → new `review` handoff, `currentRound` incremented.
 - `fix + delivered` in code-review phase → new SHAs appended, `commitRange` recomputed, next review request text includes updated range.
 - `implement + delivered` → new `review` handoff with sender=implementer, target=reviewer.
-- `execute + execution-pass` → `commitRange = baseBeforeExecution..headAfterExecution`; phase-advanced.
+- `execute + execution-pass` → `commitRange = baseBeforeExecution..headAfterExecution`; phase-advanced. No `workspaceHeadSha` required (next phase is code-review, not plan-execution).
 - `execute + execution-fail` → workflow-halted.
-- `fix + approve` → illegal verdict, forced escalate.
+- `fix + approve` → illegal verdict, normalized to escalate; `evaluatorReason` records `"illegal-step-verdict: approve"`.
 - Second call with same `handoffId` → `action='noop-already-applied'`, no new rows, no new events.
-- `confidence < 0.5` → forced escalate regardless of verdict.
+- `confidence < 0.5` → normalized to escalate; `evaluatorReason` records `"low-confidence: <original-reason>"`.
+- Evaluator bookkeeping columns on `relay_handoff` (`evaluatorVerdict`, `evaluatorConfidence`, `evaluatorReason`, `evaluatorEvaluatedAt`) are populated for every applied verdict (including normalized ones).
+
+**BrokerControl.beginPhaseRun**
+- `initialHandoffStep='execute'` without `executionBaseHeadSha` → rejected.
+- `initialHandoffStep='execute'` with malformed SHA → rejected.
+- `initialHandoffStep='execute'` with valid SHA → `workflow_context.baseBeforeExecution` set in the same transaction as the phase-run/chain/handoff inserts.
 
 **BrokerControl.haltWorkflow**
 - Sets status + reason atomically, emits `workflow.halted`.
