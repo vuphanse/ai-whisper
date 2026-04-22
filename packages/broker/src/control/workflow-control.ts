@@ -7,17 +7,22 @@ import {
 	getWorkflowById,
 	listWorkflows as listWorkflowsRepo,
 	countRunningWorkflowsForCollab,
+	updateWorkflowContext,
 	type WorkflowRecord,
 	type WorkflowStatus,
 } from "../storage/repositories/workflow-repository.js";
 import {
+	insertWorkflowPhaseRun,
 	listPhaseRunsForWorkflow,
+	hasOpenPhaseRunForIndex,
 	type WorkflowPhaseRunRecord,
 } from "../storage/repositories/workflow-phase-repository.js";
 import {
+	insertRelayChain,
 	getRelayChain as getRelayChainRepo,
 	type RelayChainRecord,
 } from "../storage/repositories/relay-chain-repository.js";
+import { insertWorkflowOwnedRelayHandoff } from "../storage/repositories/relay-handoff-repository.js";
 import {
 	getWorkflowDefinition,
 	listWorkflowTypes,
@@ -28,6 +33,8 @@ export interface WorkflowControlDeps {
 	db: Database.Database;
 	events: BrokerEventBus;
 }
+
+const SHA_REGEX = /^[0-9a-f]{7,40}$/;
 
 export function createWorkflowControl(deps: WorkflowControlDeps) {
 	const { db, events } = deps;
@@ -115,11 +122,126 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		return getRelayChainRepo(db, chainId);
 	}
 
+	function beginPhaseRun(input: {
+		workflowId: string;
+		phaseIndex: number;
+		phaseName: string;
+		initialHandoffStep: "review" | "fix" | "implement" | "execute";
+		kickoffText: string;
+		sender: "claude" | "codex";
+		target: "claude" | "codex";
+		maxRounds: number;
+		executionBaseHeadSha?: string;
+		now: string;
+	}): { phaseRunId: string; chainId: string; handoffId: string } {
+		if (input.initialHandoffStep === "execute") {
+			if (!input.executionBaseHeadSha) {
+				throw new Error(
+					"beginPhaseRun(execute) requires executionBaseHeadSha",
+				);
+			}
+			if (!SHA_REGEX.test(input.executionBaseHeadSha)) {
+				throw new Error(
+					`beginPhaseRun(execute): malformed executionBaseHeadSha: ${input.executionBaseHeadSha}`,
+				);
+			}
+		}
+
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`beginPhaseRun: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status !== "running") {
+			throw new Error(
+				`beginPhaseRun: workflow ${input.workflowId} not running (status=${workflow.status})`,
+			);
+		}
+		if (
+			hasOpenPhaseRunForIndex(db, {
+				workflowId: input.workflowId,
+				phaseIndex: input.phaseIndex,
+			})
+		) {
+			throw new Error(
+				`beginPhaseRun: open phase run already exists for workflow ${input.workflowId} index ${input.phaseIndex}`,
+			);
+		}
+
+		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+		const handoffId = `ho_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+		const tx = db.transaction(() => {
+			insertRelayChain(db, {
+				chainId,
+				collabId: workflow.collabId,
+				maxRounds: input.maxRounds,
+				now: input.now,
+			});
+			insertWorkflowPhaseRun(db, {
+				phaseRunId,
+				workflowId: input.workflowId,
+				phaseIndex: input.phaseIndex,
+				phaseName: input.phaseName,
+				chainId,
+				now: input.now,
+			});
+			insertWorkflowOwnedRelayHandoff(db, {
+				handoffId,
+				collabId: workflow.collabId,
+				senderAgent: input.sender,
+				targetAgent: input.target,
+				requestText: input.kickoffText,
+				chainId,
+				roundNumber: 1,
+				maxRounds: input.maxRounds,
+				handoffStep: input.initialHandoffStep,
+				workflowId: input.workflowId,
+				phaseRunId,
+				now: input.now,
+			});
+			if (input.executionBaseHeadSha) {
+				updateWorkflowContext(db, {
+					workflowId: input.workflowId,
+					patch: { baseBeforeExecution: input.executionBaseHeadSha },
+					now: input.now,
+				});
+			}
+		});
+		tx.immediate();
+
+		const implementer =
+			workflow.roleBindings.implementer ?? input.sender;
+		const reviewer = workflow.roleBindings.reviewer ?? input.target;
+
+		events.emit("workflow.phase-started", {
+			workflowId: input.workflowId,
+			phaseIndex: input.phaseIndex,
+			phaseName: input.phaseName,
+			chainId,
+			phaseRunId,
+			implementer,
+			reviewer,
+		});
+		events.emit("workflow.round-started", {
+			workflowId: input.workflowId,
+			chainId,
+			phaseRunId,
+			roundNumber: 1,
+			handoffStep: input.initialHandoffStep,
+			sender: input.sender,
+			target: input.target,
+		});
+
+		return { phaseRunId, chainId, handoffId };
+	}
+
 	return {
 		createWorkflow,
 		getWorkflow,
 		listWorkflows,
 		getWorkflowPhaseRuns,
 		getRelayChain,
+		beginPhaseRun,
 	};
 }

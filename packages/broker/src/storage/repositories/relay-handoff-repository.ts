@@ -714,6 +714,70 @@ export function markRelayChainAbandonedTxn(
  * Called during daemon shutdown to prevent records stranding when a collab
  * ends mid-chain.
  */
+export function insertWorkflowOwnedRelayHandoff(
+	db: Database.Database,
+	input: {
+		handoffId: string;
+		collabId: string;
+		senderAgent: "claude" | "codex";
+		targetAgent: "claude" | "codex";
+		requestText: string;
+		chainId: string;
+		roundNumber: number;
+		maxRounds: number;
+		handoffStep: "review" | "fix" | "implement" | "execute";
+		workflowId: string;
+		phaseRunId: string;
+		now: string;
+	},
+): void {
+	db.prepare(
+		`INSERT INTO relay_handoff
+		 (handoff_id, collab_id, sender_agent, target_agent, request_text, status,
+		  capture_status, chain_id, parent_handoff_id, round_number,
+		  root_request_text, handback_text, orchestrator_status, orchestrator_verdict,
+		  orchestrator_reason, orchestrator_claimed_at, orchestrator_evaluated_at,
+		  handoff_step, workflow_id, phase_run_id,
+		  evaluator_verdict, evaluator_confidence, evaluator_reason, evaluator_evaluated_at,
+		  created_at, accepted_at, deferred_at, resolved_at, last_activity_at)
+		 VALUES (?, ?, ?, ?, ?, 'pending',
+		         NULL, ?, NULL, ?,
+		         ?, NULL, 'idle', NULL,
+		         NULL, NULL, NULL,
+		         ?, ?, ?,
+		         NULL, NULL, NULL, NULL,
+		         ?, NULL, NULL, NULL, ?)`,
+	).run(
+		input.handoffId,
+		input.collabId,
+		input.senderAgent,
+		input.targetAgent,
+		input.requestText,
+		input.chainId,
+		input.roundNumber,
+		input.requestText, // root_request_text on first handoff
+		input.handoffStep,
+		input.workflowId,
+		input.phaseRunId,
+		input.now,
+		input.now,
+	);
+
+	// Flip turn ownership so the mount surface sees the new handoff.
+	upsertRelayTurnState(db, {
+		collabId: input.collabId,
+		turnOwner: input.targetAgent,
+		waitingAgent: input.senderAgent,
+		unresolvedHandoffId: input.handoffId,
+		handoffState: "pending",
+		updatedAt: input.now,
+		orchestratorEnabled: true,
+		currentRound: input.roundNumber,
+		maxRounds: input.maxRounds,
+		chainStatus: "active",
+	});
+}
+
 export function cleanupOrchestrationOnShutdownTxn(
 	db: Database.Database,
 	input: { collabId: string; reason: string; now: string },
