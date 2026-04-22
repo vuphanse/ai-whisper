@@ -775,6 +775,96 @@ export function insertWorkflowOwnedRelayHandoff(
 	});
 }
 
+export function getHandoffWithWorkflowMetaById(
+	db: Database.Database,
+	handoffId: string,
+): (RelayHandoffRecord & {
+	handoffStep: "review" | "fix" | "implement" | "execute" | null;
+	workflowId: string | null;
+	phaseRunId: string | null;
+	evaluatorVerdict: string | null;
+	evaluatorConfidence: number | null;
+}) | null {
+	const row = db
+		.prepare(
+			`SELECT h.handoff_id, h.collab_id, h.sender_agent, h.target_agent, h.request_text, h.status,
+			        h.capture_status, h.chain_id, h.parent_handoff_id, h.round_number, h.root_request_text,
+			        h.handback_text, h.orchestrator_status, h.orchestrator_verdict, h.orchestrator_reason,
+			        h.orchestrator_claimed_at, h.orchestrator_evaluated_at, h.created_at, h.accepted_at,
+			        h.deferred_at, h.resolved_at, h.last_activity_at,
+			        h.handoff_step, h.workflow_id, h.phase_run_id,
+			        h.evaluator_verdict, h.evaluator_confidence, h.evaluator_reason, h.evaluator_evaluated_at,
+			        COALESCE(rc.max_rounds, c.orchestrator_max_rounds) AS max_rounds
+			 FROM relay_handoff h
+			 JOIN collab c ON c.collab_id = h.collab_id
+			 LEFT JOIN relay_chains rc ON rc.chain_id = h.chain_id
+			 WHERE h.handoff_id = ?`,
+		)
+		.get(handoffId) as
+		| (Parameters<typeof rowToRecord>[0] & {
+				handoff_step: string | null;
+				workflow_id: string | null;
+				phase_run_id: string | null;
+				evaluator_verdict: string | null;
+				evaluator_confidence: number | null;
+				evaluator_reason: string | null;
+				evaluator_evaluated_at: string | null;
+		  })
+		| undefined;
+	if (!row) return null;
+	const base = rowToRecord(row);
+	return {
+		...base,
+		handoffStep: row.handoff_step as "review" | "fix" | "implement" | "execute" | null,
+		workflowId: row.workflow_id,
+		phaseRunId: row.phase_run_id,
+		evaluatorVerdict: row.evaluator_verdict,
+		evaluatorConfidence: row.evaluator_confidence,
+	};
+}
+
+export function updateEvaluatorBookkeeping(
+	db: Database.Database,
+	input: {
+		handoffId: string;
+		evaluatorVerdict: string;
+		evaluatorConfidence: number;
+		evaluatorReason: string;
+		evaluatorEvaluatedAt: string;
+		legacyVerdict: "done" | "loop" | "escalate";
+	},
+): void {
+	db.prepare(
+		`UPDATE relay_handoff
+		   SET evaluator_verdict = ?,
+		       evaluator_confidence = ?,
+		       evaluator_reason = ?,
+		       evaluator_evaluated_at = ?,
+		       orchestrator_status = 'processed',
+		       orchestrator_verdict = ?,
+		       orchestrator_reason = ?,
+		       orchestrator_evaluated_at = ?
+		 WHERE handoff_id = ?`,
+	).run(
+		input.evaluatorVerdict,
+		input.evaluatorConfidence,
+		input.evaluatorReason,
+		input.evaluatorEvaluatedAt,
+		input.legacyVerdict,
+		input.evaluatorReason,
+		input.evaluatorEvaluatedAt,
+		input.handoffId,
+	);
+}
+
+export function structuredVerdictToLegacy(
+	v: "approve" | "findings" | "delivered" | "execution-pass" | "execution-fail" | "escalate",
+): "done" | "loop" | "escalate" {
+	if (v === "approve" || v === "execution-pass") return "done";
+	if (v === "findings" || v === "delivered") return "loop";
+	return "escalate";
+}
+
 export function cleanupOrchestrationOnShutdownTxn(
 	db: Database.Database,
 	input: { collabId: string; reason: string; now: string },
