@@ -1,5 +1,7 @@
 export type HandoffStep = "review" | "fix" | "implement" | "execute";
 
+export type ArtifactKind = "spec" | "plan" | "commit-range";
+
 export interface PhaseConfig {
 	name: string;
 	implementerRole: "implementer";
@@ -9,7 +11,7 @@ export interface PhaseConfig {
 	kickoffTemplate: string;
 	stepTemplates: Partial<Record<HandoffStep, string>>;
 	evaluatorPromptKey: "review-loop" | "execution-gate";
-	artifactOut: { kind: string; pathTemplate?: string };
+	artifactOut: { kind: ArtifactKind; pathTemplate?: string };
 }
 
 export interface WorkflowDefinition {
@@ -105,6 +107,11 @@ export function listWorkflowTypes(): string[] {
 	return Object.keys(REGISTRY);
 }
 
+/**
+ * Substitute `{key}` placeholders in `template` with `values[key]`.
+ * Unknown keys are left literal so callers can layer partial renders.
+ * Single-pass: values containing `{key}`-like text are NOT re-rendered.
+ */
 export function renderTemplate(
 	template: string,
 	values: Record<string, string>,
@@ -114,8 +121,25 @@ export function renderTemplate(
 	);
 }
 
+/**
+ * Derive a plan file path from a design spec path.
+ *
+ * Expects `specPath` to end with `-design.md` (optionally prefixed with `YYYY-MM-DD-`).
+ * Expects `dateIso` to start with `YYYY-MM-DD`.
+ * Throws on inputs that don't match these shapes — callers should sanitize first.
+ */
 export function derivePlanPath(specPath: string, dateIso: string): string {
-	const basename = specPath.split("/").pop() ?? "plan.md";
+	if (!/^\d{4}-\d{2}-\d{2}/.test(dateIso)) {
+		throw new Error(
+			`derivePlanPath: dateIso must start with YYYY-MM-DD, got "${dateIso}"`,
+		);
+	}
+	const basename = specPath.split("/").pop() ?? "";
+	if (!basename.endsWith("-design.md")) {
+		throw new Error(
+			`derivePlanPath: specPath must end with "-design.md", got "${specPath}"`,
+		);
+	}
 	const withoutExt = basename.replace(/\.md$/, "");
 	const slug = withoutExt
 		.replace(/-design$/, "")

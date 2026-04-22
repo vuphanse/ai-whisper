@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	derivePlanPath,
 	getWorkflowDefinition,
 	listWorkflowTypes,
+	renderTemplate,
 	SUPERPOWERS_FEATURE_DEVELOPMENT,
 } from "../packages/broker/src/runtime/workflow-registry.ts";
 
@@ -37,5 +39,56 @@ describe("workflow-registry", () => {
 
 	it("listWorkflowTypes includes the one registered type", () => {
 		expect(listWorkflowTypes()).toContain("superpowers-feature-development");
+	});
+});
+
+describe("renderTemplate", () => {
+	it("replaces known keys", () => {
+		expect(renderTemplate("hello {name}", { name: "world" })).toBe(
+			"hello world",
+		);
+	});
+
+	it("leaves unknown keys literal", () => {
+		expect(renderTemplate("{known} and {unknown}", { known: "a" })).toBe(
+			"a and {unknown}",
+		);
+	});
+
+	it("replaces multiple occurrences", () => {
+		expect(renderTemplate("{x}-{x}-{x}", { x: "q" })).toBe("q-q-q");
+	});
+
+	it("single-pass: values containing a placeholder-like token are not re-rendered", () => {
+		expect(renderTemplate("{a}", { a: "{b}", b: "zzz" })).toBe("{b}");
+	});
+});
+
+describe("derivePlanPath", () => {
+	it("derives a plan path from a dated design spec", () => {
+		expect(
+			derivePlanPath(
+				"docs/superpowers/specs/2026-04-21-foo-design.md",
+				"2026-04-22T10:00:00Z",
+			),
+		).toBe("docs/superpowers/plans/2026-04-22-foo.md");
+	});
+
+	it("derives a plan path from an undated design spec", () => {
+		expect(
+			derivePlanPath("docs/superpowers/specs/foo-design.md", "2026-04-22"),
+		).toBe("docs/superpowers/plans/2026-04-22-foo.md");
+	});
+
+	it("throws on a non-design spec path", () => {
+		expect(() =>
+			derivePlanPath("docs/superpowers/specs/foo.md", "2026-04-22"),
+		).toThrow(/must end with "-design.md"/);
+	});
+
+	it("throws on a non-ISO date", () => {
+		expect(() =>
+			derivePlanPath("docs/superpowers/specs/foo-design.md", "not-a-date"),
+		).toThrow(/must start with YYYY-MM-DD/);
 	});
 });
