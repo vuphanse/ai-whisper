@@ -55,6 +55,7 @@ export function createBrokerEventBus(): BrokerEventBus {
 		on(event, handler) {
 			const wrapped = (payload: unknown): void => {
 				try {
+					// safe: on/emit generics constrain E's payload; EventEmitter is untyped.
 					handler(payload as never);
 				} catch (error) {
 					console.error(`[broker-event-bus] handler for ${String(event)} threw`, error);

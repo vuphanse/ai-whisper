@@ -20,13 +20,20 @@ describe("BrokerEventBus", () => {
 	});
 
 	it("errors in one subscriber do not block others", () => {
-		const bus = createBrokerEventBus();
-		bus.on("chain.resolved", () => {
-			throw new Error("boom");
-		});
-		const ok = vi.fn();
-		bus.on("chain.resolved", ok);
-		bus.emit("chain.resolved", { collabId: "c1", chainId: "ch_1" });
-		expect(ok).toHaveBeenCalled();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const bus = createBrokerEventBus();
+			bus.on("chain.resolved", () => {
+				throw new Error("boom");
+			});
+			const ok = vi.fn();
+			bus.on("chain.resolved", ok);
+			bus.emit("chain.resolved", { collabId: "c1", chainId: "ch_1" });
+			expect(ok).toHaveBeenCalled();
+			expect(errorSpy).toHaveBeenCalledTimes(1);
+			expect(errorSpy.mock.calls[0]?.[0]).toContain("chain.resolved");
+		} finally {
+			errorSpy.mockRestore();
+		}
 	});
 });
