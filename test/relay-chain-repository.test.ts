@@ -65,4 +65,25 @@ describe("relay-chain-repository", () => {
 		expect(terminal?.status).toBe("escalated");
 		expect(terminal?.terminalReason).toBe("max-rounds-reached (5/5)");
 	});
+
+	it("allows null terminalHandoffId for shutdown-driven abandonment", () => {
+		const { db } = setup();
+		insertRelayChain(db, {
+			chainId: "relay_ch_1",
+			collabId: "c1",
+			maxRounds: 5,
+			now: "2026-04-21T00:00:00Z",
+		});
+		setChainTerminal(db, {
+			chainId: "relay_ch_1",
+			status: "abandoned",
+			terminalHandoffId: null,
+			terminalReason: "broker-shutdown",
+			now: "2026-04-21T00:02:00Z",
+		});
+		const terminal = getRelayChain(db, "relay_ch_1");
+		expect(terminal?.status).toBe("abandoned");
+		expect(terminal?.terminalHandoffId).toBeNull();
+		expect(terminal?.terminalReason).toBe("broker-shutdown");
+	});
 });

@@ -73,7 +73,7 @@ export function setChainTerminal(
 	input: {
 		chainId: string;
 		status: "done" | "escalated" | "abandoned";
-		terminalHandoffId: string;
+		terminalHandoffId: string | null;
 		terminalReason: string | null;
 		now: string;
 	},
