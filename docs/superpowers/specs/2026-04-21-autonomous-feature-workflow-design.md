@@ -155,7 +155,7 @@ Durable per-chain terminal state, previously conflated with collab-level relay t
 | `createdAt` | TEXT | |
 | `updatedAt` | TEXT | |
 
-Populated by broker whenever a chain is created (workflow-owned or legacy). `broker.control.getRelayChain(chainId)` returns this record.
+**v1 scope:** populated by broker only for workflow-owned chains (Task 6 `beginPhaseRun` and `applyOrchestratorVerdict`-driven next-phase kickoff insert `relay_chains` rows). Legacy handoffs created via `createRelayHandoff` / `createLoopRelayHandoff` and resolved via `resolveRelayChain` / `markRelayChainEscalated` continue to store collab-level chain state on `relay_turn_state` and do NOT get `relay_chains` rows. Extending coverage to legacy chains is a post-v1 follow-up. `broker.control.getRelayChain(chainId)` returns the row when present and `null` for legacy chains.
 
 ### Extended table `relay_handoff`
 
