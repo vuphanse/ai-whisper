@@ -202,8 +202,52 @@ CREATE TABLE IF NOT EXISTS relay_handoff (
   orchestrator_evaluated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS workflows (
+  workflow_id TEXT PRIMARY KEY,
+  collab_id TEXT NOT NULL,
+  workflow_type TEXT NOT NULL,
+  name TEXT,
+  spec_path TEXT NOT NULL,
+  role_bindings TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_phase_index INTEGER NOT NULL,
+  halt_reason TEXT,
+  workflow_context TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS workflows_one_running_per_collab
+  ON workflows(collab_id) WHERE status = 'running';
+
+CREATE TABLE IF NOT EXISTS workflow_phases (
+  phase_run_id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  phase_index INTEGER NOT NULL,
+  phase_name TEXT NOT NULL,
+  chain_id TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  outcome TEXT
+);
+
+CREATE INDEX IF NOT EXISTS workflow_phases_by_workflow
+  ON workflow_phases(workflow_id, phase_index);
+
+CREATE TABLE IF NOT EXISTS relay_chains (
+  chain_id TEXT PRIMARY KEY,
+  collab_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  current_round INTEGER NOT NULL,
+  max_rounds INTEGER NOT NULL,
+  terminal_handoff_id TEXT,
+  terminal_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
-VALUES (1, 1, 1)
+VALUES (1, 2, 1)
 ON CONFLICT(id) DO UPDATE SET
   schema_version = excluded.schema_version,
   migrated = excluded.migrated;
@@ -287,6 +331,27 @@ export function applyMigrations(db: Database.Database): void {
 	}
 	if (!relayHandoffColumns.some((column) => column.name === "orchestrator_evaluated_at")) {
 		db.exec("ALTER TABLE relay_handoff ADD COLUMN orchestrator_evaluated_at TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "handoff_step")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN handoff_step TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "workflow_id")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN workflow_id TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "phase_run_id")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN phase_run_id TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "evaluator_verdict")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN evaluator_verdict TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "evaluator_confidence")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN evaluator_confidence REAL");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "evaluator_reason")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN evaluator_reason TEXT");
+	}
+	if (!relayHandoffColumns.some((c) => c.name === "evaluator_evaluated_at")) {
+		db.exec("ALTER TABLE relay_handoff ADD COLUMN evaluator_evaluated_at TEXT");
 	}
 
 	const collabColumns = db.prepare("PRAGMA table_info(collab)").all() as Array<{ name: string }>;

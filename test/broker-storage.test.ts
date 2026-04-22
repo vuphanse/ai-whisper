@@ -14,7 +14,7 @@ describe("broker storage bootstrap", () => {
 		applyMigrations(db);
 
 		expect(getBrokerState(db)).toEqual({
-			schemaVersion: 1,
+			schemaVersion: 2,
 			migrated: true,
 		});
 
