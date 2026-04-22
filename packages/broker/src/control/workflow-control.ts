@@ -156,22 +156,21 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				`beginPhaseRun: workflow ${input.workflowId} not running (status=${workflow.status})`,
 			);
 		}
-		if (
-			hasOpenPhaseRunForIndex(db, {
-				workflowId: input.workflowId,
-				phaseIndex: input.phaseIndex,
-			})
-		) {
-			throw new Error(
-				`beginPhaseRun: open phase run already exists for workflow ${input.workflowId} index ${input.phaseIndex}`,
-			);
-		}
-
 		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const handoffId = `ho_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
 		const tx = db.transaction(() => {
+			if (
+				hasOpenPhaseRunForIndex(db, {
+					workflowId: input.workflowId,
+					phaseIndex: input.phaseIndex,
+				})
+			) {
+				throw new Error(
+					`beginPhaseRun: open phase run already exists for workflow ${input.workflowId} index ${input.phaseIndex}`,
+				);
+			}
 			insertRelayChain(db, {
 				chainId,
 				collabId: workflow.collabId,
@@ -210,9 +209,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 		tx.immediate();
 
-		const implementer =
-			workflow.roleBindings.implementer ?? input.sender;
-		const reviewer = workflow.roleBindings.reviewer ?? input.target;
+		const implementer = workflow.roleBindings.implementer;
+		const reviewer = workflow.roleBindings.reviewer;
 
 		events.emit("workflow.phase-started", {
 			workflowId: input.workflowId,

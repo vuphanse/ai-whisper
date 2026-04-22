@@ -709,11 +709,7 @@ export function markRelayChainAbandonedTxn(
 	})();
 }
 
-/**
- * Marks all in-flight orchestrated handoffs for a collab as abandoned.
- * Called during daemon shutdown to prevent records stranding when a collab
- * ends mid-chain.
- */
+/** Inserts a workflow-owned relay handoff and atomically updates relay_turn_state. */
 export function insertWorkflowOwnedRelayHandoff(
 	db: Database.Database,
 	input: {
@@ -763,6 +759,7 @@ export function insertWorkflowOwnedRelayHandoff(
 		input.now,
 	);
 
+	// Callers must ensure the collab has no unresolved handoff before calling this.
 	// Flip turn ownership so the mount surface sees the new handoff.
 	upsertRelayTurnState(db, {
 		collabId: input.collabId,
