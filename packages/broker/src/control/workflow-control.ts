@@ -369,6 +369,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			phaseRunId: input.prev.phaseRunId!,
 			now: input.now,
 		});
+		// findings → fix does NOT increment the round; the reviewer is sending back to
+		// the implementer within the same review cycle. Only delivered → review increments,
+		// marking the start of a new full review round.
 		if (input.incrementRound) {
 			incrementChainRound(db, {
 				chainId: input.chain.chainId,
@@ -383,8 +386,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		definition: WorkflowDefinition;
 		workspaceHeadSha: string | undefined;
 		now: string;
-		pendingEmissions: Array<{ name: BrokerEventName; payload: unknown }>;
-	}): { phaseRunId: string; chainId: string; handoffId: string } {
+	}): { phaseRunId: string; chainId: string; handoffId: string; emissions: Array<{ name: BrokerEventName; payload: unknown }> } {
 		const phase = input.definition.phases[input.workflow.currentPhaseIndex];
 		const sender =
 			phase.initialHandoffStep === "review"
@@ -446,31 +448,33 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				now: input.now,
 			});
 		}
-		input.pendingEmissions.push({
-			name: "workflow.phase-started",
-			payload: {
-				workflowId: input.workflow.workflowId,
-				phaseIndex: input.workflow.currentPhaseIndex,
-				phaseName: phase.name,
-				chainId,
-				phaseRunId,
-				implementer: getAgentForRole(input.workflow, "implementer"),
-				reviewer: getAgentForRole(input.workflow, "reviewer"),
+		const emissions: Array<{ name: BrokerEventName; payload: unknown }> = [
+			{
+				name: "workflow.phase-started",
+				payload: {
+					workflowId: input.workflow.workflowId,
+					phaseIndex: input.workflow.currentPhaseIndex,
+					phaseName: phase.name,
+					chainId,
+					phaseRunId,
+					implementer: getAgentForRole(input.workflow, "implementer"),
+					reviewer: getAgentForRole(input.workflow, "reviewer"),
+				},
 			},
-		});
-		input.pendingEmissions.push({
-			name: "workflow.round-started",
-			payload: {
-				workflowId: input.workflow.workflowId,
-				chainId,
-				phaseRunId,
-				roundNumber: 1,
-				handoffStep: phase.initialHandoffStep,
-				sender,
-				target,
+			{
+				name: "workflow.round-started",
+				payload: {
+					workflowId: input.workflow.workflowId,
+					chainId,
+					phaseRunId,
+					roundNumber: 1,
+					handoffStep: phase.initialHandoffStep,
+					sender,
+					target,
+				},
 			},
-		});
-		return { phaseRunId, chainId, handoffId };
+		];
+		return { phaseRunId, chainId, handoffId, emissions };
 	}
 
 	function applyOrchestratorVerdict(input: {
@@ -554,6 +558,17 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		}> = [];
 
 		const tx = db.transaction(() => {
+			// Authoritative idempotency guard: re-read the verdict inside the write
+			// lock so a concurrent caller that slipped past the fast-path check above
+			// cannot apply the verdict twice.
+			const currentVerdict = db
+				.prepare("SELECT evaluator_verdict FROM relay_handoff WHERE handoff_id = ?")
+				.get(input.handoffId) as { evaluator_verdict: string | null } | undefined;
+			if (currentVerdict?.evaluator_verdict) {
+				action = "noop-already-applied";
+				return;
+			}
+
 			updateEvaluatorBookkeeping(db, {
 				handoffId: input.handoffId,
 				evaluatorVerdict: normalized.verdict,
@@ -637,10 +652,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 						definition,
 						workspaceHeadSha: input.workspaceHeadSha,
 						now: input.now,
-						pendingEmissions,
 					});
 					nextHandoffId = kickoff.handoffId;
 					nextPhaseRunId = kickoff.phaseRunId;
+					// Store kickoff emissions for ordered assembly in the emission block below.
+					pendingEmissions.push(...kickoff.emissions);
 					action = "phase-advanced";
 				}
 			} else if (normalized.verdict === "findings") {
@@ -763,21 +779,29 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					},
 				});
 			} else if (action === "phase-advanced") {
-				pendingEmissions.unshift({
-					name: "chain.resolved",
-					payload: {
-						collabId: workflow.collabId,
-						chainId: chain.chainId,
+				// Explicit ordering: chain.resolved → workflow.phase-done → workflow.phase-started → workflow.round-started
+				// kickoff.emissions (phase-started + round-started) were already pushed into pendingEmissions;
+				// extract them and rebuild the sequence so the order is visible in code, not inferred from
+				// array-mutation tricks.
+				const kickoffEmissions = pendingEmissions.splice(0);
+				pendingEmissions.push(
+					{
+						name: "chain.resolved",
+						payload: {
+							collabId: workflow.collabId,
+							chainId: chain.chainId,
+						},
 					},
-				});
-				pendingEmissions.splice(1, 0, {
-					name: "workflow.phase-done",
-					payload: {
-						workflowId: workflow.workflowId,
-						phaseIndex: workflow.currentPhaseIndex,
-						phaseName: phase.name,
+					{
+						name: "workflow.phase-done",
+						payload: {
+							workflowId: workflow.workflowId,
+							phaseIndex: workflow.currentPhaseIndex,
+							phaseName: phase.name,
+						},
 					},
-				});
+					...kickoffEmissions,
+				);
 			} else if (action === "workflow-done") {
 				pendingEmissions.push(
 					{

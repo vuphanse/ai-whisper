@@ -784,6 +784,7 @@ export function getHandoffWithWorkflowMetaById(
 	phaseRunId: string | null;
 	evaluatorVerdict: string | null;
 	evaluatorConfidence: number | null;
+	evaluatorReason: string | null;
 }) | null {
 	const row = db
 		.prepare(
@@ -820,6 +821,7 @@ export function getHandoffWithWorkflowMetaById(
 		phaseRunId: row.phase_run_id,
 		evaluatorVerdict: row.evaluator_verdict,
 		evaluatorConfidence: row.evaluator_confidence,
+		evaluatorReason: row.evaluator_reason,
 	};
 }
 
@@ -842,6 +844,7 @@ export function updateEvaluatorBookkeeping(
 		       evaluator_evaluated_at = ?,
 		       orchestrator_status = 'processed',
 		       orchestrator_verdict = ?,
+		       -- Mirror reason to legacy column for backward-compatible reporting.
 		       orchestrator_reason = ?,
 		       orchestrator_evaluated_at = ?
 		 WHERE handoff_id = ?`,

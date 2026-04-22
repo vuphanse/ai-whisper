@@ -47,6 +47,66 @@ function setup() {
 	return { broker, workflowId, handoffId, chainId };
 }
 
+/**
+ * Drive a workflow from phase 0 (spec-refining) all the way to the plan-execution
+ * execute handoff, returning the handoffId for that execute step.
+ */
+function driveToExecutePhase(
+	broker: ReturnType<typeof setup>["broker"],
+	workflowId: string,
+	specRefineHandoffId: string,
+): { executeHandoffId: string; chainId: string } {
+	// Phase 0: spec-refining approve → advances to plan-writing (implement step)
+	broker.control.applyOrchestratorVerdict({
+		handoffId: specRefineHandoffId,
+		verdict: "approve",
+		confidence: 0.9,
+		reason: "spec good",
+		now: "2026-04-21T00:10:00Z",
+	});
+
+	// Phase 1: plan-writing — get the implement handoff
+	const planImplementRow = broker.db
+		.prepare(
+			"SELECT handoff_id FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'implement' ORDER BY created_at DESC LIMIT 1",
+		)
+		.get(workflowId) as { handoff_id: string };
+
+	// delivered → creates review handoff
+	broker.control.applyOrchestratorVerdict({
+		handoffId: planImplementRow.handoff_id,
+		verdict: "delivered",
+		confidence: 0.9,
+		reason: "plan written",
+		now: "2026-04-21T00:11:00Z",
+	});
+
+	// plan-writing review → approve with workspaceHeadSha → advances to plan-execution
+	const planReviewRow = broker.db
+		.prepare(
+			"SELECT handoff_id FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'review' AND phase_run_id IN (SELECT phase_run_id FROM workflow_phases WHERE phase_index = 1) ORDER BY created_at DESC LIMIT 1",
+		)
+		.get(workflowId) as { handoff_id: string };
+
+	broker.control.applyOrchestratorVerdict({
+		handoffId: planReviewRow.handoff_id,
+		verdict: "approve",
+		confidence: 0.9,
+		reason: "plan good",
+		workspaceHeadSha: "abc1234",
+		now: "2026-04-21T00:12:00Z",
+	});
+
+	// plan-execution execute handoff
+	const executeRow = broker.db
+		.prepare(
+			"SELECT handoff_id, chain_id FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'execute' ORDER BY created_at DESC LIMIT 1",
+		)
+		.get(workflowId) as { handoff_id: string; chain_id: string };
+
+	return { executeHandoffId: executeRow.handoff_id, chainId: executeRow.chain_id };
+}
+
 describe("applyOrchestratorVerdict — review step", () => {
 	it("review + approve → chain done, phase advanced, next phase started", () => {
 		const { broker, workflowId, handoffId } = setup();
@@ -248,5 +308,99 @@ describe("applyOrchestratorVerdict — advancing into plan-execution requires wo
 				now: "2026-04-21T00:12:00Z",
 			}),
 		).toThrow(/workspaceHeadSha/);
+	});
+});
+
+describe("applyOrchestratorVerdict — execution-fail", () => {
+	it("execution-fail → workflow-halted, chain escalated", () => {
+		const { broker, workflowId, handoffId } = setup();
+
+		const { executeHandoffId, chainId } = driveToExecutePhase(broker, workflowId, handoffId);
+
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId: executeHandoffId,
+			verdict: "execution-fail",
+			confidence: 0.9,
+			reason: "tests failed",
+			now: "2026-04-21T00:20:00Z",
+		});
+
+		expect(result.action).toBe("workflow-halted");
+		expect(broker.control.getRelayChain(chainId)?.status).toBe("escalated");
+		expect(broker.control.getWorkflow(workflowId)?.status).toBe("halted");
+	});
+});
+
+describe("applyOrchestratorVerdict — workflow-done emission sequence", () => {
+	it("last-phase approve emits chain.resolved, workflow.phase-done, workflow.done in order", () => {
+		const { broker, workflowId, handoffId } = setup();
+		const seen: string[] = [];
+
+		const { executeHandoffId } = driveToExecutePhase(broker, workflowId, handoffId);
+
+		// execution-pass → advances to code-review phase
+		broker.control.applyOrchestratorVerdict({
+			handoffId: executeHandoffId,
+			verdict: "execution-pass",
+			confidence: 0.95,
+			reason: "tests passed",
+			extractedCommitShas: ["abc1234", "def5678"],
+			now: "2026-04-21T00:21:00Z",
+		});
+
+		// code-review review handoff
+		const codeReviewRow = broker.db
+			.prepare(
+				"SELECT handoff_id FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'review' AND phase_run_id IN (SELECT phase_run_id FROM workflow_phases WHERE phase_index = 3) ORDER BY created_at DESC LIMIT 1",
+			)
+			.get(workflowId) as { handoff_id: string };
+
+		// Subscribe after setup so we only capture the final approval events
+		for (const name of [
+			"chain.resolved",
+			"workflow.phase-done",
+			"workflow.done",
+		] as const) {
+			broker.events.on(name, () => seen.push(name));
+		}
+
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId: codeReviewRow.handoff_id,
+			verdict: "approve",
+			confidence: 0.9,
+			reason: "code looks great",
+			now: "2026-04-21T00:22:00Z",
+		});
+
+		expect(result.action).toBe("workflow-done");
+		expect(seen).toEqual(["chain.resolved", "workflow.phase-done", "workflow.done"]);
+	});
+});
+
+describe("applyOrchestratorVerdict — execution-pass commit context", () => {
+	it("execution-pass with extractedCommitShas stores commit range in workflowContext", () => {
+		const { broker, workflowId, handoffId } = setup();
+
+		const { executeHandoffId } = driveToExecutePhase(broker, workflowId, handoffId);
+
+		broker.control.applyOrchestratorVerdict({
+			handoffId: executeHandoffId,
+			verdict: "execution-pass",
+			confidence: 0.95,
+			reason: "all green",
+			extractedCommitShas: ["aaa1111", "bbb2222"],
+			now: "2026-04-21T00:20:00Z",
+		});
+
+		const wf = broker.control.getWorkflow(workflowId);
+		const ctx = wf?.workflowContext as {
+			executionCommitShas?: string[];
+			headAfterExecution?: string;
+			commitRange?: string;
+		};
+		expect(ctx?.executionCommitShas).toEqual(["aaa1111", "bbb2222"]);
+		expect(ctx?.headAfterExecution).toBe("bbb2222");
+		// base is the workspaceHeadSha used when entering the execute phase
+		expect(ctx?.commitRange).toBe("abc1234..bbb2222");
 	});
 });
