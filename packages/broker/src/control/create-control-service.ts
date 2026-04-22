@@ -109,6 +109,8 @@ import {
 	markRelayChainAbandonedTxn,
 	cleanupOrchestrationOnShutdownTxn,
 } from "../storage/repositories/relay-handoff-repository.js";
+import { createWorkflowControl } from "./workflow-control.js";
+import type { BrokerEventBus } from "../runtime/broker-event-bus.js";
 
 function normalizeTimestampForEventId(timestamp: string): string {
 	return timestamp.replace(/[^0-9]/g, "");
@@ -122,8 +124,9 @@ function buildEventId(
 	return `evt_${kind}_${subjectId}_${normalizeTimestampForEventId(timestamp)}`;
 }
 
-export function createControlService(db: Database.Database) {
-	return {
+export function createControlService(db: Database.Database, events: BrokerEventBus) {
+	const workflowControl = createWorkflowControl({ db, events });
+	return Object.assign({
 		startCollab(input: {
 			collabId: string;
 			workspaceRoot: string;
@@ -1094,5 +1097,5 @@ export function createControlService(db: Database.Database) {
 		cleanupOrchestration(input: { collabId: string; reason: string; now: string }) {
 			return cleanupOrchestrationOnShutdownTxn(db, input);
 		},
-	};
+	}, workflowControl);
 }

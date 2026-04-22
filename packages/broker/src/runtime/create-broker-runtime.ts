@@ -6,12 +6,17 @@ import { brokerConfigSchema, type BrokerConfig } from "../config.js";
 import { applyMigrations } from "../storage/apply-migrations.js";
 import { openDatabase } from "../storage/open-database.js";
 import { getBrokerState } from "../storage/repositories/broker-state-repository.js";
+import {
+	createBrokerEventBus,
+	type BrokerEventBus,
+} from "./broker-event-bus.js";
 
 export type BrokerRuntime = {
 	app: FastifyInstance;
 	config: BrokerConfig;
 	db: Database.Database;
 	control: ReturnType<typeof createControlService>;
+	events: BrokerEventBus;
 	start(): Promise<void>;
 	stop(): Promise<void>;
 	getHealth(): { readonly ok: true };
@@ -32,7 +37,8 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 
 	applyMigrations(db);
 
-	const control = createControlService(db);
+	const events = createBrokerEventBus();
+	const control = createControlService(db, events);
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -50,6 +56,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 		config,
 		db,
 		control,
+		events,
 		async start(): Promise<void> {
 			await app.listen({
 				host: config.host,
