@@ -134,4 +134,29 @@ describe("workflow-control (read + create)", () => {
 			broker.control.listWorkflows({ collabId: TEST_COLLAB_ID, status: "done" }),
 		).toHaveLength(0);
 	});
+
+	it("createWorkflow rejects an unknown workflowType", () => {
+		const broker = setupCollab();
+		expect(() =>
+			broker.control.createWorkflow({
+				collabId: "collab_c1",
+				workflowType: "nonexistent-type",
+				specPath: "docs/spec.md",
+				roleBindings: { implementer: "claude", reviewer: "codex" },
+				now: "2026-04-21T00:00:00Z",
+			}),
+		).toThrow(/nonexistent-type/);
+	});
+
+	it("getWorkflowPhaseRuns returns empty array for a new workflow", () => {
+		const broker = setupCollab();
+		const { workflowId } = broker.control.createWorkflow({
+			collabId: "collab_c1",
+			workflowType: "superpowers-feature-development",
+			specPath: "docs/spec.md",
+			roleBindings: { implementer: "claude", reviewer: "codex" },
+			now: "2026-04-21T00:00:00Z",
+		});
+		expect(broker.control.getWorkflowPhaseRuns(workflowId)).toEqual([]);
+	});
 });

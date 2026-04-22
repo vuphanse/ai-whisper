@@ -67,15 +67,14 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			}
 		}
 
-		if (countRunningWorkflowsForCollab(db, input.collabId) > 0) {
-			throw new Error(
-				`another workflow is already running on this collab (${input.collabId})`,
-			);
-		}
-
 		const workflowId = `wf_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
 		const tx = db.transaction(() => {
+			if (countRunningWorkflowsForCollab(db, input.collabId) > 0) {
+				throw new Error(
+					`another workflow is already running on this collab (${input.collabId})`,
+				);
+			}
 			insertWorkflow(db, {
 				workflowId,
 				collabId: input.collabId,
@@ -89,6 +88,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				now: input.now,
 			});
 		});
+		// BEGIN IMMEDIATE acquires the write lock before the callback runs, making the
+		// countRunningWorkflowsForCollab guard + insertWorkflow atomic against concurrent callers.
 		tx.immediate();
 
 		events.emit("workflow.created", { workflowId });
