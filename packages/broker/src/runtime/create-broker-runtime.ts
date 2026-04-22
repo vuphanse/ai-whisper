@@ -24,7 +24,6 @@ export type BrokerRuntime = {
 			readonly migrated: boolean;
 		};
 	};
-	__getDbForTests(): Database.Database;
 };
 
 export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
@@ -76,9 +75,6 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 					migrated: getBrokerState(db).migrated,
 				},
 			};
-		},
-		__getDbForTests() {
-			return db;
 		},
 	};
 }

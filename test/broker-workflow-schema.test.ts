@@ -8,7 +8,7 @@ describe("workflow schema migrations", () => {
 			host: "127.0.0.1",
 			port: 4321,
 		});
-		const db = broker.__getDbForTests();
+		const db = broker.db;
 
 		const tables = db
 			.prepare(
@@ -29,7 +29,7 @@ describe("workflow schema migrations", () => {
 			host: "127.0.0.1",
 			port: 4321,
 		});
-		const db = broker.__getDbForTests();
+		const db = broker.db;
 
 		db.prepare(
 			`INSERT INTO collab (collab_id, workspace_root, display_name, status, created_at, updated_at)
@@ -54,7 +54,7 @@ describe("workflow schema migrations", () => {
 			host: "127.0.0.1",
 			port: 4321,
 		});
-		const db = broker.__getDbForTests();
+		const db = broker.db;
 		const cols = db
 			.prepare("PRAGMA table_info(relay_handoff)")
 			.all() as Array<{ name: string }>;
