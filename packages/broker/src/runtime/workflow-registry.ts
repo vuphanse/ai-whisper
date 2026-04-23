@@ -117,7 +117,9 @@ export function renderTemplate(
 	values: Record<string, string>,
 ): string {
 	return template.replace(/\{(\w+)\}/g, (match, key) =>
-		Object.prototype.hasOwnProperty.call(values, key) ? values[key] : match,
+		Object.prototype.hasOwnProperty.call(values, key)
+			? (values[key] ?? match)
+			: match,
 	);
 }
 

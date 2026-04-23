@@ -1,24 +1,37 @@
 import type { WorkspaceHeadReader } from "./workspace-head-reader.js";
+import type { BrokerEventBus } from "./broker-event-bus.js";
 import {
 	getWorkflowDefinition,
 	derivePlanPath,
 	renderTemplate,
 } from "./workflow-registry.js";
 
+type WorkflowStatus = "running" | "halted" | "done" | "canceled";
+type WorkflowRecordLike = {
+	workflowId: string;
+	collabId: string;
+	workflowType: string;
+	currentPhaseIndex: number;
+	status: WorkflowStatus;
+	specPath: string;
+	roleBindings: Record<string, "claude" | "codex">;
+	workflowContext: Record<string, unknown>;
+	createdAt: string;
+	haltReason: string | null;
+};
+
 export interface WorkflowDriverDeps {
 	broker: {
 		control: {
-			getWorkflow: (id: string) => { workflowId: string; collabId: string; workflowType: string; currentPhaseIndex: number; status: string; specPath: string; roleBindings: Record<string, string>; workflowContext: Record<string, unknown>; createdAt: string; haltReason: string | null } | null | undefined;
-			listWorkflows: (filter?: { status?: string }) => Array<{ workflowId: string; collabId: string; workflowType: string; currentPhaseIndex: number; status: string; specPath: string; roleBindings: Record<string, string>; workflowContext: Record<string, unknown>; createdAt: string }>;
+			getWorkflow: (id: string) => WorkflowRecordLike | null | undefined;
+			listWorkflows: (filter?: { status?: WorkflowStatus }) => WorkflowRecordLike[];
 			getWorkflowPhaseRuns: (id: string) => Array<{ phaseIndex: number; endedAt: string | null }>;
 			beginPhaseRun: (input: { workflowId: string; phaseIndex: number; phaseName: string; initialHandoffStep: "review" | "fix" | "implement" | "execute"; kickoffText: string; sender: "claude" | "codex"; target: "claude" | "codex"; maxRounds: number; executionBaseHeadSha?: string; now: string }) => { phaseRunId: string; chainId: string; handoffId: string };
 			haltWorkflow: (input: { workflowId: string; reason: string; now: string }) => void;
 			listSessionBindings: (collabId: string) => Array<{ agentType: string; bindingState: string }>;
 			getCollab: (collabId: string) => { workspaceRoot: string } | null;
 		};
-		events: {
-			on: (name: string, handler: (payload: { workflowId: string; [key: string]: unknown }) => void) => () => void;
-		};
+		events: BrokerEventBus;
 	};
 	headReader: WorkspaceHeadReader;
 	/** Interval (ms) for the recovery sweep. 0 = disabled. */
@@ -165,7 +178,9 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 				sender,
 				target,
 				maxRounds: phase.maxRounds,
-				executionBaseHeadSha,
+				...(executionBaseHeadSha !== undefined
+					? { executionBaseHeadSha }
+					: {}),
 				now,
 			});
 		} catch (err) {

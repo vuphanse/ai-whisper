@@ -56,7 +56,13 @@ type BrokerLike = {
 		}) => void;
 		applyOrchestratorVerdict: (input: {
 			handoffId: string;
-			verdict: string;
+			verdict:
+				| "approve"
+				| "findings"
+				| "delivered"
+				| "execution-pass"
+				| "execution-fail"
+				| "escalate";
 			confidence: number;
 			reason: string;
 			followUpMessage?: string;
@@ -216,9 +222,11 @@ export function createRelayOrchestrator(input: {
 						verdict: wfVerdict.verdict,
 						confidence: wfVerdict.confidence,
 						reason: wfVerdict.reason,
-						followUpMessage: wfVerdict.verdict === "findings" ? wfVerdict.followUpMessage : undefined,
-						extractedCommitShas,
-						workspaceHeadSha,
+						...(wfVerdict.verdict === "findings" && wfVerdict.followUpMessage !== undefined
+							? { followUpMessage: wfVerdict.followUpMessage }
+							: {}),
+						...(extractedCommitShas !== undefined ? { extractedCommitShas } : {}),
+						...(workspaceHeadSha !== undefined ? { workspaceHeadSha } : {}),
 						now: now(),
 					});
 				} catch (verdictError) {

@@ -227,8 +227,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 		tx.immediate();
 
-		const implementer = workflow.roleBindings.implementer;
-		const reviewer = workflow.roleBindings.reviewer;
+		const implementer = getAgentForRole(workflow, "implementer");
+		const reviewer = getAgentForRole(workflow, "reviewer");
 
 		events.emit("workflow.phase-started", {
 			workflowId: input.workflowId,
@@ -388,6 +388,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		now: string;
 	}): { phaseRunId: string; chainId: string; handoffId: string; emissions: Array<{ name: BrokerEventName; payload: unknown }> } {
 		const phase = input.definition.phases[input.workflow.currentPhaseIndex];
+		if (!phase) {
+			throw new Error(
+				`kickoffNextPhaseInternal: no phase at index ${input.workflow.currentPhaseIndex} for workflow type ${input.definition.type}`,
+			);
+		}
 		const sender =
 			phase.initialHandoffStep === "review"
 				? getAgentForRole(input.workflow, "implementer")
@@ -520,6 +525,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 
 		const definition = getWorkflowDefinition(workflow.workflowType)!;
 		const phase = definition.phases[workflow.currentPhaseIndex];
+		if (!phase) {
+			throw new Error(
+				`applyOrchestratorVerdict: no phase at index ${workflow.currentPhaseIndex} for workflow type ${workflow.workflowType}`,
+			);
+		}
 		const nextPhase = definition.phases[workflow.currentPhaseIndex + 1];
 
 		const normalized = normalizeVerdict({
