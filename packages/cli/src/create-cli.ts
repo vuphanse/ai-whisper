@@ -367,11 +367,11 @@ export function createCli(): Command {
 		.action(async (opts: WorkspaceOpts) => {
 			const { broker, collabId } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 			try {
-				const list = await runWorkflowList({ broker, collabId });
+				const list = runWorkflowList({ broker, collabId });
 				if (list.length === 0) {
 					console.log("No workflows.");
 				} else {
-					for (const wf of list as Array<{ workflowId: string; workflowType: string; status: string }>) {
+					for (const wf of list) {
 						console.log(`${wf.workflowId}  ${wf.workflowType}  ${wf.status}`);
 					}
 				}

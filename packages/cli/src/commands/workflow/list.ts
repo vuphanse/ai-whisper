@@ -1,13 +1,30 @@
+export type WorkflowStatus = "running" | "halted" | "done" | "canceled";
+
+export type WorkflowRecord = {
+	workflowId: string;
+	collabId: string;
+	workflowType: string;
+	name: string | null;
+	specPath: string;
+	roleBindings: Record<string, "claude" | "codex">;
+	status: WorkflowStatus;
+	currentPhaseIndex: number;
+	haltReason: string | null;
+	workflowContext: Record<string, unknown>;
+	createdAt: string;
+	updatedAt: string;
+};
+
 export interface WorkflowListDeps {
 	broker: {
 		control: {
-			listWorkflows: (filter: { collabId?: string }) => unknown[];
+			listWorkflows: (filter: { collabId?: string }) => WorkflowRecord[];
 		};
 	};
 	collabId?: string;
 }
 
-export async function runWorkflowList(deps: WorkflowListDeps): Promise<unknown[]> {
+export function runWorkflowList(deps: WorkflowListDeps): WorkflowRecord[] {
 	const filter: { collabId?: string } = {};
 	if (deps.collabId !== undefined) {
 		filter.collabId = deps.collabId;
