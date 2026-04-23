@@ -1192,21 +1192,97 @@ describe("mounted turn-owned relay", () => {
 			expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
 		});
 
-		it("a/d/h/space/Ctrl+H work when workflow is halted", async () => {
-			const broker = makeAutonomousBroker({ workflowStatus: "halted" });
-			const relay = createMountedTurnOwnedRelay({
-				broker,
-				collabId: "collab_turn",
-				currentAgent: "claude",
-				writeLocalMessage() {},
-				writeUserInput() {},
-				openComposer: () => Promise.resolve(null),
-			});
+		it("a/d/h/space/Ctrl+H work when workflow is halted even if workflow_id is set", async () => {
+			// "a" — accept pending handoff
+			{
+				const broker = makeAutonomousBroker({ workflowStatus: "halted" });
+				const relay = createMountedTurnOwnedRelay({
+					broker,
+					collabId: "collab_turn",
+					currentAgent: "claude",
+					writeLocalMessage() {},
+					writeUserInput() {},
+					openComposer: () => Promise.resolve("result"),
+				});
+				await relay.handleOwnerInput("a");
+				expect(broker.control.acceptRelayHandoff).toHaveBeenCalledWith(
+					expect.objectContaining({ handoffId: "handoff_1" }),
+				);
+			}
 
-			await relay.handleOwnerInput("a");
-			expect(broker.control.acceptRelayHandoff).toHaveBeenCalledWith(
-				expect.objectContaining({ handoffId: "handoff_1" }),
-			);
+			// "d" — decline pending handoff
+			{
+				const broker = makeAutonomousBroker({ workflowStatus: "halted" });
+				const relay = createMountedTurnOwnedRelay({
+					broker,
+					collabId: "collab_turn",
+					currentAgent: "claude",
+					writeLocalMessage() {},
+					writeUserInput() {},
+					openComposer: () => Promise.resolve("result"),
+				});
+				await relay.handleOwnerInput("d");
+				expect(broker.control.declineRelayHandoff).toHaveBeenCalledWith(
+					expect.objectContaining({ handoffId: "handoff_1" }),
+				);
+			}
+
+			// " " (space) — defer pending handoff
+			{
+				const broker = makeAutonomousBroker({ workflowStatus: "halted" });
+				const relay = createMountedTurnOwnedRelay({
+					broker,
+					collabId: "collab_turn",
+					currentAgent: "claude",
+					writeLocalMessage() {},
+					writeUserInput() {},
+					openComposer: () => Promise.resolve("result"),
+				});
+				await relay.handleOwnerInput(" ");
+				expect(broker.control.deferRelayHandoff).toHaveBeenCalledWith(
+					expect.objectContaining({ handoffId: "handoff_1" }),
+				);
+			}
+
+			// "h" — hand back on an accepted-and-ready handoff (age >= 30s, assistant turn visible)
+			{
+				const broker = makeAutonomousBroker({ workflowStatus: "halted", handoffStatus: "accepted" });
+				const relay = createMountedTurnOwnedRelay({
+					broker,
+					collabId: "collab_turn",
+					currentAgent: "claude",
+					writeLocalMessage() {},
+					writeUserInput() {},
+					openComposer: () => Promise.resolve("hand-back result"),
+					turnCapture: {
+						reset: vi.fn(),
+						finishAssistantTurn: vi.fn(),
+						hasVisibleAssistantTurn: () => true,
+						extractLatestAssistantTurn: () => ({ confidence: "high" as const, text: "hand-back result" }),
+					},
+				});
+				await relay.handleOwnerInput("h");
+				expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+					expect.objectContaining({ handoffId: "handoff_1", targetAgent: "codex" }),
+				);
+			}
+
+			// Ctrl+H (\u0008) — force hand back on any accepted handoff
+			{
+				const broker = makeAutonomousBroker({ workflowStatus: "halted", handoffStatus: "accepted" });
+				const relay = createMountedTurnOwnedRelay({
+					broker,
+					collabId: "collab_turn",
+					currentAgent: "claude",
+					writeLocalMessage() {},
+					writeUserInput() {},
+					openComposer: () => Promise.resolve("forced result"),
+				});
+				await relay.handleOwnerInput("\u0008");
+				expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+					expect.objectContaining({ handoffId: "handoff_1", targetAgent: "codex" }),
+				);
+			}
 		});
 
 		it("capture failure on workflow-owned handoff calls applyOrchestratorVerdict escalate", async () => {
