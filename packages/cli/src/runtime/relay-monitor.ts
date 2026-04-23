@@ -1,5 +1,5 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
-import { getWorkflowDefinition } from "../../../broker/src/runtime/workflow-registry.js";
+import { getWorkflowDefinition } from "@ai-whisper/broker";
 
 const DIM = "\u001b[2m";
 const RESET = "\u001b[0m";
@@ -273,14 +273,11 @@ export function createRelayMonitorRuntime(input: {
 		const totalPhases = workflowDef ? workflowDef.phases.length : "?";
 
 		// Get handoff step from the latest handoff for this phase run
-		const latestHandoffRow = (input.broker.db as import("better-sqlite3").Database)
-			.prepare(
-				`SELECT handoff_step FROM relay_handoff
-				 WHERE phase_run_id = ?
-				 ORDER BY created_at DESC LIMIT 1`,
-			)
-			.get(currentPhaseRun.phaseRunId) as { handoff_step: string | null } | undefined;
-		const handoffStep = latestHandoffRow?.handoff_step ?? "-";
+		const latestHandoff =
+			typeof input.broker.control.getLatestHandoffForPhaseRun === "function"
+				? input.broker.control.getLatestHandoffForPhaseRun(currentPhaseRun.phaseRunId)
+				: null;
+		const handoffStep = latestHandoff?.handoffStep ?? "-";
 
 		// Render header block
 		const phaseLabel = currentPhaseRun.phaseName;

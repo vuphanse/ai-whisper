@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import {
 	createRelayMonitorRuntime,
@@ -216,12 +216,22 @@ describe("relay monitor", () => {
 	});
 
 	describe("relay-monitor workflow surface", () => {
+		let activeBroker: ReturnType<typeof createBrokerRuntime> | null = null;
+
+		afterEach(async () => {
+			if (activeBroker) {
+				await activeBroker.stop();
+				activeBroker = null;
+			}
+		});
+
 		function setupBrokerWithWorkflow() {
 			const broker = createBrokerRuntime({
 				sqlitePath: ":memory:",
 				host: "127.0.0.1",
 				port: 4321,
 			});
+			activeBroker = broker;
 			const collabId = "collab_c1";
 			broker.control.startCollab({
 				collabId,

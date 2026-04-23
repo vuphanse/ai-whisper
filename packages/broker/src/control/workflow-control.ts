@@ -1030,6 +1030,20 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		return getHandoffWithWorkflowMetaById(db, handoffId);
 	}
 
+	function getLatestHandoffForPhaseRun(phaseRunId: string): { handoffStep: string } | null {
+		const row = db
+			.prepare(
+				`SELECT handoff_step FROM relay_handoff
+				 WHERE phase_run_id = ?
+				 ORDER BY created_at DESC LIMIT 1`,
+			)
+			.get(phaseRunId) as { handoff_step: string | null } | undefined;
+		if (!row || row.handoff_step === null) {
+			return null;
+		}
+		return { handoffStep: row.handoff_step };
+	}
+
 	return {
 		createWorkflow,
 		getWorkflow,
@@ -1042,5 +1056,6 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		resumeWorkflow,
 		cancelWorkflow,
 		getHandoffWithWorkflowMeta,
+		getLatestHandoffForPhaseRun,
 	};
 }
