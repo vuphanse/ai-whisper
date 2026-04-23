@@ -45,6 +45,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 	const workflowDriver = createWorkflowDriver({
 		broker: { control, events },
 		headReader,
+		sweepIntervalMs: 30_000,
 	});
 	workflowDriver.start();
 	const app = createBrokerApp({
