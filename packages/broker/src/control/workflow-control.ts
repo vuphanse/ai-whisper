@@ -871,6 +871,148 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		return result;
 	}
 
+	function haltWorkflow(input: {
+		workflowId: string;
+		reason: string;
+		now: string;
+	}): void {
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`haltWorkflow: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status !== "running") {
+			throw new Error(
+				`haltWorkflow: workflow ${input.workflowId} is not running (status=${workflow.status})`,
+			);
+		}
+
+		const tx = db.transaction(() => {
+			setWorkflowStatus(db, {
+				workflowId: input.workflowId,
+				status: "halted",
+				haltReason: input.reason,
+				now: input.now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.halted", {
+			workflowId: input.workflowId,
+			reason: input.reason,
+		});
+	}
+
+	function resumeWorkflow(input: { workflowId: string; now: string }): void {
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`resumeWorkflow: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status === "canceled") {
+			throw new Error(
+				`resumeWorkflow: workflow ${input.workflowId} is canceled and cannot be resumed`,
+			);
+		}
+		if (workflow.status !== "halted") {
+			throw new Error(
+				`resumeWorkflow: workflow ${input.workflowId} is not halted (status=${workflow.status})`,
+			);
+		}
+
+		const tx = db.transaction(() => {
+			if (countRunningWorkflowsForCollab(db, workflow.collabId) > 0) {
+				throw new Error(
+					`resumeWorkflow: another workflow is already running on collab ${workflow.collabId}`,
+				);
+			}
+			setWorkflowStatus(db, {
+				workflowId: input.workflowId,
+				status: "running",
+				haltReason: null,
+				now: input.now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.resumed", {
+			workflowId: input.workflowId,
+			phaseIndex: workflow.currentPhaseIndex,
+		});
+	}
+
+	function cancelWorkflow(input: { workflowId: string; now: string }): void {
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`cancelWorkflow: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status === "canceled") {
+			throw new Error(
+				`cancelWorkflow: workflow ${input.workflowId} is already canceled`,
+			);
+		}
+		if (workflow.status === "done") {
+			throw new Error(
+				`cancelWorkflow: workflow ${input.workflowId} is already done and cannot be canceled`,
+			);
+		}
+
+		const tx = db.transaction(() => {
+			// Close any open phase runs with outcome "superseded"
+			const openPhaseRuns = listPhaseRunsForWorkflow(db, input.workflowId).filter(
+				(r) => r.endedAt === null,
+			);
+			for (const run of openPhaseRuns) {
+				// Abandon the chain for this phase run
+				const latest = db
+					.prepare(
+						`SELECT handoff_id FROM relay_handoff
+						 WHERE chain_id = ?
+						 ORDER BY created_at DESC LIMIT 1`,
+					)
+					.get(run.chainId) as { handoff_id: string } | undefined;
+
+				setChainTerminal(db, {
+					chainId: run.chainId,
+					status: "abandoned",
+					terminalHandoffId: latest?.handoff_id ?? null,
+					terminalReason: "canceled by operator",
+					now: input.now,
+				});
+
+				closeWorkflowPhaseRun(db, {
+					phaseRunId: run.phaseRunId,
+					outcome: "superseded",
+					now: input.now,
+				});
+			}
+
+			setWorkflowStatus(db, {
+				workflowId: input.workflowId,
+				status: "canceled",
+				haltReason: "canceled by operator",
+				now: input.now,
+			});
+
+			upsertRelayTurnState(db, {
+				collabId: workflow.collabId,
+				turnOwner: "none",
+				waitingAgent: null,
+				unresolvedHandoffId: null,
+				handoffState: "idle",
+				updatedAt: input.now,
+				orchestratorEnabled: true,
+				currentRound: 0,
+				maxRounds: 3,
+				chainStatus: "abandoned",
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.canceled", {
+			workflowId: input.workflowId,
+			reason: "canceled by operator",
+		});
+	}
+
 	return {
 		createWorkflow,
 		getWorkflow,
@@ -879,5 +1021,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		getRelayChain,
 		beginPhaseRun,
 		applyOrchestratorVerdict,
+		haltWorkflow,
+		resumeWorkflow,
+		cancelWorkflow,
 	};
 }
