@@ -288,6 +288,7 @@ describe("relay monitor", () => {
 			expect(output).toContain("Phase:");
 			expect(output).toContain("spec-refining");
 			expect(output).toMatch(/Round:\s*1\//);
+			expect(output).toMatch(/Chain:\s*relay_ch_/);
 		});
 
 		it("emits ▶ phase-started transition line on first poll after beginPhaseRun", async () => {

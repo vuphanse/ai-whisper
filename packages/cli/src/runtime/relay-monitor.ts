@@ -1,4 +1,5 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
+import { getWorkflowDefinition } from "../../../broker/src/runtime/workflow-registry.js";
 
 const DIM = "\u001b[2m";
 const RESET = "\u001b[0m";
@@ -264,15 +265,32 @@ export function createRelayMonitorRuntime(input: {
 			lastRenderedRound = chain.currentRound;
 		}
 
+		// Get full workflow record (required per spec)
+		const fullWorkflow = input.broker.control.getWorkflow(workflow.workflowId);
+
+		// Resolve totalPhases from workflow registry
+		const workflowDef = getWorkflowDefinition(workflow.workflowType);
+		const totalPhases = workflowDef ? workflowDef.phases.length : "?";
+
+		// Get handoff step from the latest handoff for this phase run
+		const latestHandoffRow = (input.broker.db as import("better-sqlite3").Database)
+			.prepare(
+				`SELECT handoff_step FROM relay_handoff
+				 WHERE phase_run_id = ?
+				 ORDER BY created_at DESC LIMIT 1`,
+			)
+			.get(currentPhaseRun.phaseRunId) as { handoff_step: string | null } | undefined;
+		const handoffStep = latestHandoffRow?.handoff_step ?? "-";
+
 		// Render header block
 		const phaseLabel = currentPhaseRun.phaseName;
 		const phaseNum = currentPhaseRun.phaseIndex + 1;
 		const currentRound = chain?.currentRound ?? 1;
 		const maxRounds = chain?.maxRounds ?? 3;
-		const workflowLabel = workflow.name ?? workflow.workflowType;
+		const workflowLabel = (fullWorkflow?.name ?? workflow.name) ?? workflow.workflowType;
 
 		const headerLine1 = `Workflow: ${workflow.workflowId} (${workflow.workflowType}) "${workflowLabel}"`;
-		const headerLine2 = `Phase:    ${phaseLabel} (${phaseNum})   Round: ${currentRound}/${maxRounds}`;
+		const headerLine2 = `Phase:    ${phaseLabel} (${phaseNum}/${totalPhases})   Round: ${currentRound}/${maxRounds}   Step: ${handoffStep}   Chain: ${currentPhaseRun.chainId}`;
 
 		input.stdout.write(`${headerLine1}\n${headerLine2}\n`);
 	}
