@@ -182,6 +182,9 @@ export function createRelayMonitorRuntime(input: {
 	let stopping = false;
 	let previousLatestEvent: RelayEventItem | null = null;
 	let previousTurnStateKey: string | null = null;
+	let lastRenderedPhaseRunId: string | null = null;
+	let lastRenderedRound: number | null = null;
+	let lastRenderedWorkflowStatus: string | null = null;
 	let loopResolve!: () => void;
 	const loopDone = new Promise<void>((r) => {
 		loopResolve = r;
@@ -203,6 +206,75 @@ export function createRelayMonitorRuntime(input: {
 			}),
 		);
 		previousLatestEvent = events[events.length - 1] ?? previousLatestEvent;
+	}
+
+	function renderWorkflowPanel() {
+		// listWorkflows is part of workflowControl — only present when broker has workflow support
+		if (typeof input.broker.control.listWorkflows !== "function") {
+			return;
+		}
+		const runningWorkflows = input.broker.control.listWorkflows({
+			collabId: input.collabId,
+			status: "running",
+		});
+		const workflow = runningWorkflows[0] ?? null;
+
+		// Detect terminal transitions (done / halted / canceled)
+		if (!workflow) {
+			if (lastRenderedWorkflowStatus === "running") {
+				// Workflow just transitioned out of running — check last known status
+				// by seeing if listWorkflows with no status filter has a terminal record
+				const allWorkflows = input.broker.control.listWorkflows({
+					collabId: input.collabId,
+				});
+				const latestTerminal = allWorkflows[allWorkflows.length - 1] ?? null;
+				if (latestTerminal?.status === "done") {
+					input.stdout.write(`✔ workflow-done: ${latestTerminal.workflowId}\n`);
+				} else if (latestTerminal?.status === "halted" || latestTerminal?.status === "canceled") {
+					input.stdout.write(`✖ workflow-${latestTerminal.status}: ${latestTerminal.workflowId}\n`);
+				}
+			}
+			lastRenderedWorkflowStatus = null;
+			lastRenderedPhaseRunId = null;
+			lastRenderedRound = null;
+			return;
+		}
+
+		lastRenderedWorkflowStatus = "running";
+
+		// Get current phase run
+		const phaseRuns = input.broker.control.getWorkflowPhaseRuns(workflow.workflowId);
+		const currentPhaseRun = phaseRuns.find((r) => r.endedAt === null) ?? null;
+
+		if (!currentPhaseRun) {
+			return;
+		}
+
+		// Get chain for round info
+		const chain = input.broker.control.getRelayChain(currentPhaseRun.chainId);
+
+		// Detect phase transitions
+		if (lastRenderedPhaseRunId !== currentPhaseRun.phaseRunId) {
+			input.stdout.write(`▶ phase-started: ${currentPhaseRun.phaseName}\n`);
+			lastRenderedPhaseRunId = currentPhaseRun.phaseRunId;
+			lastRenderedRound = chain?.currentRound ?? null;
+		} else if (chain && chain.currentRound >= 2 && lastRenderedRound !== chain.currentRound) {
+			// Round transition within same phase
+			input.stdout.write(`↻ round-started: round ${chain.currentRound}/${chain.maxRounds}\n`);
+			lastRenderedRound = chain.currentRound;
+		}
+
+		// Render header block
+		const phaseLabel = currentPhaseRun.phaseName;
+		const phaseNum = currentPhaseRun.phaseIndex + 1;
+		const currentRound = chain?.currentRound ?? 1;
+		const maxRounds = chain?.maxRounds ?? 3;
+		const workflowLabel = workflow.name ?? workflow.workflowType;
+
+		const headerLine1 = `Workflow: ${workflow.workflowId} (${workflow.workflowType}) "${workflowLabel}"`;
+		const headerLine2 = `Phase:    ${phaseLabel} (${phaseNum})   Round: ${currentRound}/${maxRounds}`;
+
+		input.stdout.write(`${headerLine1}\n${headerLine2}\n`);
 	}
 
 	function renderTurnPanel() {
@@ -275,6 +347,7 @@ export function createRelayMonitorRuntime(input: {
 						render(events);
 					}
 
+					renderWorkflowPanel();
 					renderTurnPanel();
 
 					await sleep(input.pollIntervalMs ?? 250);

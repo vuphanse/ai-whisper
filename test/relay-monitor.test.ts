@@ -1,5 +1,6 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
+import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import {
 	createRelayMonitorRuntime,
 	formatRelayConversationLine,
@@ -211,6 +212,117 @@ describe("relay monitor", () => {
 			});
 
 			expect(output).not.toContain("Chain:");
+		});
+	});
+
+	describe("relay-monitor workflow surface", () => {
+		function setupBrokerWithWorkflow() {
+			const broker = createBrokerRuntime({
+				sqlitePath: ":memory:",
+				host: "127.0.0.1",
+				port: 4321,
+			});
+			const collabId = "collab_c1";
+			broker.control.startCollab({
+				collabId,
+				workspaceRoot: "/tmp",
+				displayName: "test",
+				orchestratorEnabled: true,
+				orchestratorMaxRounds: 3,
+				now: "2026-04-23T00:00:00Z",
+			});
+			for (const agent of ["claude", "codex"] as const) {
+				broker.control.setSessionBinding({
+					collabId,
+					agentType: agent,
+					sessionId: agent === "claude" ? "session_claude" : "session_codex",
+					bindingSource: "adopted",
+					now: "2026-04-23T00:00:00Z",
+				});
+			}
+			const { workflowId } = broker.control.createWorkflow({
+				collabId,
+				workflowType: "superpowers-feature-development",
+				specPath: "docs/spec.md",
+				roleBindings: { implementer: "claude", reviewer: "codex" },
+				now: "2026-04-23T00:00:00Z",
+			});
+			return { broker, collabId, workflowId };
+		}
+
+		it("header shows workflow + phase + round when a workflow is running", async () => {
+			const { broker, collabId, workflowId } = setupBrokerWithWorkflow();
+
+			// Start a phase run so there is an active phase
+			broker.control.beginPhaseRun({
+				workflowId,
+				phaseIndex: 0,
+				phaseName: "spec-refining",
+				initialHandoffStep: "review",
+				kickoffText: "Review the spec.",
+				sender: "claude",
+				target: "codex",
+				maxRounds: 3,
+				now: "2026-04-23T00:01:00Z",
+			});
+
+			const chunks: string[] = [];
+			const stdout = new PassThrough();
+			stdout.on("data", (chunk: Buffer) => { chunks.push(chunk.toString()); });
+
+			const monitor = createRelayMonitorRuntime({
+				broker: broker as never,
+				collabId,
+				monitorId: "monitor_wf_header",
+				stdout,
+				pollIntervalMs: 1,
+			});
+
+			monitor.start();
+			await new Promise<void>((resolve) => setTimeout(resolve, 30));
+			await monitor.stop();
+
+			const output = chunks.join("");
+			expect(output).toContain("Workflow:");
+			expect(output).toContain(workflowId);
+			expect(output).toContain("Phase:");
+			expect(output).toContain("spec-refining");
+			expect(output).toMatch(/Round:\s*1\//);
+		});
+
+		it("emits ▶ phase-started transition line on first poll after beginPhaseRun", async () => {
+			const { broker, collabId, workflowId } = setupBrokerWithWorkflow();
+
+			broker.control.beginPhaseRun({
+				workflowId,
+				phaseIndex: 0,
+				phaseName: "spec-refining",
+				initialHandoffStep: "review",
+				kickoffText: "Review the spec.",
+				sender: "claude",
+				target: "codex",
+				maxRounds: 3,
+				now: "2026-04-23T00:01:00Z",
+			});
+
+			const chunks: string[] = [];
+			const stdout = new PassThrough();
+			stdout.on("data", (chunk: Buffer) => { chunks.push(chunk.toString()); });
+
+			const monitor = createRelayMonitorRuntime({
+				broker: broker as never,
+				collabId,
+				monitorId: "monitor_wf_phase",
+				stdout,
+				pollIntervalMs: 1,
+			});
+
+			monitor.start();
+			await new Promise<void>((resolve) => setTimeout(resolve, 30));
+			await monitor.stop();
+
+			const output = chunks.join("");
+			expect(output).toContain("▶ phase-started");
 		});
 	});
 
