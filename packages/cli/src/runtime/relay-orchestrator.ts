@@ -1,4 +1,9 @@
-import type { EvaluatorInput, RelayOrchestratorVerdict } from "./relay-orchestrator-evaluator.ts";
+import type {
+	EvaluatorInput,
+	RelayOrchestratorVerdict,
+	WorkflowEvaluatorInput,
+	WorkflowEvaluatorVerdict,
+} from "./relay-orchestrator-evaluator.ts";
 
 type BrokerLike = {
 	control: {
@@ -49,6 +54,28 @@ type BrokerLike = {
 			reason: string;
 			now: string;
 		}) => void;
+		applyOrchestratorVerdict: (input: {
+			handoffId: string;
+			verdict: string;
+			confidence: number;
+			reason: string;
+			followUpMessage?: string;
+			extractedCommitShas?: string[];
+			workspaceHeadSha?: string;
+			now: string;
+		}) => { action: string; chainId: string; nextHandoffId?: string };
+		getHandoffWithWorkflowMeta: (handoffId: string) => {
+			workflowId: string | null;
+			handoffStep: string | null;
+			phaseRunId: string | null;
+			roundNumber: number | null;
+			maxRounds: number;
+			handbackText: string | null;
+			senderAgent: string;
+			targetAgent: string;
+			requestText: string;
+			rootRequestText: string | null;
+		} | null;
 	};
 };
 
@@ -80,10 +107,11 @@ function buildEvaluatorInput(claimed: ClaimedHandoff): EvaluatorInput {
 export function createRelayOrchestrator(input: {
 	broker: BrokerLike;
 	collabId: string;
-	evaluate: (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict>;
+	evaluate: (payload: EvaluatorInput | WorkflowEvaluatorInput) => Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict>;
 	pollIntervalMs?: number;
 	clock?: () => string;
 	createHandoffId?: () => string;
+	readWorkspaceHead?: (collabId: string) => Promise<string>;
 	logger?: Pick<Console, "error" | "warn">;
 }) {
 	const now = input.clock ?? (() => new Date().toISOString());
@@ -91,7 +119,7 @@ export function createRelayOrchestrator(input: {
 
 	let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
-	async function evaluateWithRetry(payload: EvaluatorInput): Promise<RelayOrchestratorVerdict> {
+	async function evaluateWithRetry(payload: EvaluatorInput | WorkflowEvaluatorInput): Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict> {
 		try {
 			return await input.evaluate(payload);
 		} catch (firstError) {
@@ -108,6 +136,76 @@ export function createRelayOrchestrator(input: {
 				claimedAt: now(),
 			});
 			if (!claimed) continue;
+
+			// Fetch workflow metadata to branch on legacy vs. workflow path
+			const meta = input.broker.control.getHandoffWithWorkflowMeta(claimed.handoffId);
+
+			if (meta?.workflowId) {
+				// ── Workflow path ──────────────────────────────────────────────────────
+				const handoffStep = (meta.handoffStep ?? "review") as "review" | "fix" | "implement" | "execute";
+				const evaluatorPromptKey: "review-loop" | "execution-gate" =
+					handoffStep === "execute" ? "execution-gate" : "review-loop";
+
+				const wfInput: WorkflowEvaluatorInput = {
+					...buildEvaluatorInput(claimed),
+					evaluatorPromptKey,
+					workflowId: meta.workflowId,
+					phaseRunId: meta.phaseRunId ?? "",
+					phaseName: "",
+					handoffStep,
+				};
+
+				let wfVerdict: WorkflowEvaluatorVerdict;
+				try {
+					wfVerdict = (await evaluateWithRetry(wfInput)) as WorkflowEvaluatorVerdict;
+				} catch (error) {
+					input.logger?.error?.("relay orchestrator evaluator failed after retry", error);
+					input.broker.control.applyOrchestratorVerdict({
+						handoffId: claimed.handoffId,
+						verdict: "escalate",
+						confidence: 1,
+						reason: "LLM evaluation failed after retry",
+						now: now(),
+					});
+					continue;
+				}
+
+				// Resolve workspaceHeadSha for review-loop approve transitions
+				let workspaceHeadSha: string | undefined;
+				if (
+					evaluatorPromptKey === "review-loop" &&
+					wfVerdict.verdict === "approve" &&
+					input.readWorkspaceHead
+				) {
+					try {
+						workspaceHeadSha = await input.readWorkspaceHead(input.collabId);
+					} catch {
+						// non-fatal; applyOrchestratorVerdict will require it only if next phase is execute
+					}
+				}
+
+				// Extract commit SHAs from handback for execution verdicts
+				let extractedCommitShas: string[] | undefined;
+				if (wfVerdict.verdict === "execution-pass" || wfVerdict.verdict === "delivered") {
+					const shas = (claimed.handbackText ?? "").match(/\b[0-9a-f]{7,40}\b/g) ?? [];
+					if (shas.length > 0) extractedCommitShas = shas;
+				}
+
+				input.broker.control.applyOrchestratorVerdict({
+					handoffId: claimed.handoffId,
+					verdict: wfVerdict.verdict,
+					confidence: wfVerdict.confidence,
+					reason: wfVerdict.reason,
+					followUpMessage: "followUpMessage" in wfVerdict ? (wfVerdict as { followUpMessage: string }).followUpMessage : undefined,
+					extractedCommitShas,
+					workspaceHeadSha,
+					now: now(),
+				});
+
+				continue;
+			}
+
+			// ── Legacy path ────────────────────────────────────────────────────────
 
 			// Forced re-issue: no usable handback — skip LLM
 			if (
@@ -139,7 +237,7 @@ export function createRelayOrchestrator(input: {
 			// LLM evaluation with one retry
 			let verdict: RelayOrchestratorVerdict;
 			try {
-				verdict = await evaluateWithRetry(buildEvaluatorInput(claimed));
+				verdict = (await evaluateWithRetry(buildEvaluatorInput(claimed))) as RelayOrchestratorVerdict;
 			} catch (error) {
 				input.logger?.error?.("relay orchestrator evaluator failed after retry", error);
 				input.broker.control.markRelayChainEscalated({

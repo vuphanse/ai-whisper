@@ -30,6 +30,22 @@ export type RelayOrchestratorVerdict =
 	| { verdict: "loop"; confidence: number; reason: string; followUpMessage: string }
 	| { verdict: "escalate"; confidence: number; reason: string };
 
+export type WorkflowEvaluatorInput = EvaluatorInput & {
+	evaluatorPromptKey: "review-loop" | "execution-gate";
+	workflowId: string;
+	phaseRunId: string;
+	phaseName: string;
+	handoffStep: "review" | "fix" | "implement" | "execute";
+};
+
+export type WorkflowEvaluatorVerdict =
+	| { verdict: "approve"; confidence: number; reason: string }
+	| { verdict: "findings"; confidence: number; reason: string; followUpMessage: string }
+	| { verdict: "delivered"; confidence: number; reason: string }
+	| { verdict: "execution-pass"; confidence: number; reason: string; extractedCommitShas?: string[] }
+	| { verdict: "execution-fail"; confidence: number; reason: string }
+	| { verdict: "escalate"; confidence: number; reason: string };
+
 const baseFields = {
 	confidence: z.number().min(0).max(1),
 	reason: z.string(),

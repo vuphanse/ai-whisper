@@ -1026,6 +1026,10 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 	}
 
+	function getHandoffWithWorkflowMeta(handoffId: string) {
+		return getHandoffWithWorkflowMetaById(db, handoffId);
+	}
+
 	return {
 		createWorkflow,
 		getWorkflow,
@@ -1037,5 +1041,6 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		haltWorkflow,
 		resumeWorkflow,
 		cancelWorkflow,
+		getHandoffWithWorkflowMeta,
 	};
 }
