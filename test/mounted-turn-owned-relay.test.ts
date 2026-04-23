@@ -1062,4 +1062,200 @@ describe("mounted turn-owned relay", () => {
 		expect(userInputs).toEqual([]);
 		expect(localMessages).toEqual([]);
 	});
+
+	describe("autonomous mode (workflow-owned handoff)", () => {
+		function makeAutonomousBroker(overrides?: {
+			workflowStatus?: string;
+			chainStatus?: string;
+			hasMeta?: boolean;
+			handoffStatus?: "pending" | "deferred" | "accepted";
+			applyOrchestratorVerdict?: ReturnType<typeof vi.fn>;
+		}) {
+			const workflowStatus = overrides?.workflowStatus ?? "running";
+			const chainStatus = overrides?.chainStatus ?? "active";
+			const hasMeta = overrides?.hasMeta ?? true;
+			const handoffStatus = overrides?.handoffStatus ?? "pending";
+			const applyOrchestratorVerdict = overrides?.applyOrchestratorVerdict ?? vi.fn();
+
+			return {
+				control: {
+					getRelayTurnState: vi.fn(() => ({
+						collabId: "collab_turn",
+						turnOwner: "claude" as const,
+						waitingAgent: "codex" as const,
+						unresolvedHandoffId: "handoff_1",
+						handoffState: handoffStatus as "pending" | "accepted",
+						handoffAgeMs: 35_000,
+					})),
+					getRelayHandoff: vi.fn(() => ({
+						handoffId: "handoff_1",
+						collabId: "collab_turn",
+						senderAgent: "codex" as const,
+						targetAgent: "claude" as const,
+						requestText: "Do the work",
+						status: handoffStatus,
+					})),
+					acceptRelayHandoff: vi.fn(),
+					declineRelayHandoff: vi.fn(),
+					deferRelayHandoff: vi.fn(),
+					handoffBackRelay: vi.fn(),
+					getHandoffWithWorkflowMeta: vi.fn(() =>
+						hasMeta ? { workflowId: "wf_test", chainId: "ch_test" } : null,
+					),
+					getWorkflow: vi.fn((id: string) =>
+						id === "wf_test" ? { status: workflowStatus } : null,
+					),
+					getRelayChain: vi.fn((id: string) =>
+						id === "ch_test" ? { status: chainStatus } : null,
+					),
+					applyOrchestratorVerdict,
+				},
+			};
+		}
+
+		it("hides hotkey hints when workflow=running AND chain=active", () => {
+			const writes: string[] = [];
+			const broker = makeAutonomousBroker();
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage: (text: string) => { writes.push(text); },
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			relay.refreshOwnerView();
+			const rendered = writes.join("");
+			expect(rendered).not.toContain("[a]");
+			expect(rendered).not.toContain("[d]");
+			expect(rendered).not.toContain("[h]");
+			expect(rendered).toContain("auto-accept");
+		});
+
+		it("shows hotkey hints when handoff has workflow_id but workflow is halted", () => {
+			const writes: string[] = [];
+			const broker = makeAutonomousBroker({ workflowStatus: "halted" });
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage: (text: string) => { writes.push(text); },
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			relay.refreshOwnerView();
+			const rendered = writes.join("");
+			expect(rendered).toContain("[a] accept");
+			expect(rendered).toContain("[d] decline");
+		});
+
+		it("shows hotkey hints when handoff has workflow_id but chain is abandoned", () => {
+			const writes: string[] = [];
+			const broker = makeAutonomousBroker({ chainStatus: "abandoned" });
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage: (text: string) => { writes.push(text); },
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			relay.refreshOwnerView();
+			const rendered = writes.join("");
+			expect(rendered).toContain("[a] accept");
+			expect(rendered).toContain("[d] decline");
+		});
+
+		it("a/d/h/space/Ctrl+H are no-ops when workflow=running AND chain=active", async () => {
+			const broker = makeAutonomousBroker();
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage() {},
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			await relay.handleOwnerInput("a");
+			await relay.handleOwnerInput("d");
+			await relay.handleOwnerInput("h");
+			await relay.handleOwnerInput(" ");
+			await relay.handleOwnerInput("\u0008");
+
+			expect(broker.control.acceptRelayHandoff).not.toHaveBeenCalled();
+			expect(broker.control.declineRelayHandoff).not.toHaveBeenCalled();
+			expect(broker.control.deferRelayHandoff).not.toHaveBeenCalled();
+			expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+		});
+
+		it("a/d/h/space/Ctrl+H work when workflow is halted", async () => {
+			const broker = makeAutonomousBroker({ workflowStatus: "halted" });
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage() {},
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			await relay.handleOwnerInput("a");
+			expect(broker.control.acceptRelayHandoff).toHaveBeenCalledWith(
+				expect.objectContaining({ handoffId: "handoff_1" }),
+			);
+		});
+
+		it("capture failure on workflow-owned handoff calls applyOrchestratorVerdict escalate", async () => {
+			const applyOrchestratorVerdict = vi.fn();
+			const broker = makeAutonomousBroker({
+				handoffStatus: "accepted",
+				applyOrchestratorVerdict,
+			});
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage() {},
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null), // composer returns null = capture failure
+			});
+
+			await relay.handBackTo("codex");
+
+			expect(applyOrchestratorVerdict).toHaveBeenCalledWith(
+				expect.objectContaining({
+					handoffId: "handoff_1",
+					verdict: "escalate",
+					confidence: 1.0,
+					reason: expect.stringContaining("capture-failure"),
+				}),
+			);
+			expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+		});
+
+		it("capture failure on halted workflow falls back to local composer (no escalation)", async () => {
+			const applyOrchestratorVerdict = vi.fn();
+			const broker = makeAutonomousBroker({
+				handoffStatus: "accepted",
+				workflowStatus: "halted",
+				applyOrchestratorVerdict,
+			});
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage() {},
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+			});
+
+			await relay.handBackTo("codex");
+
+			expect(applyOrchestratorVerdict).not.toHaveBeenCalled();
+		});
+	});
 });

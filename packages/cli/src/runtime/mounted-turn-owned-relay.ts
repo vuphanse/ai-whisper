@@ -34,6 +34,10 @@ type BrokerLike = {
 			captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 			now: string;
 		}): void;
+		getHandoffWithWorkflowMeta?(handoffId: string): { workflowId: string | null; chainId: string | null } | null;
+		getWorkflow?(id: string): { status: string } | null;
+		getRelayChain?(id: string): { status: string } | null;
+		applyOrchestratorVerdict?(input: { handoffId: string; verdict: string; confidence: number; reason: string; now: string }): void;
 	};
 };
 
@@ -142,6 +146,14 @@ export function classifyCapture(
 	}
 
 	return "no_response_captured_confidently";
+}
+
+function isAutonomousHandoff(handoffId: string, broker: BrokerLike): boolean {
+	const meta = broker.control.getHandoffWithWorkflowMeta?.(handoffId);
+	if (!meta?.workflowId || !meta?.chainId) return false;
+	const wf = broker.control.getWorkflow?.(meta.workflowId);
+	const chain = broker.control.getRelayChain?.(meta.chainId);
+	return wf?.status === "running" && chain?.status === "active";
 }
 
 export function createMountedTurnOwnedRelay(input: {
@@ -255,6 +267,10 @@ export function createMountedTurnOwnedRelay(input: {
 	}
 
 	async function handleOwnerInput(text: string): Promise<boolean> {
+		const currentHandoff = getPendingHandoff() ?? getAcceptedHandoff();
+		if (currentHandoff && isAutonomousHandoff(currentHandoff.handoffId, input.broker)) {
+			return false; // autonomous mode — broker drives this handoff
+		}
 		const handoff = getPendingHandoff();
 		if (handoff) {
 			if (text === "a" || text === "A") {
@@ -317,9 +333,13 @@ export function createMountedTurnOwnedRelay(input: {
 			const handoff = getPendingHandoff();
 			if (handoff) {
 				const label = handoff.status === "deferred" ? "Deferred handoff" : "Pending handoff";
-				const cardKey = `${handoff.handoffId}|${handoff.status}|${handoff.requestText}`;
+				const autonomous = isAutonomousHandoff(handoff.handoffId, input.broker);
+				const hint = autonomous
+					? "handoff pending (auto-accept)"
+					: "[a] accept  [e] amend  [d] decline  [space] defer";
+				const cardKey = `${handoff.handoffId}|${handoff.status}|${handoff.requestText}|${autonomous}`;
 				renderOwnerCard(
-					`[ai-whisper] ${label} from ${handoff.senderAgent}\n${handoff.requestText}\n[a] accept  [e] amend  [d] decline  [space] defer`,
+					`[ai-whisper] ${label} from ${handoff.senderAgent}\n${handoff.requestText}\n${hint}`,
 					cardKey,
 				);
 				return;
@@ -327,9 +347,11 @@ export function createMountedTurnOwnedRelay(input: {
 
 			const accepted = getAcceptedReadyHandoff();
 			if (accepted) {
-				const cardKey = `${accepted.handoffId}|accepted-ready|${accepted.senderAgent}`;
+				const autonomous = isAutonomousHandoff(accepted.handoffId, input.broker);
+				const hint = autonomous ? "handoff accepted (auto-handback)" : "[h] hand back";
+				const cardKey = `${accepted.handoffId}|accepted-ready|${accepted.senderAgent}|${autonomous}`;
 				renderOwnerCard(
-					`[ai-whisper] Ready to hand back to ${accepted.senderAgent}  [h] hand back`,
+					`[ai-whisper] Ready to hand back to ${accepted.senderAgent}  ${hint}`,
 					cardKey,
 				);
 				return;
@@ -440,6 +462,16 @@ export function createMountedTurnOwnedRelay(input: {
 				});
 			}
 			if (composed === null) {
+				const currentHandoff = getAcceptedHandoff();
+				if (currentHandoff && isAutonomousHandoff(currentHandoff.handoffId, input.broker)) {
+					await input.broker.control.applyOrchestratorVerdict?.({
+						handoffId: currentHandoff.handoffId,
+						verdict: "escalate",
+						confidence: 1.0,
+						reason: `capture-failure: composer returned null`,
+						now: new Date().toISOString(),
+					});
+				}
 				return;
 			}
 			const now = new Date().toISOString();
@@ -455,25 +487,27 @@ export function createMountedTurnOwnedRelay(input: {
 		},
 
 		async checkIdleActions() {
-			// Auto-accept: pending (not deferred) handoff, guard not set, not paused
+			// Auto-accept: pending (not deferred) handoff, guard not set, not paused, not autonomous
 			const pending = getPendingHandoff();
 			if (
 				pending !== null &&
 				pending.status === "pending" &&
 				autoAcceptFiredFor !== pending.handoffId &&
-				!(input.isPausedInput?.() ?? false)
+				!(input.isPausedInput?.() ?? false) &&
+				!isAutonomousHandoff(pending.handoffId, input.broker)
 			) {
 				autoAcceptFiredFor = pending.handoffId;
 				await api.acceptPendingHandoff();
 				return;
 			}
 
-			// Auto-handback: accepted handoff, guard not set, not paused
+			// Auto-handback: accepted handoff, guard not set, not paused, not autonomous
 			const accepted = getAcceptedHandoff();
 			if (
 				accepted === null ||
 				autoHandbackFiredFor === accepted.handoffId ||
-				(input.isPausedInput?.() ?? false)
+				(input.isPausedInput?.() ?? false) ||
+				isAutonomousHandoff(accepted.handoffId, input.broker)
 			) {
 				return;
 			}
