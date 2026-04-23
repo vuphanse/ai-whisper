@@ -887,6 +887,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		}
 
 		const tx = db.transaction(() => {
+			const current = getWorkflowById(db, input.workflowId);
+			if (!current || current.status !== "running") return; // already halted/done, no-op
 			setWorkflowStatus(db, {
 				workflowId: input.workflowId,
 				status: "halted",
@@ -956,11 +958,14 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		}
 
 		const tx = db.transaction(() => {
+			const current = getWorkflowById(db, input.workflowId);
+			if (!current || current.status === "canceled" || current.status === "done") return; // already terminal
+
 			// Close any open phase runs with outcome "superseded"
 			const openPhaseRuns = listPhaseRunsForWorkflow(db, input.workflowId).filter(
 				(r) => r.endedAt === null,
 			);
-			let lastChainRow: { current_round: number; max_rounds: number } | undefined;
+			let lastChainRecord: RelayChainRecord | undefined;
 			for (const run of openPhaseRuns) {
 				// Abandon the chain for this phase run
 				const latest = db
@@ -971,10 +976,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					)
 					.get(run.chainId) as { handoff_id: string } | undefined;
 
-				const chainRow = db
-					.prepare("SELECT current_round, max_rounds FROM relay_chains WHERE chain_id = ?")
-					.get(run.chainId) as { current_round: number; max_rounds: number } | undefined;
-				lastChainRow = chainRow;
+				const chainRecord = getRelayChainRepo(db, run.chainId) ?? undefined;
+				lastChainRecord = chainRecord;
 
 				closeWorkflowPhaseRun(db, {
 					phaseRunId: run.phaseRunId,
@@ -998,6 +1001,10 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				now: input.now,
 			});
 
+			const collabRow = db
+				.prepare("SELECT orchestrator_max_rounds FROM collab WHERE collab_id = ?")
+				.get(workflow.collabId) as { orchestrator_max_rounds: number } | undefined;
+
 			upsertRelayTurnState(db, {
 				collabId: workflow.collabId,
 				turnOwner: "none",
@@ -1006,8 +1013,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				handoffState: "idle",
 				updatedAt: input.now,
 				orchestratorEnabled: true,
-				currentRound: lastChainRow?.current_round ?? 1,
-				maxRounds: lastChainRow?.max_rounds ?? 3,
+				currentRound: lastChainRecord?.currentRound ?? 1,
+				maxRounds: lastChainRecord?.maxRounds ?? collabRow?.orchestrator_max_rounds ?? 3,
 				chainStatus: "abandoned",
 			});
 		});

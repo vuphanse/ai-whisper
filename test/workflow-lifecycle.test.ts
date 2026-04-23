@@ -146,4 +146,31 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		expect(turnState?.handoffState).toBe("idle");
 		expect(turnState?.chainStatus).toBe("abandoned");
 	});
+
+	it("haltWorkflow throws when workflow not found", () => {
+		const { broker } = setup();
+		expect(() =>
+			broker.control.haltWorkflow({
+				workflowId: "wf_nonexistent",
+				reason: "gone",
+				now: "2026-04-21T00:05:00Z",
+			}),
+		).toThrow();
+	});
+
+	it("haltWorkflow throws when workflow already halted", () => {
+		const { broker, workflowId } = setup();
+		broker.control.haltWorkflow({
+			workflowId,
+			reason: "first halt",
+			now: "2026-04-21T00:05:00Z",
+		});
+		expect(() =>
+			broker.control.haltWorkflow({
+				workflowId,
+				reason: "second halt",
+				now: "2026-04-21T00:06:00Z",
+			}),
+		).toThrow();
+	});
 });
