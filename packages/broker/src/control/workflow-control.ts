@@ -960,6 +960,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			const openPhaseRuns = listPhaseRunsForWorkflow(db, input.workflowId).filter(
 				(r) => r.endedAt === null,
 			);
+			let lastChainRow: { current_round: number; max_rounds: number } | undefined;
 			for (const run of openPhaseRuns) {
 				// Abandon the chain for this phase run
 				const latest = db
@@ -970,17 +971,22 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					)
 					.get(run.chainId) as { handoff_id: string } | undefined;
 
+				const chainRow = db
+					.prepare("SELECT current_round, max_rounds FROM relay_chains WHERE chain_id = ?")
+					.get(run.chainId) as { current_round: number; max_rounds: number } | undefined;
+				lastChainRow = chainRow;
+
+				closeWorkflowPhaseRun(db, {
+					phaseRunId: run.phaseRunId,
+					outcome: "superseded",
+					now: input.now,
+				});
+
 				setChainTerminal(db, {
 					chainId: run.chainId,
 					status: "abandoned",
 					terminalHandoffId: latest?.handoff_id ?? null,
 					terminalReason: "canceled by operator",
-					now: input.now,
-				});
-
-				closeWorkflowPhaseRun(db, {
-					phaseRunId: run.phaseRunId,
-					outcome: "superseded",
 					now: input.now,
 				});
 			}
@@ -1000,8 +1006,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				handoffState: "idle",
 				updatedAt: input.now,
 				orchestratorEnabled: true,
-				currentRound: 0,
-				maxRounds: 3,
+				currentRound: lastChainRow?.current_round ?? 1,
+				maxRounds: lastChainRow?.max_rounds ?? 3,
 				chainStatus: "abandoned",
 			});
 		});
