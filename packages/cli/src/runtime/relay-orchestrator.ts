@@ -68,6 +68,7 @@ type BrokerLike = {
 			workflowId: string | null;
 			handoffStep: string | null;
 			phaseRunId: string | null;
+			phaseName: string | null;
 			roundNumber: number | null;
 			maxRounds: number;
 			handbackText: string | null;
@@ -142,7 +143,12 @@ export function createRelayOrchestrator(input: {
 
 			if (meta?.workflowId) {
 				// ── Workflow path ──────────────────────────────────────────────────────
-				const handoffStep = (meta.handoffStep ?? "review") as "review" | "fix" | "implement" | "execute";
+				const VALID_STEPS = ["review", "fix", "implement", "execute"] as const;
+				type HandoffStep = typeof VALID_STEPS[number];
+				const rawStep = meta.handoffStep;
+				const handoffStep: HandoffStep = VALID_STEPS.includes(rawStep as HandoffStep)
+					? (rawStep as HandoffStep)
+					: "review";
 				const evaluatorPromptKey: "review-loop" | "execution-gate" =
 					handoffStep === "execute" ? "execution-gate" : "review-loop";
 
@@ -151,7 +157,7 @@ export function createRelayOrchestrator(input: {
 					evaluatorPromptKey,
 					workflowId: meta.workflowId,
 					phaseRunId: meta.phaseRunId ?? "",
-					phaseName: "",
+					phaseName: meta.phaseName ?? "",
 					handoffStep,
 				};
 

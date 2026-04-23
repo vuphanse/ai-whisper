@@ -782,6 +782,7 @@ export function getHandoffWithWorkflowMetaById(
 	handoffStep: "review" | "fix" | "implement" | "execute" | null;
 	workflowId: string | null;
 	phaseRunId: string | null;
+	phaseName: string | null;
 	evaluatorVerdict: string | null;
 	evaluatorConfidence: number | null;
 	evaluatorReason: string | null;
@@ -795,10 +796,12 @@ export function getHandoffWithWorkflowMetaById(
 			        h.deferred_at, h.resolved_at, h.last_activity_at,
 			        h.handoff_step, h.workflow_id, h.phase_run_id,
 			        h.evaluator_verdict, h.evaluator_confidence, h.evaluator_reason, h.evaluator_evaluated_at,
+			        wp.phase_name,
 			        COALESCE(rc.max_rounds, c.orchestrator_max_rounds) AS max_rounds
 			 FROM relay_handoff h
 			 JOIN collab c ON c.collab_id = h.collab_id
 			 LEFT JOIN relay_chains rc ON rc.chain_id = h.chain_id
+			 LEFT JOIN workflow_phases wp ON wp.phase_run_id = h.phase_run_id
 			 WHERE h.handoff_id = ?`,
 		)
 		.get(handoffId) as
@@ -806,6 +809,7 @@ export function getHandoffWithWorkflowMetaById(
 				handoff_step: string | null;
 				workflow_id: string | null;
 				phase_run_id: string | null;
+				phase_name: string | null;
 				evaluator_verdict: string | null;
 				evaluator_confidence: number | null;
 				evaluator_reason: string | null;
@@ -819,6 +823,7 @@ export function getHandoffWithWorkflowMetaById(
 		handoffStep: row.handoff_step as "review" | "fix" | "implement" | "execute" | null,
 		workflowId: row.workflow_id,
 		phaseRunId: row.phase_run_id,
+		phaseName: row.phase_name,
 		evaluatorVerdict: row.evaluator_verdict,
 		evaluatorConfidence: row.evaluator_confidence,
 		evaluatorReason: row.evaluator_reason,
