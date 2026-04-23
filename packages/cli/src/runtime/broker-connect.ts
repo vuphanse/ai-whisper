@@ -6,7 +6,7 @@ import { probeAndLatchBrokerState } from "./recovery-guard.js";
 import { assessBrokerDaemon } from "./broker-daemon.js";
 
 export async function connectToWorkspaceBroker(
-	workspaceRoot: string,
+	{ workspaceRoot }: { workspaceRoot: string },
 	assessBroker?: typeof assessBrokerDaemon,
 ): Promise<{ broker: BrokerRuntime; collabId: string }> {
 	const state = readCliCollabState(getStateFilePath(workspaceRoot));

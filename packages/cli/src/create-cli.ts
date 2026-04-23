@@ -327,7 +327,6 @@ export function createCli(): Command {
 	workflow
 		.command("start")
 		.description("Start a new workflow")
-		.requiredOption("--collab <id>", "Collab ID")
 		.requiredOption("--type <type>", "Workflow type (e.g. superpowers-feature-development)")
 		.requiredOption("--spec <path>", "Spec file path")
 		.requiredOption("--implementer <agent>", "Implementer agent: claude or codex")
@@ -336,18 +335,17 @@ export function createCli(): Command {
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(
 			async (opts: WorkspaceOpts & {
-				collab: string;
 				type: string;
 				spec: string;
 				implementer: "claude" | "codex";
 				reviewer: "claude" | "codex";
 				name?: string;
 			}) => {
-				const { broker, collabId } = await connectToWorkspaceBroker(opts.workspace);
+				const { broker, collabId } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 				try {
 					const result = await runWorkflowStart({
 						broker,
-						collabId: opts.collab ?? collabId,
+						collabId,
 						workflowType: opts.type,
 						specPath: opts.spec,
 						implementer: opts.implementer,
@@ -367,7 +365,7 @@ export function createCli(): Command {
 		.description("List workflows for the active collab")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (opts: WorkspaceOpts) => {
-			const { broker, collabId } = await connectToWorkspaceBroker(opts.workspace);
+			const { broker, collabId } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 			try {
 				const list = await runWorkflowList({ broker, collabId });
 				if (list.length === 0) {
@@ -388,7 +386,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 			try {
 				const result = await runWorkflowInspect({ broker, workflowId });
 				console.log(JSON.stringify(result, null, 2));
@@ -403,7 +401,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 			try {
 				await runWorkflowResume({ broker, workflowId, now: new Date().toISOString() });
 				console.log(`Workflow resumed: ${workflowId}`);
@@ -418,7 +416,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
 			try {
 				await runWorkflowCancel({ broker, workflowId, now: new Date().toISOString() });
 				console.log(`Workflow canceled: ${workflowId}`);
