@@ -10,6 +10,8 @@ import {
 	createBrokerEventBus,
 	type BrokerEventBus,
 } from "./broker-event-bus.js";
+import { createWorkflowDriver } from "./workflow-driver.js";
+import { createWorkspaceHeadReader } from "./workspace-head-reader.js";
 
 export type BrokerRuntime = {
 	app: FastifyInstance;
@@ -39,6 +41,12 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 
 	const events = createBrokerEventBus();
 	const control = createControlService(db, events);
+	const headReader = createWorkspaceHeadReader();
+	const workflowDriver = createWorkflowDriver({
+		broker: { control, events },
+		headReader,
+	});
+	workflowDriver.start();
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -64,6 +72,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			});
 		},
 		async stop(): Promise<void> {
+			workflowDriver.stop();
 			await app.close();
 			db.close();
 		},

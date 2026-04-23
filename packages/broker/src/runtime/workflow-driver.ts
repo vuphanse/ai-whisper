@@ -179,12 +179,12 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 	return {
 		start() {
 			const unsub = broker.events.on("workflow.created", ({ workflowId }) => {
-				void kickoffCurrentPhase(workflowId);
+				setImmediate(() => void kickoffCurrentPhase(workflowId));
 			});
 			unsubscribers.push(unsub);
 			unsubscribers.push(
 				broker.events.on("workflow.resumed", (e) =>
-					void kickoffCurrentPhase(e.workflowId),
+					setImmediate(() => void kickoffCurrentPhase(e.workflowId)),
 				),
 			);
 
