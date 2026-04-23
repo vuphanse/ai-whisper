@@ -267,11 +267,12 @@ export function createMountedTurnOwnedRelay(input: {
 	}
 
 	async function handleOwnerInput(text: string): Promise<boolean> {
-		const currentHandoff = getPendingHandoff() ?? getAcceptedHandoff();
+		const pendingHandoff = getPendingHandoff();
+		const currentHandoff = pendingHandoff ?? getAcceptedHandoff();
 		if (currentHandoff && isAutonomousHandoff(currentHandoff.handoffId, input.broker)) {
 			return false; // autonomous mode — broker drives this handoff
 		}
-		const handoff = getPendingHandoff();
+		const handoff = pendingHandoff;
 		if (handoff) {
 			if (text === "a" || text === "A") {
 				await api.acceptPendingHandoff();
@@ -462,10 +463,9 @@ export function createMountedTurnOwnedRelay(input: {
 				});
 			}
 			if (composed === null) {
-				const currentHandoff = getAcceptedHandoff();
-				if (currentHandoff && isAutonomousHandoff(currentHandoff.handoffId, input.broker)) {
+				if (handoff && isAutonomousHandoff(handoff.handoffId, input.broker)) {
 					await input.broker.control.applyOrchestratorVerdict?.({
-						handoffId: currentHandoff.handoffId,
+						handoffId: handoff.handoffId,
 						verdict: "escalate",
 						confidence: 1.0,
 						reason: `capture-failure: composer returned null`,
