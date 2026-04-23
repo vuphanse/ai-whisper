@@ -42,12 +42,14 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 	const events = createBrokerEventBus();
 	const control = createControlService(db, events);
 	const headReader = createWorkspaceHeadReader();
-	const workflowDriver = createWorkflowDriver({
-		broker: { control, events },
-		headReader,
-		sweepIntervalMs: 30_000,
-	});
-	workflowDriver.start();
+	const workflowDriver = config.runWorkflowDriver
+		? createWorkflowDriver({
+				broker: { control, events },
+				headReader,
+				sweepIntervalMs: 30_000,
+			})
+		: null;
+	workflowDriver?.start();
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -73,7 +75,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			});
 		},
 		async stop(): Promise<void> {
-			workflowDriver.stop();
+			workflowDriver?.stop();
 			await app.close();
 			db.close();
 		},

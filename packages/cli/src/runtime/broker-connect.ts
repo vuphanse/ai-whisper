@@ -20,6 +20,10 @@ export async function connectToWorkspaceBroker(
 		sqlitePath: getBrokerSqlitePath(workspaceRoot),
 		host: state.broker.host,
 		port: state.broker.port,
+		// Transient CLI broker: the daemon owns workflow driving. Skipping the
+		// local driver avoids racing setImmediate-scheduled kickoffs against
+		// broker.stop() on command exit.
+		runWorkflowDriver: false,
 	});
 
 	return { broker, collabId: state.collabId };
