@@ -2,6 +2,7 @@ import type { BrokerRuntime } from "./create-broker-runtime.js";
 import type { WorkspaceHeadReader } from "./workspace-head-reader.js";
 import {
 	getWorkflowDefinition,
+	derivePlanPath,
 	renderTemplate,
 } from "./workflow-registry.js";
 
@@ -69,6 +70,14 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 
 		const implementerAgent = workflow.roleBindings.implementer;
 		const reviewerAgent = workflow.roleBindings.reviewer;
+		if (!implementerAgent || !reviewerAgent) {
+			broker.control.haltWorkflow({
+				workflowId,
+				reason: "missing implementer or reviewer role binding",
+				now,
+			});
+			return;
+		}
 
 		const isAgentBound = (agent: "claude" | "codex"): boolean =>
 			bindings.some((b) => b.agentType === agent && b.bindingState === "bound");
@@ -120,9 +129,15 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 
 		// Render kickoff text
 		const ctx = workflow.workflowContext as { commitRange?: string };
+		let planPath = workflow.specPath; // safe fallback
+		try {
+			planPath = derivePlanPath(workflow.specPath, workflow.createdAt);
+		} catch {
+			// specPath doesn't follow the -design.md convention; use specPath as fallback
+		}
 		const kickoffText = renderTemplate(phase.kickoffTemplate, {
 			specPath: workflow.specPath,
-			planPath: workflow.specPath, // safe fallback — derivePlanPath may throw for loose paths
+			planPath,
 			commitRange: ctx.commitRange ?? "HEAD",
 		});
 
@@ -167,6 +182,11 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 				void kickoffCurrentPhase(workflowId);
 			});
 			unsubscribers.push(unsub);
+			unsubscribers.push(
+				broker.events.on("workflow.resumed", (e) =>
+					void kickoffCurrentPhase(e.workflowId),
+				),
+			);
 
 			if (sweepIntervalMs > 0) {
 				sweepTimer = setInterval(() => {
