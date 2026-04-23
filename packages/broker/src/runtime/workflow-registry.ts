@@ -36,7 +36,7 @@ export const SUPERPOWERS_FEATURE_DEVELOPMENT: WorkflowDefinition = {
 				"Review the spec at {specPath}. Approve or list findings.",
 			stepTemplates: {
 				review: "Review the spec at {specPath}. Approve or list findings.",
-				fix: "Address the reviewer's findings in {specPath}:\n{lastFindings}",
+				fix: "Address the reviewer's findings in {specPath}.",
 			},
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "spec", pathTemplate: "{specPath}" },
@@ -54,7 +54,7 @@ export const SUPERPOWERS_FEATURE_DEVELOPMENT: WorkflowDefinition = {
 					"Using the approved spec at {specPath}, write an implementation plan to {planPath}. Hand back when the file is ready.",
 				review:
 					"Review the implementation plan at {planPath}. Approve or list findings.",
-				fix: "Address the reviewer's findings in {planPath}:\n{lastFindings}",
+				fix: "Address the reviewer's findings in {planPath}.",
 			},
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "plan", pathTemplate: "{planPath}" },
@@ -85,7 +85,7 @@ export const SUPERPOWERS_FEATURE_DEVELOPMENT: WorkflowDefinition = {
 			stepTemplates: {
 				review:
 					"Review commits {commitRange}. Run `pnpm test`. Approve or list findings.",
-				fix: "Address the reviewer's findings on commits {commitRange}:\n{lastFindings}",
+				fix: "Address the reviewer's findings on commits {commitRange}.",
 			},
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "commit-range" },

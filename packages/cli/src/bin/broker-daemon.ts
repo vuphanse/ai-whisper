@@ -11,6 +11,7 @@ import {
 	createRelayOrchestratorEvaluator,
 	type EvaluatorProviderConfig,
 } from "../runtime/relay-orchestrator-evaluator.js";
+import { execFile } from "node:child_process";
 
 loadDotEnv();
 
@@ -55,9 +56,26 @@ const evaluator = (() => {
 	});
 })();
 
+async function readWorkspaceHead(cId: string): Promise<string> {
+	const workspaceRoot = broker.control.getCollab(cId)?.workspaceRoot;
+	if (!workspaceRoot) {
+		throw new Error(`readWorkspaceHead: no workspaceRoot for collab ${cId}`);
+	}
+	return new Promise((resolve, reject) => {
+		execFile(
+			"git",
+			["-C", workspaceRoot, "rev-parse", "HEAD"],
+			(err, stdout) => {
+				if (err) reject(err);
+				else resolve(stdout.trim());
+			},
+		);
+	});
+}
+
 const orchestrator =
 	collab?.orchestratorEnabled && evaluator
-		? createRelayOrchestrator({ broker, collabId, evaluate: evaluator })
+		? createRelayOrchestrator({ broker, collabId, evaluate: evaluator, readWorkspaceHead })
 		: null;
 
 orchestrator?.start();

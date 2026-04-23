@@ -498,7 +498,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		nextPhaseRunId?: string;
 	} {
 		const handoff = getHandoffWithWorkflowMetaById(db, input.handoffId);
-		if (!handoff || !handoff.workflowId || !handoff.handoffStep) {
+		if (!handoff || !handoff.workflowId || !handoff.handoffStep || !handoff.phaseRunId) {
 			throw new Error(
 				"applyOrchestratorVerdict: handoff is not workflow-owned",
 			);
