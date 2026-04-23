@@ -28,6 +28,25 @@ function stripTerminalResponses(raw: string): string {
 	);
 }
 
+// Kitty keyboard progressive enhancement with REPORT_EVENT_TYPES: navigation
+// keys (arrows, PgUp/PgDn, Home/End, F-keys, etc.) carry an event-type
+// subparam — press=1, repeat=2, release=3 — e.g. `ESC[1;1:3A` for an up-arrow
+// release. Downstream provider PTYs (codex, claude) only grok legacy arrows;
+// the enhanced forms leak through as garbage and break navigation.
+//
+// Drop release events outright; strip the `:<event>` subparam from press/
+// repeat so they reduce to the legacy xterm-style modifier form.
+const csiNavigationWithEventTypePattern =
+	/\x1b\[(\d+);(\d+):(\d+)([A-Z~])/g;
+
+function stripKeyboardProgressiveEnhancement(raw: string): string {
+	return raw.replace(
+		csiNavigationWithEventTypePattern,
+		(_match, p1, p2, eventType, terminator) =>
+			eventType === "3" ? "" : `\x1b[${p1};${p2}${terminator}`,
+	);
+}
+
 function decodePrintableCsiKeyboardSequence(
 	primaryCodepointText: string,
 	alternateCodepointText?: string,
@@ -156,7 +175,9 @@ export function normalizeTerminalInput(input: {
 	state: NormalizedInputState;
 }): { text: string; state: NormalizedInputState } {
 	return decodeCsiKeyboardInput({
-		raw: stripTerminalResponses(input.raw),
+		raw: stripKeyboardProgressiveEnhancement(
+			stripTerminalResponses(input.raw),
+		),
 		state: input.state,
 	});
 }

@@ -25,9 +25,7 @@ describe("relay line buffer", () => {
 		expect(buffer.push("h")).toEqual([{ kind: "passthrough", data: "h" }]);
 		expect(buffer.push("e")).toEqual([{ kind: "passthrough", data: "e" }]);
 		expect(buffer.push("llo\n")).toEqual([
-			{ kind: "passthrough", data: "l" },
-			{ kind: "passthrough", data: "l" },
-			{ kind: "passthrough", data: "o" },
+			{ kind: "passthrough", data: "llo" },
 			{ kind: "passthrough", data: "\n" },
 		]);
 	});
@@ -65,7 +63,7 @@ describe("relay line buffer", () => {
 		const result = buffer.push("\u007fhello\n");
 
 		expect(result).toContainEqual({ kind: "passthrough", data: "@" });
-		expect(result).toContainEqual({ kind: "passthrough", data: "h" });
+		expect(result).toContainEqual({ kind: "passthrough", data: "hello" });
 		expect(result.filter((decision) => decision.kind === "relay")).toHaveLength(
 			0,
 		);
@@ -162,5 +160,24 @@ describe("relay line buffer", () => {
 				.push("@@claude hello\r")
 				.some((decision) => decision.kind === "relay"),
 		).toBe(true);
+	});
+
+	it("emits a single passthrough for a multi-byte ESC sequence", () => {
+		// Host terminals deliver arrow keys as a single 3-byte chunk
+		// (ESC + '[' + 'A'). Splitting that chunk into three separate
+		// passthrough writes leaks a bare ESC to the downstream PTY, which
+		// timer-out line editors interpret as "Escape" (exits menu) before
+		// the follow-up bytes arrive. Keep the sequence atomic.
+		const buffer = makeBuffer();
+		expect(buffer.push("[A")).toEqual([
+			{ kind: "passthrough", data: "[A" },
+		]);
+	});
+
+	it("batches consecutive plain chars within a chunk into one passthrough", () => {
+		const buffer = makeBuffer();
+		expect(buffer.push("hello")).toEqual([
+			{ kind: "passthrough", data: "hello" },
+		]);
 	});
 });

@@ -42,9 +42,22 @@ export function createRelayLineBuffer(input: {
 	return {
 		push(chunk: string): RelayDecision[] {
 			const results: RelayDecision[] = [];
+			// Accumulate consecutive plain chars so that multi-byte sequences
+			// (e.g. ESC[A arrow keys) land on the downstream PTY as a single
+			// write instead of being split byte-by-byte — otherwise a bare
+			// ESC can reach the child's line editor before its follow-up
+			// bytes arrive.
+			let passthroughRun = "";
+			const flushPassthroughRun = () => {
+				if (passthroughRun.length > 0) {
+					results.push({ kind: "passthrough", data: passthroughRun });
+					passthroughRun = "";
+				}
+			};
 
 			for (const char of chunk) {
 				if (char === "\r") {
+					flushPassthroughRun();
 					skipNextLineFeed = true;
 					flushLine(results, "\r");
 					continue;
@@ -56,6 +69,7 @@ export function createRelayLineBuffer(input: {
 						continue;
 					}
 
+					flushPassthroughRun();
 					flushLine(results, "\n");
 					continue;
 				}
@@ -63,25 +77,35 @@ export function createRelayLineBuffer(input: {
 				skipNextLineFeed = false;
 
 				if (isBackspace(char)) {
-					line = line.slice(0, -1);
-					if (relayCandidate) {
-						if (line.startsWith("@@")) {
-							results.push({ kind: "buffering", line });
+					if (relayCandidate || line.length > 0) {
+						flushPassthroughRun();
+						line = line.slice(0, -1);
+						if (relayCandidate) {
+							if (line.startsWith("@@")) {
+								results.push({ kind: "buffering", line });
+								continue;
+							}
+
+							relayCandidate = false;
+							if (line.length > 0) {
+								results.push({ kind: "passthrough", data: line });
+								line = "";
+							}
 							continue;
 						}
-
-						relayCandidate = false;
-						if (line.length > 0) {
-							results.push({ kind: "passthrough", data: line });
-							line = "";
-						}
-						continue;
 					}
 
-					results.push({ kind: "passthrough", data: char });
+					passthroughRun += char;
 					continue;
 				}
 
+				// Plain char outside any relay-candidate context: extend the run.
+				if (!relayCandidate && line.length === 0 && char !== "@") {
+					passthroughRun += char;
+					continue;
+				}
+
+				flushPassthroughRun();
 				line += char;
 				if (!relayCandidate && line === "@") {
 					results.push({ kind: "buffering", line });
@@ -114,6 +138,7 @@ export function createRelayLineBuffer(input: {
 				results.push({ kind: "buffering", line });
 			}
 
+			flushPassthroughRun();
 			return results;
 		},
 	};
