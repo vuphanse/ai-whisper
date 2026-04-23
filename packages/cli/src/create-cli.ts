@@ -12,6 +12,13 @@ import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
 import { runCollabTell } from "./commands/collab/tell.js";
 import { chooseLaunchMode, detectTmux } from "./runtime/launcher.js";
+import { runWorkflowStart } from "./commands/workflow/start.js";
+import { runWorkflowList } from "./commands/workflow/list.js";
+import { runWorkflowInspect } from "./commands/workflow/inspect.js";
+import { runWorkflowResume } from "./commands/workflow/resume.js";
+import { runWorkflowCancel } from "./commands/workflow/cancel.js";
+import { runWorkflowTypes } from "./commands/workflow/types.js";
+import { connectToWorkspaceBroker } from "./runtime/broker-connect.js";
 
 interface WorkspaceOpts {
 	workspace: string;
@@ -310,6 +317,123 @@ export function createCli(): Command {
 				console.log(`Collab stopped: ${result.collabId}`);
 			} else {
 				console.log(result.message);
+			}
+		});
+
+	const workflow = cli
+		.command("workflow")
+		.description("Manage AI agent workflows");
+
+	workflow
+		.command("start")
+		.description("Start a new workflow")
+		.requiredOption("--collab <id>", "Collab ID")
+		.requiredOption("--type <type>", "Workflow type (e.g. superpowers-feature-development)")
+		.requiredOption("--spec <path>", "Spec file path")
+		.requiredOption("--implementer <agent>", "Implementer agent: claude or codex")
+		.requiredOption("--reviewer <agent>", "Reviewer agent: claude or codex")
+		.option("--name <name>", "Optional workflow display name")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(
+			async (opts: WorkspaceOpts & {
+				collab: string;
+				type: string;
+				spec: string;
+				implementer: "claude" | "codex";
+				reviewer: "claude" | "codex";
+				name?: string;
+			}) => {
+				const { broker, collabId } = await connectToWorkspaceBroker(opts.workspace);
+				try {
+					const result = await runWorkflowStart({
+						broker,
+						collabId: opts.collab ?? collabId,
+						workflowType: opts.type,
+						specPath: opts.spec,
+						implementer: opts.implementer,
+						reviewer: opts.reviewer,
+						...(opts.name ? { name: opts.name } : {}),
+						now: new Date().toISOString(),
+					});
+					console.log(`Workflow started: ${result.workflowId}`);
+				} finally {
+					await broker.stop();
+				}
+			},
+		);
+
+	workflow
+		.command("list")
+		.description("List workflows for the active collab")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (opts: WorkspaceOpts) => {
+			const { broker, collabId } = await connectToWorkspaceBroker(opts.workspace);
+			try {
+				const list = await runWorkflowList({ broker, collabId });
+				if (list.length === 0) {
+					console.log("No workflows.");
+				} else {
+					for (const wf of list as Array<{ workflowId: string; workflowType: string; status: string }>) {
+						console.log(`${wf.workflowId}  ${wf.workflowType}  ${wf.status}`);
+					}
+				}
+			} finally {
+				await broker.stop();
+			}
+		});
+
+	workflow
+		.command("inspect")
+		.description("Inspect a workflow and its phase runs")
+		.argument("<workflowId>", "Workflow ID")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (workflowId: string, opts: WorkspaceOpts) => {
+			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			try {
+				const result = await runWorkflowInspect({ broker, workflowId });
+				console.log(JSON.stringify(result, null, 2));
+			} finally {
+				await broker.stop();
+			}
+		});
+
+	workflow
+		.command("resume")
+		.description("Resume a halted workflow")
+		.argument("<workflowId>", "Workflow ID")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (workflowId: string, opts: WorkspaceOpts) => {
+			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			try {
+				await runWorkflowResume({ broker, workflowId, now: new Date().toISOString() });
+				console.log(`Workflow resumed: ${workflowId}`);
+			} finally {
+				await broker.stop();
+			}
+		});
+
+	workflow
+		.command("cancel")
+		.description("Cancel a running or halted workflow")
+		.argument("<workflowId>", "Workflow ID")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.action(async (workflowId: string, opts: WorkspaceOpts) => {
+			const { broker } = await connectToWorkspaceBroker(opts.workspace);
+			try {
+				await runWorkflowCancel({ broker, workflowId, now: new Date().toISOString() });
+				console.log(`Workflow canceled: ${workflowId}`);
+			} finally {
+				await broker.stop();
+			}
+		});
+
+	workflow
+		.command("types")
+		.description("List registered workflow types")
+		.action(async () => {
+			const types = await runWorkflowTypes();
+			for (const t of types) {
+				console.log(t);
 			}
 		});
 

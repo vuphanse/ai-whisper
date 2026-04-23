@@ -28,4 +28,4 @@ export {
 	listSessionsForCollab,
 	updateSessionHealth,
 } from "./storage/repositories/session-repository.js";
-export { getWorkflowDefinition } from "./runtime/workflow-registry.js";
+export { getWorkflowDefinition, listWorkflowTypes } from "./runtime/workflow-registry.js";
