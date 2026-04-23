@@ -63,7 +63,7 @@ type BrokerLike = {
 			extractedCommitShas?: string[];
 			workspaceHeadSha?: string;
 			now: string;
-		}) => { action: string; chainId: string; nextHandoffId?: string };
+		}) => { action: string; chainId: string; nextHandoffId?: string; nextPhaseRunId?: string };
 		getHandoffWithWorkflowMeta: (handoffId: string) => {
 			workflowId: string | null;
 			handoffStep: string | null;
@@ -146,6 +146,9 @@ export function createRelayOrchestrator(input: {
 				const VALID_STEPS = ["review", "fix", "implement", "execute"] as const;
 				type HandoffStep = typeof VALID_STEPS[number];
 				const rawStep = meta.handoffStep;
+				if (!VALID_STEPS.includes(rawStep as HandoffStep)) {
+					input.logger?.warn?.(`unexpected handoffStep value: ${rawStep}; defaulting to 'review'`);
+				}
 				const handoffStep: HandoffStep = VALID_STEPS.includes(rawStep as HandoffStep)
 					? (rawStep as HandoffStep)
 					: "review";
@@ -185,28 +188,53 @@ export function createRelayOrchestrator(input: {
 				) {
 					try {
 						workspaceHeadSha = await input.readWorkspaceHead(input.collabId);
-					} catch {
-						// non-fatal; applyOrchestratorVerdict will require it only if next phase is execute
+					} catch (headErr) {
+						input.logger?.error?.("readWorkspaceHead failed; escalating workflow handoff", headErr);
+						try {
+							input.broker.control.applyOrchestratorVerdict({
+								handoffId: claimed.handoffId,
+								verdict: "escalate",
+								confidence: 0,
+								reason: `readWorkspaceHead failed: ${headErr instanceof Error ? headErr.message : String(headErr)}`,
+								now: now(),
+							});
+						} catch { /* already terminal */ }
+						continue;
 					}
 				}
 
 				// Extract commit SHAs from handback for execution verdicts
 				let extractedCommitShas: string[] | undefined;
 				if (wfVerdict.verdict === "execution-pass" || wfVerdict.verdict === "delivered") {
-					const shas = (claimed.handbackText ?? "").match(/\b[0-9a-f]{7,40}\b/g) ?? [];
+					const shas = [...new Set((claimed.handbackText ?? "").match(/\b[0-9a-f]{7,40}\b/g) ?? [])];
 					if (shas.length > 0) extractedCommitShas = shas;
 				}
 
-				input.broker.control.applyOrchestratorVerdict({
-					handoffId: claimed.handoffId,
-					verdict: wfVerdict.verdict,
-					confidence: wfVerdict.confidence,
-					reason: wfVerdict.reason,
-					followUpMessage: "followUpMessage" in wfVerdict ? (wfVerdict as { followUpMessage: string }).followUpMessage : undefined,
-					extractedCommitShas,
-					workspaceHeadSha,
-					now: now(),
-				});
+				try {
+					await input.broker.control.applyOrchestratorVerdict({
+						handoffId: claimed.handoffId,
+						verdict: wfVerdict.verdict,
+						confidence: wfVerdict.confidence,
+						reason: wfVerdict.reason,
+						followUpMessage: wfVerdict.verdict === "findings" ? wfVerdict.followUpMessage : undefined,
+						extractedCommitShas,
+						workspaceHeadSha,
+						now: now(),
+					});
+				} catch (verdictError) {
+					input.logger?.error?.("applyOrchestratorVerdict failed; attempting escalation", verdictError);
+					try {
+						input.broker.control.applyOrchestratorVerdict({
+							handoffId: claimed.handoffId,
+							verdict: "escalate",
+							confidence: 0,
+							reason: `orchestrator error: ${verdictError instanceof Error ? verdictError.message : String(verdictError)}`,
+							now: now(),
+						});
+					} catch {
+						// Already escalated or terminal — safe to ignore
+					}
+				}
 
 				continue;
 			}
