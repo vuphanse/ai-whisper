@@ -1192,6 +1192,30 @@ describe("mounted turn-owned relay", () => {
 			expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
 		});
 
+		it("hides the auto-handback ready card when workflow=running AND chain=active", () => {
+			const writes: string[] = [];
+			const broker = makeAutonomousBroker({ handoffStatus: "accepted" });
+			const relay = createMountedTurnOwnedRelay({
+				broker,
+				collabId: "collab_turn",
+				currentAgent: "claude",
+				writeLocalMessage: (text: string) => { writes.push(text); },
+				writeUserInput() {},
+				openComposer: () => Promise.resolve(null),
+				turnCapture: {
+					reset: vi.fn(),
+					finishAssistantTurn: vi.fn(),
+					hasVisibleAssistantTurn: () => true,
+					extractLatestAssistantTurn: () => ({ confidence: "high" as const, text: "done" }),
+				},
+			});
+
+			relay.refreshOwnerView();
+			const rendered = writes.join("");
+			expect(rendered).not.toContain("Ready to hand back");
+			expect(rendered).not.toContain("auto-handback");
+		});
+
 		it("a/d/h/space/Ctrl+H work when workflow is halted even if workflow_id is set", async () => {
 			// "a" — accept pending handoff
 			{

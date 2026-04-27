@@ -349,13 +349,17 @@ export function createMountedTurnOwnedRelay(input: {
 			const accepted = getAcceptedReadyHandoff();
 			if (accepted) {
 				const autonomous = isAutonomousHandoff(accepted.handoffId, input.broker);
-				const hint = autonomous ? "handoff accepted (auto-handback)" : "[h] hand back";
-				const cardKey = `${accepted.handoffId}|accepted-ready|${accepted.senderAgent}|${autonomous}`;
-				renderOwnerCard(
-					`[ai-whisper] Ready to hand back to ${accepted.senderAgent}  ${hint}`,
-					cardKey,
-				);
-				return;
+				if (!autonomous) {
+					const cardKey = `${accepted.handoffId}|accepted-ready|${accepted.senderAgent}`;
+					renderOwnerCard(
+						`[ai-whisper] Ready to hand back to ${accepted.senderAgent}  [h] hand back`,
+						cardKey,
+					);
+					return;
+				}
+				// Autonomous mode: auto-handback fires within ~1s of readiness; the
+				// ready-card has no operator action and would only add noise. Fall
+				// through to clearOwnerCard so any prior card is cleaned up.
 			}
 
 			clearOwnerCard();
