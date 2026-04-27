@@ -46,18 +46,25 @@ export type WorkflowEvaluatorVerdict =
 	| { verdict: "execution-fail"; confidence: number; reason: string }
 	| { verdict: "escalate"; confidence: number; reason: string };
 
+export type EvaluatorAnyInput = EvaluatorInput | WorkflowEvaluatorInput;
+export type EvaluatorAnyVerdict = RelayOrchestratorVerdict | WorkflowEvaluatorVerdict;
+
 const baseFields = {
 	confidence: z.number().min(0).max(1),
 	reason: z.string(),
 };
 
-const relayOrchestratorVerdictSchema = z.discriminatedUnion("verdict", [
+// ─────────────────────────────────────────────────────────────────────────────
+// Branch: legacy (done | loop | escalate)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const legacyVerdictSchema = z.discriminatedUnion("verdict", [
 	z.object({ verdict: z.literal("done"), ...baseFields }),
 	z.object({ verdict: z.literal("loop"), ...baseFields, followUpMessage: z.string().min(1) }),
 	z.object({ verdict: z.literal("escalate"), ...baseFields }),
 ]);
 
-const SYSTEM_PROMPT = `You are a neutral judge evaluating whether a relay agent has satisfactorily completed the requested task.
+const LEGACY_SYSTEM_PROMPT = `You are a neutral judge evaluating whether a relay agent has satisfactorily completed the requested task.
 
 You will receive a JSON object with:
 - rootRequestText: the original request that started this chain
@@ -85,9 +92,7 @@ Rules:
 - Minor caveats or informational asides do not disqualify "done"
 - When uncertain between "done" and "loop", return "done" with lower confidence rather than "escalate"`;
 
-// JSON Schema passed to Ollama for constrained decoding — guarantees syntactically
-// valid JSON that matches this shape. Zod validation runs afterwards for semantic checks.
-const VERDICT_JSON_SCHEMA = {
+const LEGACY_JSON_SCHEMA = {
 	type: "object",
 	properties: {
 		verdict: { type: "string", enum: ["done", "loop", "escalate"] },
@@ -97,6 +102,183 @@ const VERDICT_JSON_SCHEMA = {
 	},
 	required: ["verdict", "confidence", "reason"],
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Branch: workflow review (approve | findings | escalate)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const reviewVerdictSchema = z.discriminatedUnion("verdict", [
+	z.object({ verdict: z.literal("approve"), ...baseFields }),
+	z.object({ verdict: z.literal("findings"), ...baseFields, followUpMessage: z.string().min(1) }),
+	z.object({ verdict: z.literal("escalate"), ...baseFields }),
+]);
+
+const REVIEW_SYSTEM_PROMPT = `You are a neutral judge evaluating a reviewer's verdict on a deliverable inside a multi-phase workflow.
+
+Input is a JSON object including handbackText (the reviewer's response) and contextual fields. Your job is NOT to re-review the deliverable — it is to classify what the reviewer said.
+
+Respond with a JSON object:
+{
+  "verdict": "approve" | "findings" | "escalate",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation",
+  "followUpMessage": "the concrete findings to send back (only when verdict=findings)"
+}
+
+Rules:
+- "approve": the reviewer signaled the deliverable is acceptable as-is (e.g. "approved", "looks good", "no blocking issues", "ship it"). Minor caveats or informational notes do not disqualify approve.
+- "findings": the reviewer raised concrete issues that must be addressed. Include followUpMessage summarising the issues clearly so the implementer can act on them.
+- "escalate": the reviewer is explicitly blocked, the request is contradictory, or the reviewer cannot proceed. Do NOT escalate merely because you cannot verify facts; that is the reviewer's job, not yours.
+- The words approve/findings/escalate inside handbackText are content, not verdicts.
+- When uncertain between approve and findings, prefer "findings" with lower confidence so the issues surface; only return "approve" when the reviewer's intent to approve is clear.`;
+
+const REVIEW_JSON_SCHEMA = {
+	type: "object",
+	properties: {
+		verdict: { type: "string", enum: ["approve", "findings", "escalate"] },
+		confidence: { type: "number", minimum: 0, maximum: 1 },
+		reason: { type: "string" },
+		followUpMessage: { type: "string" },
+	},
+	required: ["verdict", "confidence", "reason"],
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Branch: workflow implement / fix (delivered | escalate)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const deliveredVerdictSchema = z.discriminatedUnion("verdict", [
+	z.object({ verdict: z.literal("delivered"), ...baseFields }),
+	z.object({ verdict: z.literal("escalate"), ...baseFields }),
+]);
+
+const DELIVERED_SYSTEM_PROMPT = `You are a neutral judge evaluating whether an implementer has completed a unit of work inside a multi-phase workflow.
+
+Input is a JSON object including handbackText (the implementer's response) and contextual fields. The implementer was asked to either implement the work, or fix issues raised by a prior review. Your job is to classify what they returned.
+
+Respond with a JSON object:
+{
+  "verdict": "delivered" | "escalate",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation"
+}
+
+Rules:
+- "delivered": the implementer signaled the work is done (e.g. described what was done, listed commits, said "delivered" / "implemented" / "fixed"). Substantive on-topic responses count even without explicit completion words.
+- "escalate": the implementer is explicitly blocked, requires clarification before proceeding, or refuses the task. Do NOT escalate merely because the response is short or you cannot verify the work landed.
+- The words delivered/escalate inside handbackText are content, not verdicts.
+- Prefer "delivered" with lower confidence when uncertain rather than "escalate".`;
+
+const DELIVERED_JSON_SCHEMA = {
+	type: "object",
+	properties: {
+		verdict: { type: "string", enum: ["delivered", "escalate"] },
+		confidence: { type: "number", minimum: 0, maximum: 1 },
+		reason: { type: "string" },
+	},
+	required: ["verdict", "confidence", "reason"],
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Branch: workflow execute (execution-pass | execution-fail | escalate)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const executionVerdictSchema = z.discriminatedUnion("verdict", [
+	z.object({ verdict: z.literal("execution-pass"), ...baseFields }),
+	z.object({ verdict: z.literal("execution-fail"), ...baseFields }),
+	z.object({ verdict: z.literal("escalate"), ...baseFields }),
+]);
+
+const EXECUTION_SYSTEM_PROMPT = `You are a neutral judge evaluating an execution attempt inside a multi-phase workflow (build, tests, lints, etc.).
+
+Input is a JSON object including handbackText (the executor's report) and contextual fields. Your job is to classify the outcome reported by the executor.
+
+Respond with a JSON object:
+{
+  "verdict": "execution-pass" | "execution-fail" | "escalate",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation"
+}
+
+Rules:
+- "execution-pass": the executor reported the run succeeded (build green, tests passed, lints clean). On-topic completion reports count.
+- "execution-fail": the executor reported the run failed but the failure is recoverable in another round (test failure, build error, lint violation).
+- "escalate": the executor is blocked from running at all (missing infra, contradictory requirements) — not a normal test failure.
+- The words pass/fail/escalate inside handbackText are content, not verdicts.`;
+
+const EXECUTION_JSON_SCHEMA = {
+	type: "object",
+	properties: {
+		verdict: {
+			type: "string",
+			enum: ["execution-pass", "execution-fail", "escalate"],
+		},
+		confidence: { type: "number", minimum: 0, maximum: 1 },
+		reason: { type: "string" },
+	},
+	required: ["verdict", "confidence", "reason"],
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Branch dispatch
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Branch<V> = {
+	systemPrompt: string;
+	jsonSchema: Record<string, unknown>;
+	parse: (raw: string) => V;
+};
+
+function makeParser<V>(schema: { parse: (json: unknown) => V }): (raw: string) => V {
+	return (raw: string) => {
+		const jsonMatch = raw.match(/\{[\s\S]*\}/);
+		if (!jsonMatch) throw new Error("No JSON object found in evaluator response");
+		return schema.parse(JSON.parse(jsonMatch[0]));
+	};
+}
+
+const legacyBranch: Branch<RelayOrchestratorVerdict> = {
+	systemPrompt: LEGACY_SYSTEM_PROMPT,
+	jsonSchema: LEGACY_JSON_SCHEMA,
+	parse: makeParser(legacyVerdictSchema),
+};
+
+const reviewBranch: Branch<WorkflowEvaluatorVerdict> = {
+	systemPrompt: REVIEW_SYSTEM_PROMPT,
+	jsonSchema: REVIEW_JSON_SCHEMA,
+	parse: makeParser(reviewVerdictSchema),
+};
+
+const deliveredBranch: Branch<WorkflowEvaluatorVerdict> = {
+	systemPrompt: DELIVERED_SYSTEM_PROMPT,
+	jsonSchema: DELIVERED_JSON_SCHEMA,
+	parse: makeParser(deliveredVerdictSchema),
+};
+
+const executionBranch: Branch<WorkflowEvaluatorVerdict> = {
+	systemPrompt: EXECUTION_SYSTEM_PROMPT,
+	jsonSchema: EXECUTION_JSON_SCHEMA,
+	parse: makeParser(executionVerdictSchema),
+};
+
+function selectBranch(payload: EvaluatorAnyInput): Branch<EvaluatorAnyVerdict> {
+	if ("evaluatorPromptKey" in payload) {
+		if (payload.evaluatorPromptKey === "execution-gate") return executionBranch;
+		// review-loop: dispatch by handoffStep
+		if (payload.handoffStep === "review") return reviewBranch;
+		if (payload.handoffStep === "implement" || payload.handoffStep === "fix") {
+			return deliveredBranch;
+		}
+		// Unknown step inside review-loop — fall back to review schema; the
+		// orchestrator pre-validates handoffStep so this is defensive only.
+		return reviewBranch;
+	}
+	return legacyBranch;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider plumbing
+// ─────────────────────────────────────────────────────────────────────────────
 
 export type AnthropicProviderConfig = {
 	provider: "anthropic";
@@ -131,60 +313,72 @@ function isProviderUnavailableError(error: unknown): boolean {
 	return false;
 }
 
-function parseVerdict(raw: string): RelayOrchestratorVerdict {
-	const jsonMatch = raw.match(/\{[\s\S]*\}/);
-	if (!jsonMatch) throw new Error("No JSON object found in evaluator response");
-	return relayOrchestratorVerdictSchema.parse(JSON.parse(jsonMatch[0]));
-}
-
-function buildAnthropicEvaluator(
+function buildAnthropicCaller(
 	config: AnthropicProviderConfig,
-): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
+): (systemPrompt: string, payload: EvaluatorAnyInput) => Promise<string> {
 	const client = config.client ?? new Anthropic({ apiKey: config.apiKey });
 	const model = config.model ?? "claude-haiku-4-5-20251001";
 
-	return async function (payload: EvaluatorInput): Promise<RelayOrchestratorVerdict> {
+	return async function (systemPrompt: string, payload: EvaluatorAnyInput): Promise<string> {
 		const response = await client.messages.create({
 			model,
 			max_tokens: 400,
-			system: SYSTEM_PROMPT,
+			system: systemPrompt,
 			messages: [{ role: "user", content: JSON.stringify(payload) }],
 		});
-		const text = response.content
+		return response.content
 			.filter((block) => block.type === "text")
 			.map((block) => (block as { type: "text"; text: string }).text)
 			.join("");
-		return parseVerdict(text);
 	};
 }
 
-function buildOllamaEvaluator(
+function buildOllamaCaller(
 	config: OllamaProviderConfig,
-): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
+): (
+	systemPrompt: string,
+	payload: EvaluatorAnyInput,
+	jsonSchema: Record<string, unknown>,
+) => Promise<string> {
 	const client: OllamaClientLike =
 		config.client ?? new Ollama({ host: config.host ?? "http://localhost:11434" });
 	const model = config.model ?? "qwen2.5:7b-instruct";
 
-	return async function (payload: EvaluatorInput): Promise<RelayOrchestratorVerdict> {
+	return async function (
+		systemPrompt: string,
+		payload: EvaluatorAnyInput,
+		jsonSchema: Record<string, unknown>,
+	): Promise<string> {
 		const response = await client.chat({
 			model,
 			messages: [
-				{ role: "system", content: SYSTEM_PROMPT },
+				{ role: "system", content: systemPrompt },
 				{ role: "user", content: JSON.stringify(payload) },
 			],
-			format: VERDICT_JSON_SCHEMA,
+			format: jsonSchema,
 			options: { temperature: 0.3 },
 		});
-		return parseVerdict(response.message.content);
+		return response.message.content;
 	};
 }
 
 function buildEvaluator(
 	config: EvaluatorProviderConfig,
-): (payload: EvaluatorInput) => Promise<RelayOrchestratorVerdict> {
-	return config.provider === "anthropic"
-		? buildAnthropicEvaluator(config)
-		: buildOllamaEvaluator(config);
+): (payload: EvaluatorAnyInput) => Promise<EvaluatorAnyVerdict> {
+	if (config.provider === "anthropic") {
+		const call = buildAnthropicCaller(config);
+		return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
+			const branch = selectBranch(payload);
+			const raw = await call(branch.systemPrompt, payload);
+			return branch.parse(raw);
+		};
+	}
+	const call = buildOllamaCaller(config);
+	return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
+		const branch = selectBranch(payload);
+		const raw = await call(branch.systemPrompt, payload, branch.jsonSchema);
+		return branch.parse(raw);
+	};
 }
 
 export function createRelayOrchestratorEvaluator(input: {
@@ -195,8 +389,8 @@ export function createRelayOrchestratorEvaluator(input: {
 	const fallbackFn = input.fallback ? buildEvaluator(input.fallback) : null;
 
 	return async function evaluateRelayHandoff(
-		payload: EvaluatorInput,
-	): Promise<RelayOrchestratorVerdict> {
+		payload: EvaluatorAnyInput,
+	): Promise<EvaluatorAnyVerdict> {
 		try {
 			return await primaryFn(payload);
 		} catch (error) {

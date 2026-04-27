@@ -3,6 +3,7 @@ import {
 	createRelayOrchestratorEvaluator,
 	type EvaluatorInput,
 	type OllamaClientLike,
+	type WorkflowEvaluatorInput,
 } from "../packages/cli/src/runtime/relay-orchestrator-evaluator.ts";
 
 function makePayload(overrides: Partial<EvaluatorInput> = {}): EvaluatorInput {
@@ -15,6 +16,20 @@ function makePayload(overrides: Partial<EvaluatorInput> = {}): EvaluatorInput {
 		roundNumber: 1,
 		maxRounds: 3,
 		captureStatus: "ok",
+		...overrides,
+	};
+}
+
+function makeWorkflowPayload(
+	overrides: Partial<WorkflowEvaluatorInput> = {},
+): WorkflowEvaluatorInput {
+	return {
+		...makePayload(),
+		evaluatorPromptKey: "review-loop",
+		workflowId: "wf_1",
+		phaseRunId: "pr_1",
+		phaseName: "spec-refining",
+		handoffStep: "review",
 		...overrides,
 	};
 }
@@ -175,5 +190,149 @@ describe("createRelayOrchestratorEvaluator — fallback", () => {
 		const result = await evaluate(makePayload());
 
 		expect(result.verdict).toBe("done");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Workflow path: review step (review-loop, handoffStep="review")
+// Allowed verdicts: approve | findings | escalate
+// ---------------------------------------------------------------------------
+
+describe("createRelayOrchestratorEvaluator — workflow review step", () => {
+	it("parses an approve verdict", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "approve", confidence: 0.9, reason: "spec is clear" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		expect(result.verdict).toBe("approve");
+	});
+
+	it("parses a findings verdict with followUpMessage", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({
+				verdict: "findings",
+				confidence: 0.85,
+				reason: "missing acceptance criteria",
+				followUpMessage: "Add acceptance criteria for stdout content and exit code",
+			}),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		expect(result.verdict).toBe("findings");
+		if (result.verdict === "findings") {
+			expect(result.followUpMessage).toContain("acceptance criteria");
+		}
+	});
+
+	it("parses an escalate verdict", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "contradictory spec" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		expect(result.verdict).toBe("escalate");
+	});
+
+	it("rejects a legacy `done` verdict for review step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		await expect(evaluate(makeWorkflowPayload({ handoffStep: "review" }))).rejects.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Workflow path: implement / fix step (review-loop, handoffStep="implement"|"fix")
+// Allowed verdicts: delivered | escalate
+// ---------------------------------------------------------------------------
+
+describe("createRelayOrchestratorEvaluator — workflow implement/fix step", () => {
+	it("parses a delivered verdict for implement step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "delivered", confidence: 0.9, reason: "commits made" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "implement" }));
+		expect(result.verdict).toBe("delivered");
+	});
+
+	it("parses a delivered verdict for fix step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "delivered", confidence: 0.85, reason: "fix landed" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "fix" }));
+		expect(result.verdict).toBe("delivered");
+	});
+
+	it("parses an escalate verdict for implement step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "blocked on missing dep" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(makeWorkflowPayload({ handoffStep: "implement" }));
+		expect(result.verdict).toBe("escalate");
+	});
+
+	it("rejects an approve verdict for implement step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "approve", confidence: 0.9, reason: "ok" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		await expect(evaluate(makeWorkflowPayload({ handoffStep: "implement" }))).rejects.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Workflow path: execute step (execution-gate, handoffStep="execute")
+// Allowed verdicts: execution-pass | execution-fail | escalate
+// ---------------------------------------------------------------------------
+
+describe("createRelayOrchestratorEvaluator — workflow execute step", () => {
+	it("parses an execution-pass verdict", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "execution-pass", confidence: 0.95, reason: "tests pass" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(
+			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+		);
+		expect(result.verdict).toBe("execution-pass");
+	});
+
+	it("parses an execution-fail verdict", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "execution-fail", confidence: 0.9, reason: "tests failed" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(
+			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+		);
+		expect(result.verdict).toBe("execution-fail");
+	});
+
+	it("parses an escalate verdict for execute step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "infra missing" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		const result = await evaluate(
+			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+		);
+		expect(result.verdict).toBe("escalate");
+	});
+
+	it("rejects a delivered verdict for execute step", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "delivered", confidence: 0.9, reason: "ok" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+		await expect(
+			evaluate(
+				makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+			),
+		).rejects.toThrow();
 	});
 });
