@@ -132,6 +132,8 @@ function makeRelayForIdle(opts: {
 		hasVisibleAssistantTurn: () => boolean;
 		extractLatestAssistantTurn: () => { confidence: "high" | "low"; text: string | null };
 	};
+	autonomous?: boolean;
+	handoffAgeMs?: number;
 }) {
 	const { handoffStatus } = opts;
 	const handoffId = "handoff_idle_1";
@@ -159,7 +161,7 @@ function makeRelayForIdle(opts: {
 					| "pending"
 					| "deferred"
 					| "accepted",
-				handoffAgeMs: 5_000,
+				handoffAgeMs: opts.handoffAgeMs ?? 5_000,
 			})),
 			getRelayHandoff: vi.fn(() => handoff),
 			acceptRelayHandoff: vi.fn(),
@@ -167,6 +169,16 @@ function makeRelayForIdle(opts: {
 			deferRelayHandoff: vi.fn(),
 			markRelayHandoffStale: vi.fn(),
 			handoffBackRelay: vi.fn(),
+			...(opts.autonomous
+				? {
+						getHandoffWithWorkflowMeta: vi.fn(() => ({
+							workflowId: "wf_test",
+							chainId: "ch_test",
+						})),
+						getWorkflow: vi.fn(() => ({ status: "running" })),
+						getRelayChain: vi.fn(() => ({ status: "active" })),
+					}
+				: {}),
 		},
 	};
 
@@ -216,6 +228,47 @@ describe("checkIdleActions: auto-accept", () => {
 		await relay.checkIdleActions();
 		await relay.checkIdleActions();
 		expect(broker.control.acceptRelayHandoff).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("checkIdleActions: autonomous mode", () => {
+	// In autonomous mode (workflow=running, chain=active), the broker has no PTY
+	// handle — only the mounted CLI process can inject text into the pane. Idle
+	// auto-accept and auto-handback must therefore fire for autonomous handoffs
+	// just like manual ones; the orchestrator evaluates verdicts after handback.
+	it("auto-accepts a pending autonomous handoff", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "pending",
+			autonomous: true,
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.acceptRelayHandoff).toHaveBeenCalledWith({
+			handoffId: "handoff_idle_1",
+			acceptedAt: expect.any(String),
+		});
+	});
+
+	it("auto-handbacks an accepted autonomous handoff once age >= 30s", async () => {
+		const result = "implement approved plan keep commits small verify tests pass";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			autonomous: true,
+			handoffAgeMs: 35_000,
+			captureHandbackText: async () => result,
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({
+					confidence: "high" as const,
+					text: result,
+				})),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ captureStatus: "ok", requestText: result }),
+		);
 	});
 });
 

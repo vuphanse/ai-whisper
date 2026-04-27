@@ -487,27 +487,30 @@ export function createMountedTurnOwnedRelay(input: {
 		},
 
 		async checkIdleActions() {
-			// Auto-accept: pending (not deferred) handoff, guard not set, not paused, not autonomous
+			// Auto-accept: pending (not deferred) handoff, guard not set, not paused.
+			// Autonomous handoffs (workflow=running, chain=active) also flow through
+			// this path: the broker has no PTY handle, so the mount pane is the only
+			// process that can inject the request text into the agent's prompt.
 			const pending = getPendingHandoff();
 			if (
 				pending !== null &&
 				pending.status === "pending" &&
 				autoAcceptFiredFor !== pending.handoffId &&
-				!(input.isPausedInput?.() ?? false) &&
-				!isAutonomousHandoff(pending.handoffId, input.broker)
+				!(input.isPausedInput?.() ?? false)
 			) {
 				autoAcceptFiredFor = pending.handoffId;
 				await api.acceptPendingHandoff();
 				return;
 			}
 
-			// Auto-handback: accepted handoff, guard not set, not paused, not autonomous
+			// Auto-handback: accepted handoff, guard not set, not paused. Same
+			// rationale as auto-accept — autonomous mode runs through this path so
+			// the orchestrator can evaluate the captured handback verdict.
 			const accepted = getAcceptedHandoff();
 			if (
 				accepted === null ||
 				autoHandbackFiredFor === accepted.handoffId ||
-				(input.isPausedInput?.() ?? false) ||
-				isAutonomousHandoff(accepted.handoffId, input.broker)
+				(input.isPausedInput?.() ?? false)
 			) {
 				return;
 			}
