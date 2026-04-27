@@ -249,6 +249,22 @@ export function createRelayOrchestrator(input: {
 
 			// ── Legacy path ────────────────────────────────────────────────────────
 
+			const roundNumber = claimed.roundNumber ?? 1;
+
+			// Pre-LLM max-round enforcement. Must run before the forced-reissue
+			// branch below — otherwise an agent that never produces a capturable
+			// handback (manual chats with no /copy) loops indefinitely because
+			// each round emits captureStatus=no_response_captured_confidently and
+			// the forced re-issue path skips this check.
+			if (roundNumber >= claimed.maxRounds) {
+				input.broker.control.markRelayChainEscalated({
+					handoffId: claimed.handoffId,
+					reason: `max rounds reached (${roundNumber}/${claimed.maxRounds})`,
+					evaluatedAt: now(),
+				});
+				continue;
+			}
+
 			// Forced re-issue: no usable handback — skip LLM
 			if (
 				claimed.captureStatus === "no_response_captured" ||
@@ -260,18 +276,6 @@ export function createRelayOrchestrator(input: {
 					requestText: claimed.requestText,
 					reason: `forced re-issue: ${claimed.captureStatus}`,
 					now: now(),
-				});
-				continue;
-			}
-
-			const roundNumber = claimed.roundNumber ?? 1;
-
-			// Pre-LLM max-round enforcement
-			if (roundNumber >= claimed.maxRounds) {
-				input.broker.control.markRelayChainEscalated({
-					handoffId: claimed.handoffId,
-					reason: `max rounds reached (${roundNumber}/${claimed.maxRounds})`,
-					evaluatedAt: now(),
 				});
 				continue;
 			}

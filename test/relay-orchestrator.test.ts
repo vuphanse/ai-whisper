@@ -133,6 +133,35 @@ describe("relay orchestrator", () => {
 		);
 	});
 
+	it("escalates instead of re-issuing when captureStatus is bad and roundNumber=maxRounds", async () => {
+		// A bad capture (no_response_captured / no_response_captured_confidently)
+		// triggers a forced re-issue, but max-rounds enforcement must still apply.
+		// Otherwise an agent that never produces capturable output (e.g. manual
+		// chats without /copy) loops forever past maxRounds.
+		const broker = makeBrokerDouble({
+			claimable: [
+				makeHandedBack({
+					roundNumber: 3,
+					maxRounds: 3,
+					captureStatus: "no_response_captured_confidently",
+				}),
+			],
+		});
+		const evaluate = vi.fn();
+
+		const orchestrator = createRelayOrchestrator({ broker, collabId: "collab_chain", evaluate });
+		await orchestrator.pollOnce();
+
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(broker.control.createLoopRelayHandoff).not.toHaveBeenCalled();
+		expect(broker.control.markRelayChainEscalated).toHaveBeenCalledWith(
+			expect.objectContaining({
+				handoffId: "handoff_1",
+				reason: expect.stringContaining("max rounds") as string,
+			}),
+		);
+	});
+
 	it("retries evaluator once, then escalates when both attempts throw", async () => {
 		const broker = makeBrokerDouble({ claimable: [makeHandedBack()] });
 		const evaluate = vi
