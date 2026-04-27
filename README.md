@@ -4,7 +4,9 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 7 is complete and delivers attach, recovery, operator monitoring, terminal-first mounted sessions, adopt workflows, and relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration.
+This repository is being built in incremental phases. Phase 7 is complete and delivers attach, recovery, operator monitoring, terminal-first mounted sessions, adopt workflows, and relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `superpowers-feature-development`) run on top of the same relay.
+
+For the full handoff lifecycle reference — manual chats, autonomous workflows, capture classification, hotkeys, and per-step verdicts — see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md).
 
 When running from this repo checkout, build first with `pnpm build` and invoke the CLI as `node packages/cli/dist/bin/whisper.js ...`. The `whisper ...` examples below assume a packaged or globally installed CLI.
 
@@ -208,6 +210,8 @@ The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Us
 
 The relay orchestrator is an opt-in daemon that automates the post-handback judgment loop. After an agent hands back a deliverable, the orchestrator evaluates whether the work satisfies the original request — without requiring human intervention for each round.
 
+> See [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md) for the complete handoff state machine, capture-status table, hotkey reference, per-step verdicts, and troubleshooting guide.
+
 #### How it works
 
 1. Agent hands back work → handoff status becomes `handed_back`
@@ -398,6 +402,41 @@ AI_WHISPER_IDLE_THRESHOLD_MS=30000
 ```
 
 When orchestrator is disabled (default), the collab uses the traditional manual relay workflow and no LLM calls are made by the broker daemon.
+
+### Autonomous workflows
+
+Multi-phase pipelines that drive both agents through a structured task. Today the only registered workflow type is `superpowers-feature-development`, which runs spec-refining → plan-writing → plan-execution → code-review.
+
+Start a workflow once you have a collab running and both agents mounted:
+
+```bash
+whisper workflow start \
+  --type superpowers-feature-development \
+  --spec docs/path/to/spec.md \
+  --implementer claude \
+  --reviewer codex
+```
+
+What the workflow does:
+
+- **Phase 0 — spec-refining** (review-loop, maxRounds=5): reviewer reads the spec; either approves or returns findings; implementer addresses findings; loops until approve or escalate.
+- **Phase 1 — plan-writing** (review-loop, maxRounds=5): implementer writes a plan file; reviewer judges; loops until approve.
+- **Phase 2 — plan-execution** (execution-gate, maxRounds=1): implementer runs the plan and commits; orchestrator judges execution-pass / execution-fail / escalate.
+- **Phase 3 — code-review** (review-loop, maxRounds=5): reviewer reviews the commits; loops until approve or halt.
+
+While a workflow is running the manual hotkeys (`a/e/d/h/space/Ctrl+H`) are no-ops — the broker drives the chain. Operators observe via `whisper collab relay-monitor` and the SQLite tables (`workflows`, `relay_chains`, `relay_handoff`).
+
+Other workflow commands:
+
+```bash
+whisper workflow list
+whisper workflow inspect <workflowId>
+whisper workflow resume <workflowId>
+whisper workflow cancel <workflowId>
+whisper workflow types
+```
+
+For the per-step verdict vocabulary, halt conditions, and inspection cookbook, see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md#2-autonomous-workflows).
 
 ## Phase Roadmap
 
