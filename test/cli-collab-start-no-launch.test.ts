@@ -66,6 +66,60 @@ describe("cli collab start --no-launch", () => {
 		expect(sleep).toHaveBeenCalledTimes(2);
 	});
 
+	it("defaults orchestratorEnabled to true when env var is unset", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-orch-default-"));
+		const prior = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
+		delete process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
+
+		try {
+			const result = await runCollabStart({
+				workspaceRoot,
+				now: "2026-04-29T00:00:00.000Z",
+				launchMode: "none",
+				spawnBroker: fakeBrokerSpawn(),
+				assessBroker: healthyBrokerAssess,
+			});
+
+			const sqlitePath = getBrokerSqlitePath(workspaceRoot);
+			const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4311 });
+			expect(broker.control.getCollab(result.collabId)).toEqual(
+				expect.objectContaining({ orchestratorEnabled: true }),
+			);
+		} finally {
+			if (prior !== undefined) {
+				process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = prior;
+			}
+		}
+	});
+
+	it("disables orchestrator when env var is explicitly '0'", async () => {
+		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-orch-off-"));
+		const prior = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
+		process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = "0";
+
+		try {
+			const result = await runCollabStart({
+				workspaceRoot,
+				now: "2026-04-29T00:00:00.000Z",
+				launchMode: "none",
+				spawnBroker: fakeBrokerSpawn(),
+				assessBroker: healthyBrokerAssess,
+			});
+
+			const sqlitePath = getBrokerSqlitePath(workspaceRoot);
+			const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4311 });
+			expect(broker.control.getCollab(result.collabId)).toEqual(
+				expect.objectContaining({ orchestratorEnabled: false }),
+			);
+		} finally {
+			if (prior !== undefined) {
+				process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = prior;
+			} else {
+				delete process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
+			}
+		}
+	});
+
 	it("persists orchestrator config from environment when collab starts", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-orch-"));
 		process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = "1";

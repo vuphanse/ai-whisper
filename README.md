@@ -377,7 +377,7 @@ On network or rate-limit errors, the evaluator retries once with the fallback pr
 #### Configuration
 
 ```bash
-# Enable orchestrator for the collab
+# Orchestrator is on by default. Set to "0" before `whisper collab start` to disable.
 AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1
 
 # Max rounds before forced escalation (default: 3)

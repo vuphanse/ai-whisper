@@ -80,7 +80,9 @@ The `/copy` step matters: it's what populates the clipboard. Some agent prompts 
 
 ### Orchestrator and max-rounds
 
-If the collab is created with `orchestratorEnabled` (the default), a per-collab orchestrator polls every 1s for handed-back handoffs and emits a verdict. Each chain has a `max_rounds` (default 3, set per collab via `orchestratorMaxRounds`).
+A per-collab orchestrator polls every 1s for handed-back handoffs and emits a verdict. It is on by default — `whisper collab start` sets `orchestratorEnabled=true` unless `AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=0` is exported before startup. Each chain has a `max_rounds` (default 3, overridable via `AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS` at start time).
+
+Autonomous workflows require `orchestratorEnabled=true`; `whisper workflow start` throws if the collab was started with the orchestrator disabled.
 
 The orchestrator enforces max-rounds **before** anything else: a chain at `roundNumber >= maxRounds` always escalates, even if the handback couldn't be captured. (Without this, persistent capture failures would loop the chain forever.)
 
@@ -270,8 +272,10 @@ pending  ─[accept]──► accepted  ─[hand back]──► handed_back
 
 ## Knobs
 
-| env var                        | default | meaning                                                              |
-|--------------------------------|---------|----------------------------------------------------------------------|
-| `AI_WHISPER_IDLE_THRESHOLD_MS` | 30000   | how long the terminal must be idle before auto-fire runs (min 5000)  |
+| env var                                    | default | meaning                                                                                                          |
+|--------------------------------------------|---------|------------------------------------------------------------------------------------------------------------------|
+| `AI_WHISPER_IDLE_THRESHOLD_MS`             | 30000   | how long the terminal must be idle before auto-fire runs (min 5000)                                              |
+| `AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED`    | (on)    | set to `0` before `whisper collab start` to disable the orchestrator. Any other value (or unset) keeps it on.    |
+| `AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS` | 3       | per-collab `orchestratorMaxRounds`; bounds every legacy chain in that collab. Read once at `collab start`.       |
 
-Per-collab `orchestratorMaxRounds` (default 3) is set when the collab is started; it bounds every legacy chain in that collab. Workflow phases have their own `maxRounds` baked into the registry (per-phase, see table above).
+Workflow phases have their own `maxRounds` baked into the registry (per-phase, see table above) — `AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS` does not override them.

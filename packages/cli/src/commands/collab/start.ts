@@ -100,7 +100,7 @@ export async function runCollabStart(input: {
 
 	const collabId = createCliCollabId(input.now);
 
-	const orchestratorEnabled = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED === "1";
+	const orchestratorEnabled = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED !== "0";
 	const orchestratorMaxRounds = Math.max(
 		1,
 		Number(process.env.AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS ?? "3") || 3,
