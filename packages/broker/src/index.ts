@@ -37,4 +37,13 @@ export {
 	type RelayCaptureDiagnosticRecord,
 	type CaptureStatus,
 } from "./storage/repositories/relay-capture-diagnostics-repository.js";
+export {
+	insertEvaluatorDiagnostic,
+	listEvaluatorDiagnosticsByCollab,
+	listEvaluatorDiagnosticsByCollabAndChain,
+	listEvaluatorDiagnosticsByHandoff,
+	deleteEvaluatorDiagnosticsOlderThan,
+	type RelayEvaluatorDiagnosticRecord,
+	type EvaluatorOutcome,
+} from "./storage/repositories/relay-evaluator-diagnostics-repository.js";
 export { getWorkflowDefinition, listWorkflowTypes } from "./runtime/workflow-registry.js";
