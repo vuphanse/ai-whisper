@@ -190,16 +190,35 @@ export function createCli(): Command {
 		.description("Inspect the active collab thread")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--watch", "Continuously redraw the active-thread operator view")
-		.action(async (opts: WorkspaceOpts & { watch?: boolean }) => {
-			const output = await runCollabInspect({
-				workspaceRoot: opts.workspace,
-				now: new Date().toISOString(),
-				watch: Boolean(opts.watch),
-			});
-			if (output) {
-				process.stdout.write(output);
-			}
-		});
+		.option(
+			"--captures [chainId]",
+			"Show recent capture-diagnostics rows. Pass a chain id to filter, or 'all' for the full history.",
+		)
+		.action(
+			async (
+				opts: WorkspaceOpts & {
+					watch?: boolean;
+					captures?: boolean | string;
+				},
+			) => {
+				const capturesArg: true | string | undefined =
+					opts.captures === undefined || opts.captures === false
+						? undefined
+						: opts.captures === true
+							? true
+							: opts.captures;
+
+				const output = await runCollabInspect({
+					workspaceRoot: opts.workspace,
+					now: new Date().toISOString(),
+					watch: Boolean(opts.watch),
+					...(capturesArg !== undefined ? { captures: capturesArg } : {}),
+				});
+				if (output) {
+					process.stdout.write(output);
+				}
+			},
+		);
 
 	collab
 		.command("relay-monitor")

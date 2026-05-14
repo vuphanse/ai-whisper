@@ -21,4 +21,23 @@ describe("cli command wiring", () => {
 		expect(optionNames).toContain("--target");
 		expect(optionNames).toContain("--action");
 	});
+
+	it("inspect subcommand accepts --captures and --watch options", () => {
+		const cli = createCli();
+		const collab = cli.commands.find((c) => c.name() === "collab")!;
+		const inspect = collab.commands.find((c) => c.name() === "inspect");
+		expect(inspect).toBeDefined();
+		const longs = inspect!.options.map((o) => o.long);
+		expect(longs).toContain("--captures");
+		expect(longs).toContain("--watch");
+	});
+
+	it("inspect's --captures option is optional-value (takes either a chain id or no argument)", () => {
+		const cli = createCli();
+		const collab = cli.commands.find((c) => c.name() === "collab")!;
+		const inspect = collab.commands.find((c) => c.name() === "inspect")!;
+		const captures = inspect.options.find((o) => o.long === "--captures");
+		expect(captures).toBeDefined();
+		expect(captures!.flags).toMatch(/\[/);
+	});
 });
