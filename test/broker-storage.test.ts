@@ -77,4 +77,57 @@ describe("broker storage bootstrap", () => {
 
 		void broker.stop();
 	});
+
+	it("creates relay_evaluator_diagnostics with the expected columns and indexes", () => {
+		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-eval-diag-"));
+		const sqlitePath = join(dir, "broker.sqlite");
+		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4601 });
+
+		const columns = broker.db
+			.prepare("PRAGMA table_info(relay_evaluator_diagnostics)")
+			.all() as Array<{ name: string }>;
+		const names = columns.map((c) => c.name).sort();
+
+		expect(names).toEqual(
+			[
+				"attempt_kind",
+				"call_group_id",
+				"chain_id",
+				"collab_id",
+				"confidence",
+				"created_at",
+				"error_message",
+				"evaluator_branch",
+				"evaluator_id",
+				"evaluator_prompt_key",
+				"follow_up_message_len",
+				"handoff_id",
+				"handoff_step",
+				"input_tokens",
+				"latency_ms",
+				"outcome",
+				"output_tokens",
+				"phase_run_id",
+				"prompt_sample",
+				"provider",
+				"reason",
+				"response_sample",
+				"verdict",
+				"workflow_id",
+			].sort(),
+		);
+
+		const indexes = broker.db
+			.prepare("PRAGMA index_list(relay_evaluator_diagnostics)")
+			.all() as Array<{ name: string }>;
+		const indexNames = indexes.map((i) => i.name);
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_collab_created");
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_handoff");
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_chain_created");
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_workflow");
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_call_group");
+		expect(indexNames).toContain("idx_relay_evaluator_diagnostics_outcome");
+
+		void broker.stop();
+	});
 });

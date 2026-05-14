@@ -404,4 +404,45 @@ export function applyMigrations(db: Database.Database): void {
 		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_status
 			ON relay_capture_diagnostics (capture_status);
 	`);
+
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS relay_evaluator_diagnostics (
+			evaluator_id TEXT PRIMARY KEY,
+			handoff_id TEXT NOT NULL,
+			collab_id TEXT NOT NULL,
+			chain_id TEXT,
+			workflow_id TEXT,
+			phase_run_id TEXT,
+			evaluator_branch TEXT NOT NULL,
+			evaluator_prompt_key TEXT,
+			handoff_step TEXT,
+			attempt_kind TEXT NOT NULL,
+			call_group_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			outcome TEXT NOT NULL,
+			verdict TEXT,
+			confidence REAL,
+			reason TEXT,
+			follow_up_message_len INTEGER,
+			latency_ms INTEGER NOT NULL,
+			error_message TEXT,
+			input_tokens INTEGER,
+			output_tokens INTEGER,
+			prompt_sample TEXT,
+			response_sample TEXT,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_collab_created
+			ON relay_evaluator_diagnostics (collab_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_handoff
+			ON relay_evaluator_diagnostics (handoff_id);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_chain_created
+			ON relay_evaluator_diagnostics (chain_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_workflow
+			ON relay_evaluator_diagnostics (workflow_id);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_call_group
+			ON relay_evaluator_diagnostics (call_group_id);
+		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_outcome
+			ON relay_evaluator_diagnostics (outcome);
+	`);
 }
