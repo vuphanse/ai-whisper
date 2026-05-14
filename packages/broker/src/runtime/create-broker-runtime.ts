@@ -10,6 +10,7 @@ import {
 	createBrokerEventBus,
 	type BrokerEventBus,
 } from "./broker-event-bus.js";
+import { createDiagnosticsSweep } from "./diagnostics-sweep.js";
 import { createWorkflowDriver } from "./workflow-driver.js";
 import { createWorkspaceHeadReader } from "./workspace-head-reader.js";
 
@@ -50,6 +51,10 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			})
 		: null;
 	workflowDriver?.start();
+	const diagnosticsSweep = config.runDiagnosticsSweep
+		? createDiagnosticsSweep({ broker: { control } })
+		: null;
+	diagnosticsSweep?.start();
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -75,6 +80,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			});
 		},
 		async stop(): Promise<void> {
+			diagnosticsSweep?.stop();
 			workflowDriver?.stop();
 			await app.close();
 			db.close();

@@ -9,6 +9,11 @@ export const brokerConfigSchema = z.object({
 	// must pass `false` — otherwise a setImmediate-scheduled phase kickoff
 	// races broker.stop() and crashes on the closed database connection.
 	runWorkflowDriver: z.boolean().default(true),
+	// Same rationale as runWorkflowDriver: only the authoritative broker should
+	// run the diagnostics-sweep timer. Transient CLI brokers (inspect, status,
+	// etc.) must pass `false` so they do not spin up a per-process maintenance
+	// timer that ticks until the next short-lived stop().
+	runDiagnosticsSweep: z.boolean().default(true),
 });
 
 export type BrokerConfig = z.input<typeof brokerConfigSchema>;

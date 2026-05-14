@@ -43,6 +43,8 @@ export async function runCollabInspect(input: {
 			sqlitePath: state.broker.sqlitePath,
 			host: state.broker.host,
 			port: state.broker.port,
+			runWorkflowDriver: false,
+			runDiagnosticsSweep: false,
 		});
 
 		try {
