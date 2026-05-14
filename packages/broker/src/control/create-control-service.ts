@@ -92,6 +92,14 @@ import {
 	upsertRelayTurnState,
 } from "../storage/repositories/relay-turn-state-repository.js";
 import {
+	insertCaptureDiagnostic,
+	listCaptureDiagnosticsByCollab as queryListCaptureDiagnosticsByCollab,
+	listCaptureDiagnosticsByChain as queryListCaptureDiagnosticsByChain,
+	listCaptureDiagnosticsByHandoff as queryListCaptureDiagnosticsByHandoff,
+	deleteCaptureDiagnosticsOlderThan,
+	type RelayCaptureDiagnosticRecord,
+} from "../storage/repositories/relay-capture-diagnostics-repository.js";
+import {
 	createRelayHandoffTxn,
 	acceptRelayHandoffTxn,
 	deferRelayHandoffTxn,
@@ -1093,6 +1101,64 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		markRelayChainAbandoned(input: { handoffId: string; reason: string; evaluatedAt: string }) {
 			return markRelayChainAbandonedTxn(db, input);
+		},
+		recordCaptureDiagnostic(input: {
+			handoffId: string;
+			collabId: string;
+			chainId: string | null;
+			workflowId: string | null;
+			targetProvider: "codex" | "claude";
+			captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured";
+			clipLen: number;
+			turnLen: number;
+			turnConfidence: "high" | "low";
+			jaccardScore: number | null;
+			containmentScore: number | null;
+			clipSample: string | null;
+			turnSample: string | null;
+			abortedByRaceGuard: boolean;
+			now: string;
+		}): { captureId: string } {
+			const captureId = `capture_${input.now.replace(/[^0-9]/g, "")}_${input.handoffId.slice(-8)}`;
+			insertCaptureDiagnostic(db, {
+				captureId,
+				handoffId: input.handoffId,
+				collabId: input.collabId,
+				chainId: input.chainId,
+				workflowId: input.workflowId,
+				targetProvider: input.targetProvider,
+				captureStatus: input.captureStatus,
+				clipLen: input.clipLen,
+				turnLen: input.turnLen,
+				turnConfidence: input.turnConfidence,
+				jaccardScore: input.jaccardScore,
+				containmentScore: input.containmentScore,
+				clipSample: input.clipSample,
+				turnSample: input.turnSample,
+				abortedByRaceGuard: input.abortedByRaceGuard,
+				createdAt: input.now,
+			});
+			return { captureId };
+		},
+		listCaptureDiagnosticsByCollab(
+			collabId: string,
+			limit: number,
+		): RelayCaptureDiagnosticRecord[] {
+			return queryListCaptureDiagnosticsByCollab(db, collabId, limit);
+		},
+		listCaptureDiagnosticsByChain(
+			chainId: string,
+			limit: number,
+		): RelayCaptureDiagnosticRecord[] {
+			return queryListCaptureDiagnosticsByChain(db, chainId, limit);
+		},
+		listCaptureDiagnosticsByHandoff(
+			handoffId: string,
+		): RelayCaptureDiagnosticRecord[] {
+			return queryListCaptureDiagnosticsByHandoff(db, handoffId);
+		},
+		sweepCaptureDiagnostics(input: { cutoffIso: string }): number {
+			return deleteCaptureDiagnosticsOlderThan(db, input.cutoffIso);
 		},
 		cleanupOrchestration(input: { collabId: string; reason: string; now: string }) {
 			return cleanupOrchestrationOnShutdownTxn(db, input);
