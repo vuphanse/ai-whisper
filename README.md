@@ -95,6 +95,8 @@ whisper collab inspect --watch
 
 `inspect` is read-only. It shows the active thread, recent work items, recent replies, and recent failed or `recovery_blocked` activity with truncated previews by default.
 
+Use `--captures` to surface recent auto-handback capture diagnostics for the active collab; pass a chain id (e.g. `--captures chain_abc`) to filter, or `--captures all` for the full history. Combine with `--watch` to tail.
+
 ### Terminal-first mounted sessions (Phase 7E)
 
 The preferred workflow for inline `@@` relay support. `whisper collab mount` claims the current iTerm shell as the managed session surface and launches the provider automatically:
