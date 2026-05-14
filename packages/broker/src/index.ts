@@ -31,7 +31,7 @@ export {
 export {
 	insertCaptureDiagnostic,
 	listCaptureDiagnosticsByCollab,
-	listCaptureDiagnosticsByChain,
+	listCaptureDiagnosticsByCollabAndChain,
 	listCaptureDiagnosticsByHandoff,
 	deleteCaptureDiagnosticsOlderThan,
 	type RelayCaptureDiagnosticRecord,

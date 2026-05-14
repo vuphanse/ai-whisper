@@ -110,19 +110,20 @@ export function listCaptureDiagnosticsByCollab(
 	return rows.map(rowToRecord);
 }
 
-export function listCaptureDiagnosticsByChain(
+export function listCaptureDiagnosticsByCollabAndChain(
 	db: Database.Database,
+	collabId: string,
 	chainId: string,
 	limit: number,
 ): RelayCaptureDiagnosticRecord[] {
 	const rows = db
 		.prepare(
 			`SELECT * FROM relay_capture_diagnostics
-			 WHERE chain_id = ?
+			 WHERE collab_id = ? AND chain_id = ?
 			 ORDER BY created_at DESC
 			 LIMIT ?`,
 		)
-		.all(chainId, limit) as Row[];
+		.all(collabId, chainId, limit) as Row[];
 	return rows.map(rowToRecord);
 }
 

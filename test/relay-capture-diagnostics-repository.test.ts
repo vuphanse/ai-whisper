@@ -6,7 +6,7 @@ import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import {
 	insertCaptureDiagnostic,
 	listCaptureDiagnosticsByCollab,
-	listCaptureDiagnosticsByChain,
+	listCaptureDiagnosticsByCollabAndChain,
 	listCaptureDiagnosticsByHandoff,
 	deleteCaptureDiagnosticsOlderThan,
 } from "../packages/broker/src/storage/repositories/relay-capture-diagnostics-repository.ts";
@@ -83,7 +83,7 @@ describe("relay-capture-diagnostics repository", () => {
 		}
 	});
 
-	it("listByChain filters by chain_id", () => {
+	it("listByCollabAndChain filters by both collab_id and chain_id", () => {
 		const broker = newBroker();
 		try {
 			insertCaptureDiagnostic(broker.db, {
@@ -102,9 +102,40 @@ describe("relay-capture-diagnostics repository", () => {
 				clipSample: null, turnSample: null,
 				abortedByRaceGuard: false, createdAt: "2026-05-14T10:01:00.000Z",
 			});
-			const rows = listCaptureDiagnosticsByChain(broker.db, "chain_X", 20);
+			const rows = listCaptureDiagnosticsByCollabAndChain(broker.db, "x", "chain_X", 20);
 			expect(rows).toHaveLength(1);
 			expect(rows[0]?.captureId).toBe("capture_c1");
+		} finally {
+			void broker.stop();
+		}
+	});
+
+	it("listByCollabAndChain does not return rows from a different collab that shares the chain_id", () => {
+		const broker = newBroker();
+		try {
+			// Same chain_id appears in two different collabs.
+			insertCaptureDiagnostic(broker.db, {
+				captureId: "capture_a", handoffId: "h_a", collabId: "collab_a", chainId: "chain_shared",
+				workflowId: null, targetProvider: "claude", captureStatus: "ok",
+				clipLen: 100, turnLen: 100, turnConfidence: "high",
+				jaccardScore: null, containmentScore: null,
+				clipSample: null, turnSample: null,
+				abortedByRaceGuard: false, createdAt: "2026-05-14T10:00:00.000Z",
+			});
+			insertCaptureDiagnostic(broker.db, {
+				captureId: "capture_b", handoffId: "h_b", collabId: "collab_b", chainId: "chain_shared",
+				workflowId: null, targetProvider: "claude", captureStatus: "ok",
+				clipLen: 100, turnLen: 100, turnConfidence: "high",
+				jaccardScore: null, containmentScore: null,
+				clipSample: null, turnSample: null,
+				abortedByRaceGuard: false, createdAt: "2026-05-14T10:01:00.000Z",
+			});
+
+			const rowsForA = listCaptureDiagnosticsByCollabAndChain(broker.db, "collab_a", "chain_shared", 20);
+			expect(rowsForA.map((r) => r.captureId)).toEqual(["capture_a"]);
+
+			const rowsForB = listCaptureDiagnosticsByCollabAndChain(broker.db, "collab_b", "chain_shared", 20);
+			expect(rowsForB.map((r) => r.captureId)).toEqual(["capture_b"]);
 		} finally {
 			void broker.stop();
 		}

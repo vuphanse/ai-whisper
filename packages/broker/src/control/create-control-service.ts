@@ -94,7 +94,7 @@ import {
 import {
 	insertCaptureDiagnostic,
 	listCaptureDiagnosticsByCollab as queryListCaptureDiagnosticsByCollab,
-	listCaptureDiagnosticsByChain as queryListCaptureDiagnosticsByChain,
+	listCaptureDiagnosticsByCollabAndChain as queryListCaptureDiagnosticsByCollabAndChain,
 	listCaptureDiagnosticsByHandoff as queryListCaptureDiagnosticsByHandoff,
 	deleteCaptureDiagnosticsOlderThan,
 	type RelayCaptureDiagnosticRecord,
@@ -1146,11 +1146,12 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		): RelayCaptureDiagnosticRecord[] {
 			return queryListCaptureDiagnosticsByCollab(db, collabId, limit);
 		},
-		listCaptureDiagnosticsByChain(
+		listCaptureDiagnosticsByCollabAndChain(
+			collabId: string,
 			chainId: string,
 			limit: number,
 		): RelayCaptureDiagnosticRecord[] {
-			return queryListCaptureDiagnosticsByChain(db, chainId, limit);
+			return queryListCaptureDiagnosticsByCollabAndChain(db, collabId, chainId, limit);
 		},
 		listCaptureDiagnosticsByHandoff(
 			handoffId: string,

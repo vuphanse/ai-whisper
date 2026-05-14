@@ -68,8 +68,13 @@ export async function runCollabInspect(input: {
 					const rows = broker.control.listCaptureDiagnosticsByCollab(state.collabId, ALL_LIMIT);
 					return formatCapturesView({ rows, collabId: state.collabId });
 				}
-				// Treat any other string as a chain id.
-				const rows = broker.control.listCaptureDiagnosticsByChain(captures, ALL_LIMIT);
+				// Treat any other string as a chain id, scoped to the active collab so
+				// rows from other collabs sharing the chain id never leak through.
+				const rows = broker.control.listCaptureDiagnosticsByCollabAndChain(
+					state.collabId,
+					captures,
+					ALL_LIMIT,
+				);
 				return formatCapturesView({ rows, collabId: state.collabId });
 			}
 			const snapshot = buildInspectSnapshot({ broker, state, now: timestamp });
