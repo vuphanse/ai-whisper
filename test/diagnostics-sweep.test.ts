@@ -109,4 +109,47 @@ describe("diagnostics-sweep", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it("deletes evaluator-diagnostics rows older than retentionDays on each tick", () => {
+		vi.useFakeTimers();
+		const broker = newBroker();
+		try {
+			vi.setSystemTime(new Date("2026-05-14T00:00:00.000Z"));
+
+			broker.control.recordEvaluatorDiagnostic({
+				handoffId: "h_old", collabId: "x", chainId: null, workflowId: null, phaseRunId: null,
+				evaluatorBranch: "legacy", evaluatorPromptKey: null, handoffStep: null,
+				attemptKind: "primary", callGroupId: "cg_old", provider: "anthropic",
+				outcome: "ok", verdict: "done", confidence: 0.9, reason: "x", followUpMessageLen: 0,
+				latencyMs: 100, errorMessage: null, inputTokens: null, outputTokens: null,
+				promptSample: null, responseSample: null,
+				now: "2026-04-01T00:00:00.000Z",
+			});
+			broker.control.recordEvaluatorDiagnostic({
+				handoffId: "h_new", collabId: "x", chainId: null, workflowId: null, phaseRunId: null,
+				evaluatorBranch: "legacy", evaluatorPromptKey: null, handoffStep: null,
+				attemptKind: "primary", callGroupId: "cg_new", provider: "anthropic",
+				outcome: "ok", verdict: "done", confidence: 0.9, reason: "x", followUpMessageLen: 0,
+				latencyMs: 100, errorMessage: null, inputTokens: null, outputTokens: null,
+				promptSample: null, responseSample: null,
+				now: "2026-05-13T00:00:00.000Z",
+			});
+
+			const sweep = createDiagnosticsSweep({
+				broker: { control: broker.control },
+				intervalMs: 100,
+				retentionDays: 30,
+			});
+			sweep.start();
+			vi.advanceTimersByTime(150);
+			sweep.stop();
+
+			const rows = broker.control.listEvaluatorDiagnosticsByCollab("x", 10);
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.handoffId).toBe("h_new");
+		} finally {
+			void broker.stop();
+			vi.useRealTimers();
+		}
+	});
 });

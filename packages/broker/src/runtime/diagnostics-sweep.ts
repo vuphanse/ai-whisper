@@ -1,5 +1,6 @@
 type ControlMethods = {
 	sweepCaptureDiagnostics(input: { cutoffIso: string }): number;
+	sweepEvaluatorDiagnostics(input: { cutoffIso: string }): number;
 };
 
 export type DiagnosticsSweepDeps = {
@@ -39,7 +40,9 @@ export function createDiagnosticsSweep(deps: DiagnosticsSweepDeps): DiagnosticsS
 
 	function tick(): void {
 		const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-		deps.broker.control.sweepCaptureDiagnostics({ cutoffIso: cutoff.toISOString() });
+		const cutoffIso = cutoff.toISOString();
+		deps.broker.control.sweepCaptureDiagnostics({ cutoffIso });
+		deps.broker.control.sweepEvaluatorDiagnostics({ cutoffIso });
 	}
 
 	return {
