@@ -618,4 +618,27 @@ describe("checkIdleActions: auto-handback diagnostics", () => {
 			}
 		}
 	});
+
+	it("does NOT block handoffBackRelay when recordCaptureDiagnostic throws", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { relay, broker } = makeRelayForIdle({
+				handoffStatus: "accepted",
+				handoffAgeMs: 60_000,
+				captureHandbackText: async () => "c".repeat(150),
+			});
+			vi.mocked(broker.control.recordCaptureDiagnostic).mockImplementation(() => {
+				throw new Error("sqlite is full");
+			});
+
+			await relay.checkIdleActions();
+
+			expect(broker.control.handoffBackRelay).toHaveBeenCalledTimes(1);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("capture diagnostic write failed"),
+			);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
 });

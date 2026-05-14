@@ -585,23 +585,30 @@ export function createMountedTurnOwnedRelay(input: {
 			};
 
 			const now = new Date().toISOString();
-			input.broker.control.recordCaptureDiagnostic?.({
-				handoffId: accepted.handoffId,
-				collabId: input.collabId,
-				chainId: handoffMeta?.chainId ?? null,
-				workflowId: handoffMeta?.workflowId ?? null,
-				targetProvider: input.currentAgent,
-				captureStatus,
-				clipLen: (clipboardText ?? "").length,
-				turnLen: (turnResult.text ?? "").length,
-				turnConfidence: turnResult.confidence,
-				jaccardScore: classification.jaccardScore,
-				containmentScore: classification.containmentScore,
-				clipSample: sampleOf(clipboardText),
-				turnSample: sampleOf(turnResult.text),
-				abortedByRaceGuard,
-				now,
-			});
+			try {
+				input.broker.control.recordCaptureDiagnostic?.({
+					handoffId: accepted.handoffId,
+					collabId: input.collabId,
+					chainId: handoffMeta?.chainId ?? null,
+					workflowId: handoffMeta?.workflowId ?? null,
+					targetProvider: input.currentAgent,
+					captureStatus,
+					clipLen: (clipboardText ?? "").length,
+					turnLen: (turnResult.text ?? "").length,
+					turnConfidence: turnResult.confidence,
+					jaccardScore: classification.jaccardScore,
+					containmentScore: classification.containmentScore,
+					clipSample: sampleOf(clipboardText),
+					turnSample: sampleOf(turnResult.text),
+					abortedByRaceGuard,
+					now,
+				});
+			} catch (err) {
+				// Diagnostics are observability — never block the relay path.
+				console.warn(
+					`[ai-whisper] capture diagnostic write failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
 
 			if (process.env["AI_WHISPER_DEBUG_CAPTURE"]) {
 				const { writeFileSync } = await import("node:fs");
