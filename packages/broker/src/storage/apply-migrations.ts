@@ -375,4 +375,33 @@ export function applyMigrations(db: Database.Database): void {
 	if (!relayTurnStateColumns.some((column) => column.name === "chain_status")) {
 		db.exec("ALTER TABLE relay_turn_state ADD COLUMN chain_status TEXT NOT NULL DEFAULT 'done'");
 	}
+
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS relay_capture_diagnostics (
+			capture_id TEXT PRIMARY KEY,
+			handoff_id TEXT NOT NULL,
+			collab_id TEXT NOT NULL,
+			chain_id TEXT,
+			workflow_id TEXT,
+			target_provider TEXT NOT NULL,
+			capture_status TEXT NOT NULL,
+			clip_len INTEGER NOT NULL,
+			turn_len INTEGER NOT NULL,
+			turn_confidence TEXT NOT NULL,
+			jaccard_score REAL,
+			containment_score REAL,
+			clip_sample TEXT,
+			turn_sample TEXT,
+			aborted_by_race_guard INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_collab_created
+			ON relay_capture_diagnostics (collab_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_handoff
+			ON relay_capture_diagnostics (handoff_id);
+		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_chain_created
+			ON relay_capture_diagnostics (chain_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_status
+			ON relay_capture_diagnostics (capture_status);
+	`);
 }
