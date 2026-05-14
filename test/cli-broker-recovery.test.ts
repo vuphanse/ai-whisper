@@ -9,8 +9,6 @@ import { runCollabRecover } from "../packages/cli/src/commands/collab/recover.ts
 import { runCollabReconnect } from "../packages/cli/src/commands/collab/reconnect.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { runCollabAttach } from "../packages/cli/src/commands/collab/attach.ts";
-import { runCollabRebind } from "../packages/cli/src/commands/collab/rebind.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 
 describe("cli recovery state", () => {
@@ -328,22 +326,6 @@ describe("reconnect command", () => {
 		return { dir, statePath, collabId, sqlitePath, now };
 	}
 
-	it("prints a reconnect snippet for a degraded remembered role", async () => {
-		const { dir, now } = await buildReconnectFixture();
-
-		const result = await runCollabReconnect({
-			workspaceRoot: dir,
-			target: "codex",
-			now,
-		});
-
-		expect(result.claim.mode).toBe("reconnect");
-		if (result.mode === "snippet") {
-			expect(result.snippet).toContain("attach-session");
-			expect(result.snippet).toContain("codex");
-		}
-	});
-
 	it("throws when recovery.state is not 'recovered'", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-notrecov-"));
 		const sqlitePath = join(dir, "broker.sqlite");
@@ -383,86 +365,6 @@ describe("reconnect command", () => {
 		).rejects.toThrow(/no remembered binding/i);
 	});
 
-	async function buildAdoptedReconnectFixture() {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-adopted-"));
-		const sqlitePath = join(dir, "broker.sqlite");
-		const collabId = "collab_reconnect_adopted";
-		const now = "2026-04-06T17:00:00.000Z";
-
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4412 });
-		broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "reconnect adopted", now });
-		broker.control.registerSession({
-			sessionId: "session_codex_adopted",
-			collabId,
-			agentType: "codex",
-			capabilities: {
-				supportsDirectPackets: true,
-				supportsNormalization: false,
-				supportsRelayInterception: true,
-				supportsLocalBuffering: true,
-				supportsLaunchHooks: false,
-				extensions: {},
-			},
-			now,
-		});
-		broker.control.setSessionBinding({
-			collabId,
-			agentType: "codex",
-			sessionId: "session_codex_adopted",
-			bindingSource: "adopted",
-			now,
-		});
-		broker.control.prepareCollabRecovery({ collabId, now });
-		await broker.stop();
-
-		const statePath = join(dir, ".ai-whisper", "runtime", "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4412, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "recovered", idleAfterRecovery: true, recoveredAt: now },
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
-		return { dir, collabId, sqlitePath, now };
-	}
-
-	it("defaults to adopt_current_tty mode when previous binding was adopted", async () => {
-		const { dir, now } = await buildAdoptedReconnectFixture();
-
-		const startDaemon = vi.fn(() => 99345);
-		const result = await runCollabReconnect({
-			workspaceRoot: dir,
-			target: "codex",
-			now,
-			resolveCurrentTty: () => "/dev/ttys099",
-			startAdoptionDaemon: startDaemon,
-		});
-
-		expect(result.mode).toBe("adopted");
-		if (result.mode === "adopted") {
-			expect(result.ttyPath).toBe("/dev/ttys099");
-			expect(result.daemonPid).toBe(99345);
-		}
-	});
-
-	it("respects explicit snippet_shell targetMode even when previous binding was adopted", async () => {
-		const { dir, now } = await buildAdoptedReconnectFixture();
-
-		const result = await runCollabReconnect({
-			workspaceRoot: dir,
-			target: "codex",
-			now,
-			targetMode: "snippet_shell",
-		});
-
-		expect(result.mode).toBe("snippet");
-	});
 });
 
 describe("recovery guards", () => {
@@ -550,37 +452,6 @@ describe("recovery guards", () => {
 		).rejects.toThrow(/whisper collab reconnect/i);
 	});
 
-	it("refuses attach when collab recovery is required", async () => {
-		const { dir, now } = await buildGuardFixture("recovery_required");
-
-		await expect(
-			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
-		).rejects.toThrow(/whisper collab recover/i);
-	});
-
-	it("refuses attach when collab was recovered but not reconnected", async () => {
-		const { dir, now } = await buildGuardFixture("recovered");
-
-		await expect(
-			runCollabAttach({ workspaceRoot: dir, target: "codex", now }),
-		).rejects.toThrow(/whisper collab reconnect/i);
-	});
-
-	it("refuses rebind when collab recovery is required", async () => {
-		const { dir, now } = await buildGuardFixture("recovery_required");
-
-		await expect(
-			runCollabRebind({ workspaceRoot: dir, target: "codex", now, replace: true, isInteractive: false }),
-		).rejects.toThrow(/whisper collab recover/i);
-	});
-
-	it("refuses rebind when collab was recovered but not reconnected", async () => {
-		const { dir, now } = await buildGuardFixture("recovered");
-
-		await expect(
-			runCollabRebind({ workspaceRoot: dir, target: "codex", now, replace: true, isInteractive: false }),
-		).rejects.toThrow(/whisper collab reconnect/i);
-	});
 });
 
 describe("broker latch", () => {
@@ -672,28 +543,6 @@ describe("broker latch", () => {
 		expect(updatedState?.recovery.state).toBe("recovery_required");
 	});
 
-	it("latches recovery_required into state file when attach is called with a dead broker", async () => {
-		const { dir } = await buildNormalStateFixture();
-		const now = "2026-04-05T19:00:00.000Z";
-
-		const mockAssessBroker = vi.fn(() => Promise.resolve({
-			pidAlive: false as const,
-			httpReachable: false as const,
-			ok: false as const,
-		}));
-
-		await expect(
-			runCollabAttach({
-				workspaceRoot: dir,
-				target: "codex",
-				now,
-				assessBroker: mockAssessBroker,
-			}),
-		).rejects.toThrow(/whisper collab recover/i);
-
-		const updatedState = readCliCollabState(getStateFilePath(dir));
-		expect(updatedState?.recovery.state).toBe("recovery_required");
-	});
 });
 
 describe("status command recovery awareness", () => {
@@ -821,15 +670,4 @@ describe("mounted reconnect", () => {
 		expect(startMountedSession).toHaveBeenCalledWith(expect.objectContaining({ ttyPath: "/dev/ttys031" }));
 	});
 
-	it("respects explicit snippet_shell targetMode even when previous binding was mounted", async () => {
-		const { dir, now } = await buildMountedReconnectFixture();
-		const result = await runCollabReconnect({
-			workspaceRoot: dir,
-			target: "codex",
-			now,
-			targetMode: "snippet_shell",
-		});
-
-		expect(result.mode).toBe("snippet");
-	});
 });

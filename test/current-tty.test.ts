@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { resolveCurrentTty } from "../packages/cli/src/runtime/adopted-session-target.ts";
+import { resolveCurrentTty } from "../packages/cli/src/runtime/current-tty.ts";
 
 describe("resolveCurrentTty", () => {
 	afterEach(() => {

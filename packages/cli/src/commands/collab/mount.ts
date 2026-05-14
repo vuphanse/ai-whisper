@@ -3,7 +3,7 @@ import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
-import { resolveCurrentTty } from "../../runtime/adopted-session-target.js";
+import { resolveCurrentTty } from "../../runtime/current-tty.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
 
 const MONITOR_WAIT_TIMEOUT_MS = 10_000;
@@ -58,7 +58,7 @@ export async function runCollabMount(input: {
 			.find((binding) => binding.agentType === input.target);
 		if (current?.bindingState === "bound") {
 			throw new Error(
-				`${input.target === "codex" ? "Codex" : "Claude"} is already bound. Use rebind for replacement.`,
+				`${input.target === "codex" ? "Codex" : "Claude"} is already bound. Stop the existing mount tab and run \`whisper collab mount\` again.`,
 			);
 		}
 

@@ -1,9 +1,6 @@
-import { createInterface } from "node:readline";
 import { Command } from "commander";
-import { runCollabAttach } from "./commands/collab/attach.js";
 import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
-import { runCollabRebind } from "./commands/collab/rebind.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabReconnect } from "./commands/collab/reconnect.js";
 import { runCollabRelayMonitor } from "./commands/collab/relay-monitor.js";
@@ -38,19 +35,6 @@ interface TellOpts extends WorkspaceOpts {
 
 function collectArtifact(value: string, previous: string[] = []): string[] {
 	return [...previous, value];
-}
-
-export function resolveReconnectTargetMode(opts: {
-	adoptCurrentTty?: boolean;
-	tty?: string;
-}): "adopt_current_tty" | "explicit_tty" | undefined {
-	if (opts.adoptCurrentTty) {
-		return "adopt_current_tty";
-	}
-	if (opts.tty) {
-		return "explicit_tty";
-	}
-	return undefined;
 }
 
 export function createCli(): Command {
@@ -107,7 +91,7 @@ export function createCli(): Command {
 				if (status.recovery.state === "recovery_required") {
 					console.log("  Recovery required: run `whisper collab recover`");
 				} else if (status.recovery.state === "recovered") {
-					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>` (adopted sessions auto-detect tty mode)");
+					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>`");
 				}
 
 				for (const [role, binding] of [["Codex", status.roles.codex], ["Claude", status.roles.claude]] as const) {
@@ -164,75 +148,6 @@ export function createCli(): Command {
 		});
 
 	collab
-		.command("attach")
-		.description("Attach or adopt an agent session into the collab")
-		.argument("<agent>", "Target agent: codex or claude")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
-		.option("--tty <path>", "Adopt an explicit local tty path")
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
-			if (opts.adoptCurrentTty && opts.tty) {
-				throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
-			}
-			const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
-			const result = await runCollabAttach({
-				workspaceRoot: opts.workspace,
-				target,
-				now: new Date().toISOString(),
-				targetMode,
-				...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
-			});
-			if (result.mode === "snippet") {
-				console.log(result.snippet);
-			} else {
-				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
-			}
-		});
-
-	collab
-		.command("rebind")
-		.description("Replace an existing agent binding with a new attach claim")
-		.argument("<agent>", "Target agent: codex or claude")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.option("--replace", "Replace the existing binding without prompting")
-		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
-		.option("--tty <path>", "Adopt an explicit local tty path")
-		.action(
-			async (
-				target: "codex" | "claude",
-				opts: WorkspaceOpts & { replace?: boolean; adoptCurrentTty?: boolean; tty?: string },
-			) => {
-				if (opts.adoptCurrentTty && opts.tty) {
-					throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
-				}
-				const targetMode = opts.adoptCurrentTty ? "adopt_current_tty" as const : opts.tty ? "explicit_tty" as const : "snippet_shell" as const;
-				const result = await runCollabRebind({
-					workspaceRoot: opts.workspace,
-					target,
-					now: new Date().toISOString(),
-					...(opts.replace !== undefined ? { replace: opts.replace } : {}),
-					isInteractive: Boolean(process.stdin.isTTY),
-					targetMode,
-					...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
-					confirmReplace: async (message: string) => {
-						const rl = createInterface({ input: process.stdin, output: process.stdout });
-						return new Promise<boolean>((resolve) => {
-							rl.question(message, (answer) => {
-								rl.close();
-								resolve(answer.trim().toLowerCase() === "y");
-							});
-						});
-					},
-				});
-				if (result.mode === "snippet") {
-					console.log(result.snippet);
-				} else {
-					console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
-				}
-			},
-		);
-
-	collab
 		.command("recover")
 		.description("Recover the current workspace collab after broker loss")
 		.option("--workspace <path>", "Workspace root", process.cwd())
@@ -246,28 +161,15 @@ export function createCli(): Command {
 
 	collab
 		.command("reconnect")
-		.description("Reconnect a remembered role after broker recovery")
+		.description("Reconnect a remembered role after broker recovery (mount mode)")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.option("--adopt-current-tty", "Adopt the tty of the current shell after provider suspend")
-		.option("--tty <path>", "Adopt an explicit local tty path")
-		.action(async (target: string, opts: WorkspaceOpts & { adoptCurrentTty?: boolean; tty?: string }) => {
-			if (opts.adoptCurrentTty && opts.tty) {
-				throw new Error("--adopt-current-tty and --tty are mutually exclusive.");
-			}
-			const targetMode = resolveReconnectTargetMode(opts);
-			const result = await runCollabReconnect({
+		.action(async (target: string, opts: WorkspaceOpts) => {
+			await runCollabReconnect({
 				workspaceRoot: opts.workspace,
 				target: target as "codex" | "claude",
 				now: new Date().toISOString(),
-				...(targetMode ? { targetMode } : {}),
-				...(opts.tty ? { explicitTtyPath: opts.tty } : {}),
 			});
-			if (result.mode === "snippet") {
-				console.log(result.snippet);
-			} else if (result.mode === "adopted") {
-				console.log(`Adopted ${target} tty ${result.ttyPath}. Resume the provider with \`fg\`.`);
-			}
 		});
 
 	collab

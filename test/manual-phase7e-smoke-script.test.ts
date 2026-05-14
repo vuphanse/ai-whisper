@@ -92,10 +92,9 @@ describe("phase 7e mounted handoff probe script", () => {
 });
 
 describe("README mount guidance", () => {
-	it("documents mount as the inline relay path and attach as the legacy no-inline-relay path", () => {
+	it("documents mount as the inline relay path", () => {
 		const readme = readFileSync(resolve(root, "README.md"), "utf8");
 		expect(readme).toContain("whisper collab mount");
-		expect(readme).toContain("attach --adopt-current-tty");
-		expect(readme).toContain("does not support inline @@");
+		expect(readme).toContain("inline `@@` relay");
 	});
 });

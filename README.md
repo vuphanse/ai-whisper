@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 7 is complete and delivers attach, recovery, operator monitoring, terminal-first mounted sessions, adopt workflows, and relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `superpowers-feature-development`) run on top of the same relay.
+This repository is being built in incremental phases. Phase 7 is complete and delivers recovery, operator monitoring, terminal-first mounted sessions, and the relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `superpowers-feature-development`) run on top of the same relay. Earlier `attach` and `adopt` flows (Phase 7A / 7D) have been shelved; see [`docs/legacy-attach.md`](docs/legacy-attach.md).
 
 For the full handoff lifecycle reference — manual chats, autonomous workflows, capture classification, hotkeys, and per-step verdicts — see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md).
 
@@ -39,7 +39,7 @@ pnpm format
 whisper collab start
 ```
 
-By default, `collab start` prefers `tmux` and attaches your current terminal into the collab session with split panes when `tmux` is available. Use `--no-tmux` to launch separate terminal windows instead. Use `--no-launch` when you only want the broker and plan to `mount` or legacy-`attach` providers manually.
+By default, `collab start` prefers `tmux` and attaches your current terminal into the collab session with split panes when `tmux` is available. Use `--no-tmux` to launch separate terminal windows instead. Use `--no-launch` when you only want the broker and plan to `mount` providers manually.
 
 Then inside a live session:
 
@@ -61,26 +61,6 @@ whisper collab status
 whisper collab stop
 ```
 
-### Attach workflow (Phase 7A)
-
-Use `--no-launch` when you want to start the broker without immediately spawning provider sessions, then attach each provider manually:
-
-```bash
-whisper collab start --no-launch
-whisper collab attach codex
-whisper collab attach claude
-```
-
-Each `attach` command prints a snippet to run from a shell prompt in the terminal you want to dedicate to that role. In Phase 7A, that snippet starts the local `attach-session` bridge process and takes over that terminal as the `ai-whisper` live-session surface; it does not hook into or recover the provider's internal conversation state.
-
-This means Phase 7A does not yet support pasting the snippet into an already-running Codex or Claude interactive prompt. If you do that, the provider will treat it as normal prompt text. The current supported attach flow is to start with `whisper collab start --no-launch`, then run the printed snippet from a normal shell prompt in a terminal that will become the attached session surface.
-
-If a role is already bound and you need to replace it:
-
-```bash
-whisper collab rebind codex
-```
-
 ### Recovery workflow (Phase 7B)
 
 If the current workspace collab still exists but the broker is gone or unusable:
@@ -91,7 +71,7 @@ whisper collab reconnect codex
 whisper collab reconnect claude
 ```
 
-Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. For roles that were originally bound via `--adopt-current-tty`, reconnect defaults to adoption mode — suspend the provider with `Ctrl+Z`, run `whisper collab reconnect <role>`, then `fg`. For snippet-based roles, reconnect prints a shell snippet as before. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
+Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Run `whisper collab reconnect <role>` from the iTerm tab you want to mount as that role. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
 
 ### Operator monitoring workflow (Phase 7C1)
 
@@ -183,28 +163,12 @@ After accept, owner works normally in visible provider session. When ready to re
 
 Practical guidance:
 
-- use `mount`, not `attach --adopt-current-tty`, for this workflow
 - think of relay as strict baton pass, not two active sessions typing at once
 - send compact, explicit tasks so owner can accept quickly or amend locally
 - use handback to return result summary or next-step request to other side
 - if handoff stays deferred, sender remains blocked until owner declines, cancels, or hands turn back
 
-### Adopt existing provider sessions (Phase 7D)
-
-Legacy workflow for sessions started before `whisper collab mount` existed. Use when you have already started a provider and want to bind it without relaunching:
-
-1. `whisper collab start --no-launch`
-2. start `codex` or `claude` manually
-3. press `Ctrl+Z` to suspend the provider
-4. run `whisper collab attach codex --adopt-current-tty`
-5. verify the shell returns
-6. run `fg` to resume the original provider
-
-The adopted session keeps the provider's terminal surface intact. The background daemon handles broker work items queued via `whisper collab tell` from another terminal.
-
-**Limitation**: `attach --adopt-current-tty` does not support inline @@ relay directives. The provider process owns the terminal's input after `fg`, and the background daemon cannot intercept keystrokes. Use `whisper collab tell --target codex "review this"` from a separate terminal instead. If you need inline relay, use `whisper collab mount` instead.
-
-The `--adopt-current-tty` flag is also available on `rebind` and `reconnect`. Use `--tty <path>` to adopt a specific device path instead. The two flags are mutually exclusive.
+> The earlier `whisper collab attach`, `whisper collab rebind`, and `--adopt-current-tty` flows (Phase 7A and Phase 7D) have been shelved. See [`docs/legacy-attach.md`](docs/legacy-attach.md) for the historical design.
 
 ### Relay Orchestrator (Phase 7F)
 
@@ -447,9 +411,9 @@ For the per-step verdict vocabulary, halt conditions, and inspection cookbook, s
 - Phase 5: CLI-first MVP
 - Phase 6: in-session relay workflow
 - Phase 7: attach, recovery, and operator tooling
-  - 7A: attach workflow
+  - 7A: attach workflow — _shelved, see [`docs/legacy-attach.md`](docs/legacy-attach.md)_
   - 7B: recovery workflow
   - 7C1: operator monitoring
-  - 7D: adopt existing provider sessions
+  - 7D: adopt existing provider sessions — _shelved, see [`docs/legacy-attach.md`](docs/legacy-attach.md)_
   - 7E: terminal-first mounted sessions
   - 7F: relay orchestrator
