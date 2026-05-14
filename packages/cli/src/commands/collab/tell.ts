@@ -37,6 +37,8 @@ export async function runCollabTell(input: {
 		sqlitePath: getBrokerSqlitePath(input.workspaceRoot),
 		host: state.broker.host,
 		port: state.broker.port,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 
 	const artifactPaths = normalizeArtifactPaths(

@@ -91,11 +91,15 @@ export async function runCollabStart(input: {
 	const sqliteDir = pathDirname(sqlitePath);
 	mkdirSync(sqliteDir, { recursive: true });
 
-	// Use in-process broker for initial setup (create collab, register sessions)
+	// Use in-process broker for initial setup (create collab, register sessions).
+	// This broker is torn down once the daemon takes over the SQLite + port, so
+	// it must not run any background drivers — the daemon owns those.
 	const broker = createBrokerRuntime({
 		sqlitePath,
 		host: brokerHost,
 		port: brokerPort,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 
 	const collabId = createCliCollabId(input.now);

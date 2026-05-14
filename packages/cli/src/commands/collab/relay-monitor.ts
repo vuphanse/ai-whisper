@@ -30,7 +30,13 @@ export async function runCollabRelayMonitor(input: {
 		collabId = state.collabId;
 	}
 
-	const broker = createBrokerRuntime({ sqlitePath, host, port });
+	const broker = createBrokerRuntime({
+		sqlitePath,
+		host,
+		port,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
+	});
 
 	const monitorId = `monitor_${randomBytes(9).toString("base64url")}`;
 	const monitor = createRelayMonitorRuntime({

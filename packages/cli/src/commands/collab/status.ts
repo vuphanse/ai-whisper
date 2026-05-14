@@ -31,6 +31,8 @@ export async function runCollabStatus(input: {
 				sqlitePath: state.broker.sqlitePath,
 				host: state.broker.host,
 				port: state.broker.port,
+				runWorkflowDriver: false,
+				runDiagnosticsSweep: false,
 			});
 			const bindings = offlineBroker.control.listSessionBindings(state.collabId);
 			const sessions = offlineBroker.control.listSessions(state.collabId);
@@ -77,6 +79,8 @@ export async function runCollabStatus(input: {
 			sqlitePath: state.broker.sqlitePath,
 			host: state.broker.host,
 			port: state.broker.port,
+			runWorkflowDriver: false,
+			runDiagnosticsSweep: false,
 		});
 	} catch {
 		return {

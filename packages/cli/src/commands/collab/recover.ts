@@ -35,6 +35,8 @@ export async function runCollabRecover(input: {
 		sqlitePath: state.broker.sqlitePath,
 		host: state.broker.host,
 		port: state.broker.port,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 
 	const prepared = broker.control.prepareCollabRecovery({

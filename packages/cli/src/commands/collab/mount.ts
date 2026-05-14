@@ -39,6 +39,8 @@ export async function runCollabMount(input: {
 		sqlitePath: state.broker.sqlitePath,
 		host: state.broker.host,
 		port: state.broker.port,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 	let brokerHandedOff = false;
 	try {

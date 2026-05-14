@@ -30,6 +30,8 @@ export async function runCollabReconnect(input: {
 		sqlitePath: state.broker.sqlitePath,
 		host: state.broker.host,
 		port: state.broker.port,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 
 	const current = broker.control

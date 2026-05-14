@@ -40,6 +40,10 @@ async function main(): Promise<void> {
 		sqlitePath,
 		host,
 		port,
+		// Companion-agent bin is a long-running client of the broker daemon.
+		// The daemon owns workflow driving and diagnostics retention.
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
 	});
 	const provider = createProviderForTarget(agentArg);
 	const interactiveSession = createInteractiveSessionForTarget({
