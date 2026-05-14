@@ -15,7 +15,7 @@ import {
 	type ProviderIdentity,
 } from "@ai-whisper/shared";
 import type Database from "better-sqlite3";
-import { randomBytes } from "node:crypto";
+import * as crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import {
 	appendEvent,
@@ -99,6 +99,14 @@ import {
 	deleteCaptureDiagnosticsOlderThan,
 	type RelayCaptureDiagnosticRecord,
 } from "../storage/repositories/relay-capture-diagnostics-repository.js";
+import {
+	insertEvaluatorDiagnostic,
+	listEvaluatorDiagnosticsByCollab as queryListEvaluatorDiagnosticsByCollab,
+	listEvaluatorDiagnosticsByCollabAndChain as queryListEvaluatorDiagnosticsByCollabAndChain,
+	listEvaluatorDiagnosticsByHandoff as queryListEvaluatorDiagnosticsByHandoff,
+	deleteEvaluatorDiagnosticsOlderThan,
+	type RelayEvaluatorDiagnosticRecord,
+} from "../storage/repositories/relay-evaluator-diagnostics-repository.js";
 import {
 	createRelayHandoffTxn,
 	acceptRelayHandoffTxn,
@@ -787,7 +795,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			}
 
 			const claimId = `claim_${nanoid(16)}`;
-			const secret = randomBytes(16).toString("hex");
+			const secret = crypto.randomBytes(16).toString("hex");
 
 			const claim = attachClaimSchema.parse({
 				version: 1,
@@ -1160,6 +1168,80 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		sweepCaptureDiagnostics(input: { cutoffIso: string }): number {
 			return deleteCaptureDiagnosticsOlderThan(db, input.cutoffIso);
+		},
+		recordEvaluatorDiagnostic(input: {
+			handoffId: string;
+			collabId: string;
+			chainId: string | null;
+			workflowId: string | null;
+			phaseRunId: string | null;
+			evaluatorBranch: "legacy" | "review" | "delivered" | "execution";
+			evaluatorPromptKey: "review-loop" | "execution-gate" | null;
+			handoffStep: "review" | "fix" | "implement" | "execute" | null;
+			attemptKind: "primary" | "fallback";
+			callGroupId: string;
+			provider: "anthropic" | "ollama";
+			outcome: "ok" | "parse_error" | "validation_error" | "provider_unavailable" | "unknown_error";
+			verdict: string | null;
+			confidence: number | null;
+			reason: string | null;
+			followUpMessageLen: number | null;
+			latencyMs: number;
+			errorMessage: string | null;
+			inputTokens: number | null;
+			outputTokens: number | null;
+			promptSample: string | null;
+			responseSample: string | null;
+			now: string;
+		}): { evaluatorId: string } {
+			const randomSuffix = crypto.randomUUID().slice(0, 8);
+			const evaluatorId = `eval_${input.now.replace(/[^0-9]/g, "")}_${randomSuffix}`;
+			insertEvaluatorDiagnostic(db, {
+				evaluatorId,
+				handoffId: input.handoffId,
+				collabId: input.collabId,
+				chainId: input.chainId,
+				workflowId: input.workflowId,
+				phaseRunId: input.phaseRunId,
+				evaluatorBranch: input.evaluatorBranch,
+				evaluatorPromptKey: input.evaluatorPromptKey,
+				handoffStep: input.handoffStep,
+				attemptKind: input.attemptKind,
+				callGroupId: input.callGroupId,
+				provider: input.provider,
+				outcome: input.outcome,
+				verdict: input.verdict,
+				confidence: input.confidence,
+				reason: input.reason,
+				followUpMessageLen: input.followUpMessageLen,
+				latencyMs: input.latencyMs,
+				errorMessage: input.errorMessage,
+				inputTokens: input.inputTokens,
+				outputTokens: input.outputTokens,
+				promptSample: input.promptSample,
+				responseSample: input.responseSample,
+				createdAt: input.now,
+			});
+			return { evaluatorId };
+		},
+		listEvaluatorDiagnosticsByCollab(
+			collabId: string,
+			limit: number | null,
+		): RelayEvaluatorDiagnosticRecord[] {
+			return queryListEvaluatorDiagnosticsByCollab(db, collabId, limit);
+		},
+		listEvaluatorDiagnosticsByCollabAndChain(
+			collabId: string,
+			chainId: string,
+			limit: number | null,
+		): RelayEvaluatorDiagnosticRecord[] {
+			return queryListEvaluatorDiagnosticsByCollabAndChain(db, collabId, chainId, limit);
+		},
+		listEvaluatorDiagnosticsByHandoff(handoffId: string): RelayEvaluatorDiagnosticRecord[] {
+			return queryListEvaluatorDiagnosticsByHandoff(db, handoffId);
+		},
+		sweepEvaluatorDiagnostics(input: { cutoffIso: string }): number {
+			return deleteEvaluatorDiagnosticsOlderThan(db, input.cutoffIso);
 		},
 		cleanupOrchestration(input: { collabId: string; reason: string; now: string }) {
 			return cleanupOrchestrationOnShutdownTxn(db, input);
