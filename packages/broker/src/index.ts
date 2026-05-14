@@ -28,4 +28,13 @@ export {
 	listSessionsForCollab,
 	updateSessionHealth,
 } from "./storage/repositories/session-repository.js";
+export {
+	insertCaptureDiagnostic,
+	listCaptureDiagnosticsByCollab,
+	listCaptureDiagnosticsByChain,
+	listCaptureDiagnosticsByHandoff,
+	deleteCaptureDiagnosticsOlderThan,
+	type RelayCaptureDiagnosticRecord,
+	type CaptureStatus,
+} from "./storage/repositories/relay-capture-diagnostics-repository.js";
 export { getWorkflowDefinition, listWorkflowTypes } from "./runtime/workflow-registry.js";
