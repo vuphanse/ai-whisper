@@ -194,11 +194,16 @@ export function createCli(): Command {
 			"--captures [chainId]",
 			"Show recent capture-diagnostics rows. Pass a chain id to filter, or 'all' for the full history.",
 		)
+		.option(
+			"--verdicts [chainId]",
+			"Show recent evaluator-diagnostics rows. Pass a chain id to filter, or 'all' for the full history. Mutually exclusive with --captures.",
+		)
 		.action(
 			async (
 				opts: WorkspaceOpts & {
 					watch?: boolean;
 					captures?: boolean | string;
+					verdicts?: boolean | string;
 				},
 			) => {
 				const capturesArg: true | string | undefined =
@@ -207,12 +212,19 @@ export function createCli(): Command {
 						: opts.captures === true
 							? true
 							: opts.captures;
+				const verdictsArg: true | string | undefined =
+					opts.verdicts === undefined || opts.verdicts === false
+						? undefined
+						: opts.verdicts === true
+							? true
+							: opts.verdicts;
 
 				const output = await runCollabInspect({
 					workspaceRoot: opts.workspace,
 					now: new Date().toISOString(),
 					watch: Boolean(opts.watch),
 					...(capturesArg !== undefined ? { captures: capturesArg } : {}),
+					...(verdictsArg !== undefined ? { verdicts: verdictsArg } : {}),
 				});
 				if (output) {
 					process.stdout.write(output);

@@ -40,4 +40,14 @@ describe("cli command wiring", () => {
 		expect(captures).toBeDefined();
 		expect(captures!.flags).toMatch(/\[/);
 	});
+
+	it("inspect subcommand accepts --verdicts option (optional-value)", () => {
+		const cli = createCli();
+		const collab = cli.commands.find((c) => c.name() === "collab")!;
+		const inspect = collab.commands.find((c) => c.name() === "inspect")!;
+		const longs = inspect.options.map((o) => o.long);
+		expect(longs).toContain("--verdicts");
+		const verdicts = inspect.options.find((o) => o.long === "--verdicts")!;
+		expect(verdicts.flags).toMatch(/\[/);
+	});
 });

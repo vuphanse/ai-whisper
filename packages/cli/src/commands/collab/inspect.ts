@@ -2,6 +2,7 @@ import { createBrokerRuntime } from "@ai-whisper/broker";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import { buildInspectSnapshot, formatInspectSnapshot } from "../../runtime/operator-inspect.js";
 import { formatCapturesView } from "../../runtime/operator-inspect-captures.js";
+import { formatVerdictsView } from "../../runtime/operator-inspect-verdicts.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { readCliCollabState, writeCliCollabState } from "../../runtime/state-file.js";
 
@@ -9,6 +10,7 @@ import { readCliCollabState, writeCliCollabState } from "../../runtime/state-fil
 // `"all"`    → list all rows for the active collab (no limit)
 // any string → list rows for that chain id
 export type CapturesArg = true | string;
+export type VerdictsArg = true | string;
 
 const DEFAULT_LIMIT = 20;
 const NO_LIMIT = null;
@@ -18,11 +20,16 @@ export async function runCollabInspect(input: {
 	now: string;
 	watch: boolean;
 	captures?: CapturesArg;
+	verdicts?: VerdictsArg;
 	assessBroker?: typeof assessBrokerDaemon;
 	write?: (chunk: string) => void;
 	sleep?: (ms: number) => Promise<void>;
 	watchIntervalMs?: number;
 }) {
+	if (input.captures !== undefined && input.verdicts !== undefined) {
+		throw new Error("--captures and --verdicts are mutually exclusive.");
+	}
+
 	const renderOnce = async (timestamp: string) => {
 		const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
 		if (!state) {
@@ -76,6 +83,23 @@ export async function runCollabInspect(input: {
 					NO_LIMIT,
 				);
 				return formatCapturesView({ rows, collabId: state.collabId });
+			}
+			if (input.verdicts !== undefined) {
+				const verdicts = input.verdicts;
+				if (verdicts === true) {
+					const rows = broker.control.listEvaluatorDiagnosticsByCollab(state.collabId, DEFAULT_LIMIT);
+					return formatVerdictsView({ rows, collabId: state.collabId });
+				}
+				if (verdicts === "all") {
+					const rows = broker.control.listEvaluatorDiagnosticsByCollab(state.collabId, NO_LIMIT);
+					return formatVerdictsView({ rows, collabId: state.collabId });
+				}
+				const rows = broker.control.listEvaluatorDiagnosticsByCollabAndChain(
+					state.collabId,
+					verdicts,
+					NO_LIMIT,
+				);
+				return formatVerdictsView({ rows, collabId: state.collabId });
 			}
 			const snapshot = buildInspectSnapshot({ broker, state, now: timestamp });
 			return formatInspectSnapshot({
