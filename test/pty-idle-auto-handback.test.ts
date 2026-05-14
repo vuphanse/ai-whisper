@@ -67,39 +67,45 @@ describe("computeContainment", () => {
 
 describe("classifyCapture", () => {
 	it("returns no_response_captured when both signals empty", () => {
-		expect(classifyCapture({ confidence: "low", text: null }, null)).toBe(
-			"no_response_captured",
-		);
-		expect(classifyCapture({ confidence: "high", text: "" }, "")).toBe(
-			"no_response_captured",
-		);
+		expect(classifyCapture({ confidence: "low", text: null }, null)).toMatchObject({
+			status: "no_response_captured",
+		});
+		expect(classifyCapture({ confidence: "high", text: "" }, "")).toMatchObject({
+			status: "no_response_captured",
+		});
 	});
 
 	it("returns ok when high confidence + clipboard non-empty + jaccard >= 0.6", () => {
 		const text = "implement approved plan keep commits small verify tests pass";
-		expect(classifyCapture({ confidence: "high", text }, text)).toBe("ok");
+		expect(classifyCapture({ confidence: "high", text }, text)).toMatchObject({
+			status: "ok",
+		});
 	});
 
 	it("returns ok when clipboard is substantial (>= 100 chars) regardless of PTY confidence", () => {
 		// Simulates full-screen TUI providers (e.g. Claude Code) where PTY text
 		// normalization produces nothing but clipboard holds the real response.
 		const substantialResponse = "a".repeat(100);
-		expect(classifyCapture({ confidence: "low", text: null }, substantialResponse)).toBe("ok");
+		expect(classifyCapture({ confidence: "low", text: null }, substantialResponse)).toMatchObject({
+			status: "ok",
+		});
 	});
 
 	it("returns no_response_captured_confidently when confidence is low and clipboard short", () => {
 		expect(
 			classifyCapture({ confidence: "low", text: "something here" }, "something here"),
-		).toBe("no_response_captured_confidently");
+		).toMatchObject({
+			status: "no_response_captured_confidently",
+		});
 	});
 
 	it("returns no_response_captured_confidently when jaccard < 0.6 and containment < 0.8", () => {
 		// Completely different vocabulary: no words overlap between clip and turn
 		const turnText = "zebra monkey banana orange apple grape lemon melon";
 		const clipText = "implement approve commit verify tests pass done";
-		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toBe(
-			"no_response_captured_confidently",
-		);
+		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toMatchObject({
+			status: "no_response_captured_confidently",
+		});
 	});
 
 	it("returns ok via containment when clipboard words are mostly present in verbose PTY output", () => {
@@ -108,13 +114,40 @@ describe("classifyCapture", () => {
 			"done harmonizing clipboard copied characters lines written update available upgrade";
 		const clipText = "done";
 		// jaccard = 1/10 = 0.1 < 0.6, but containment = 1/1 = 1.0 >= 0.8 → ok
-		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toBe("ok");
+		expect(classifyCapture({ confidence: "high", text: turnText }, clipText)).toMatchObject({
+			status: "ok",
+		});
 	});
 
 	it("returns no_response_captured_confidently when clipboard is empty but turn text exists", () => {
-		expect(classifyCapture({ confidence: "high", text: "some output here" }, null)).toBe(
-			"no_response_captured_confidently",
-		);
+		expect(classifyCapture({ confidence: "high", text: "some output here" }, null)).toMatchObject({
+			status: "no_response_captured_confidently",
+		});
+	});
+
+	it("classifyCapture returns jaccard and containment scores when computed", () => {
+		const turn = { confidence: "high" as const, text: "the quick brown fox jumps over the lazy dog" };
+		const clip = "quick brown fox";
+		const result = classifyCapture(turn, clip);
+		expect(result.status).toBe("ok");
+		expect(result.jaccardScore).toBeGreaterThan(0);
+		expect(result.containmentScore).toBe(1);
+	});
+
+	it("classifyCapture returns null scores when clipboard >= 100 chars (short-circuit)", () => {
+		const turn = { confidence: "low" as const, text: null };
+		const clip = "x".repeat(120);
+		const result = classifyCapture(turn, clip);
+		expect(result.status).toBe("ok");
+		expect(result.jaccardScore).toBeNull();
+		expect(result.containmentScore).toBeNull();
+	});
+
+	it("classifyCapture returns null scores when both inputs empty", () => {
+		const result = classifyCapture({ confidence: "low" as const, text: null }, null);
+		expect(result.status).toBe("no_response_captured");
+		expect(result.jaccardScore).toBeNull();
+		expect(result.containmentScore).toBeNull();
 	});
 });
 

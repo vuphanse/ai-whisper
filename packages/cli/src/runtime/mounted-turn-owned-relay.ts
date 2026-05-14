@@ -114,15 +114,21 @@ export function computeContainment(clip: string, turn: string): number {
 	return matched / clipWords.length;
 }
 
+export type CaptureClassification = {
+	status: "ok" | "no_response_captured_confidently" | "no_response_captured";
+	jaccardScore: number | null;
+	containmentScore: number | null;
+};
+
 export function classifyCapture(
 	turnResult: { confidence: "high" | "low"; text: string | null },
 	clipboardText: string | null,
-): "ok" | "no_response_captured_confidently" | "no_response_captured" {
+): CaptureClassification {
 	const turnText = turnResult.text ?? "";
 	const clipText = clipboardText ?? "";
 
 	if (turnText.trim().length === 0 && clipText.trim().length === 0) {
-		return "no_response_captured";
+		return { status: "no_response_captured", jaccardScore: null, containmentScore: null };
 	}
 
 	if (clipText.trim().length > 0) {
@@ -132,20 +138,29 @@ export function classifyCapture(
 		// checks always fail even when the response is valid. The clipboard change
 		// detection in captureClipboardHandback already guarantees freshness.
 		if (clipText.trim().length >= 100) {
-			return "ok";
+			return { status: "ok", jaccardScore: null, containmentScore: null };
 		}
 
 		// Short clipboard: require PTY similarity to rule out stale or unrelated content.
-		if (
-			turnResult.confidence === "high" &&
-			(computeOrderedJaccard(turnText, clipText) >= 0.6 ||
-				computeContainment(clipText, turnText) >= 0.8)
-		) {
-			return "ok";
+		if (turnResult.confidence === "high") {
+			const jaccardScore = computeOrderedJaccard(turnText, clipText);
+			const containmentScore = computeContainment(clipText, turnText);
+			if (jaccardScore >= 0.6 || containmentScore >= 0.8) {
+				return { status: "ok", jaccardScore, containmentScore };
+			}
+			return {
+				status: "no_response_captured_confidently",
+				jaccardScore,
+				containmentScore,
+			};
 		}
 	}
 
-	return "no_response_captured_confidently";
+	return {
+		status: "no_response_captured_confidently",
+		jaccardScore: null,
+		containmentScore: null,
+	};
 }
 
 function isAutonomousHandoff(handoffId: string, broker: BrokerLike): boolean {
@@ -535,7 +550,8 @@ export function createMountedTurnOwnedRelay(input: {
 				clipboardText = null;
 			}
 
-			const captureStatus = classifyCapture(turnResult, clipboardText);
+			const classification = classifyCapture(turnResult, clipboardText);
+			const captureStatus = classification.status;
 			const requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
 
 			if (process.env["AI_WHISPER_DEBUG_CAPTURE"]) {
@@ -544,6 +560,8 @@ export function createMountedTurnOwnedRelay(input: {
 					process.env["AI_WHISPER_DEBUG_CAPTURE"],
 					JSON.stringify({
 						captureStatus,
+						jaccardScore: classification.jaccardScore,
+						containmentScore: classification.containmentScore,
 						turnTextLen: (turnResult.text ?? "").length,
 						clipLen: (clipboardText ?? "").length,
 						turnText: turnResult.text,
