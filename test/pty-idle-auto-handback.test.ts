@@ -203,6 +203,7 @@ function makeRelayForIdle(opts: {
 			deferRelayHandoff: vi.fn(),
 			markRelayHandoffStale: vi.fn(),
 			handoffBackRelay: vi.fn(),
+			recordCaptureDiagnostic: vi.fn(),
 			...(opts.autonomous
 				? {
 						getHandoffWithWorkflowMeta: vi.fn(() => ({
@@ -524,5 +525,97 @@ describe("checkIdleActions: auto-handback captureStatus", () => {
 
 		// handoffId no longer matches — must not hand back
 		expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+	});
+});
+
+describe("checkIdleActions: auto-handback diagnostics", () => {
+	it("records a capture diagnostic with abortedByRaceGuard=false on success", async () => {
+		// Use clipboard text >= 100 chars so the classifier's short-circuit returns "ok"
+		// without needing a high-confidence PTY turn capture (which the default helper
+		// does not provide).
+		const clipboardResponse = "a".repeat(150);
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => clipboardResponse,
+		});
+		await relay.checkIdleActions();
+
+		expect(broker.control.recordCaptureDiagnostic).toHaveBeenCalledTimes(1);
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		const arg = vi.mocked(broker.control.recordCaptureDiagnostic!).mock.calls[0]![0]!;
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+		expect(arg.captureStatus).toBe("ok");
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+		expect(arg.abortedByRaceGuard).toBe(false);
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+		expect(arg.clipLen).toBe(clipboardResponse.length);
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledTimes(1);
+	});
+
+	it("records abortedByRaceGuard=true and skips handoffBackRelay when the accepted handoff changes mid-capture", async () => {
+		const original = {
+			handoffId: "handoff_idle_1",
+			collabId: "collab_idle",
+			senderAgent: "codex" as const,
+			targetAgent: "claude" as const,
+			requestText: "Do the work",
+			status: "accepted" as const,
+		};
+		const different = { ...original, handoffId: "handoff_other" };
+
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => "x".repeat(150),
+		});
+		// Override getRelayHandoff: calls 1-2 (getPendingHandoff + first getAcceptedHandoff)
+		// return the original; call 3+ (post-capture race-guard getAcceptedHandoff) returns
+		// a different handoff, simulating the original being resolved mid-capture.
+		let calls = 0;
+		(broker.control.getRelayHandoff as ReturnType<typeof vi.fn>).mockImplementation(() => {
+			calls += 1;
+			return calls <= 2 ? original : different;
+		});
+
+		await relay.checkIdleActions();
+
+		expect(broker.control.recordCaptureDiagnostic).toHaveBeenCalledTimes(1);
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		const arg = vi.mocked(broker.control.recordCaptureDiagnostic!).mock.calls[0]![0]!;
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+		expect(arg.abortedByRaceGuard).toBe(true);
+		expect(broker.control.handoffBackRelay).not.toHaveBeenCalled();
+	});
+
+	it("honors AI_WHISPER_NO_CAPTURE_SAMPLES=1 by writing NULL samples while keeping lengths/scores", async () => {
+		const prior = process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"];
+		process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"] = "1";
+		try {
+			// >=100 chars so we end up with captureStatus="ok" and a populated row;
+			// the assertions here only care about clipSample/turnSample/clipLen.
+			const clipboardResponse = "b".repeat(150);
+			const { relay, broker } = makeRelayForIdle({
+				handoffStatus: "accepted",
+				handoffAgeMs: 60_000,
+				captureHandbackText: async () => clipboardResponse,
+			});
+			await relay.checkIdleActions();
+
+			// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+			const arg = vi.mocked(broker.control.recordCaptureDiagnostic!).mock.calls[0]![0]!;
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+			expect(arg.clipSample).toBeNull();
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+			expect(arg.turnSample).toBeNull();
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+			expect(arg.clipLen).toBe(clipboardResponse.length);
+		} finally {
+			if (prior === undefined) {
+				delete process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"];
+			} else {
+				process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"] = prior;
+			}
+		}
 	});
 });

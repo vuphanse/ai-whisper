@@ -35,6 +35,23 @@ type BrokerLike = {
 			now: string;
 		}): void;
 		getHandoffWithWorkflowMeta?(handoffId: string): { workflowId: string | null; chainId: string | null } | null;
+		recordCaptureDiagnostic?(input: {
+			handoffId: string;
+			collabId: string;
+			chainId: string | null;
+			workflowId: string | null;
+			targetProvider: "codex" | "claude";
+			captureStatus: "ok" | "no_response_captured_confidently" | "no_response_captured";
+			clipLen: number;
+			turnLen: number;
+			turnConfidence: "high" | "low";
+			jaccardScore: number | null;
+			containmentScore: number | null;
+			clipSample: string | null;
+			turnSample: string | null;
+			abortedByRaceGuard: boolean;
+			now: string;
+		}): { captureId: string };
 		getWorkflow?(id: string): { status: string } | null;
 		getRelayChain?(id: string): { status: string } | null;
 		applyOrchestratorVerdict?(input: { handoffId: string; verdict: string; confidence: number; reason: string; now: string }): void;
@@ -554,6 +571,38 @@ export function createMountedTurnOwnedRelay(input: {
 			const captureStatus = classification.status;
 			const requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
 
+			// Evaluate race guard synchronously so the diagnostic row carries the correct flag.
+			const currentAcceptedId = getAcceptedHandoff()?.handoffId;
+			const abortedByRaceGuard = currentAcceptedId !== accepted.handoffId;
+
+			// Pull workflow/chain context for diagnostics (best-effort; nullable in the row).
+			const handoffMeta = input.broker.control.getHandoffWithWorkflowMeta?.(accepted.handoffId) ?? null;
+			const samplesAllowed = process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"] !== "1";
+			const sampleOf = (text: string | null): string | null => {
+				if (text === null) return null;
+				if (!samplesAllowed) return null;
+				return text.slice(0, 200);
+			};
+
+			const now = new Date().toISOString();
+			input.broker.control.recordCaptureDiagnostic?.({
+				handoffId: accepted.handoffId,
+				collabId: input.collabId,
+				chainId: handoffMeta?.chainId ?? null,
+				workflowId: handoffMeta?.workflowId ?? null,
+				targetProvider: input.currentAgent,
+				captureStatus,
+				clipLen: (clipboardText ?? "").length,
+				turnLen: (turnResult.text ?? "").length,
+				turnConfidence: turnResult.confidence,
+				jaccardScore: classification.jaccardScore,
+				containmentScore: classification.containmentScore,
+				clipSample: sampleOf(clipboardText),
+				turnSample: sampleOf(turnResult.text),
+				abortedByRaceGuard,
+				now,
+			});
+
 			if (process.env["AI_WHISPER_DEBUG_CAPTURE"]) {
 				const { writeFileSync } = await import("node:fs");
 				writeFileSync(
@@ -571,11 +620,8 @@ export function createMountedTurnOwnedRelay(input: {
 				);
 			}
 
-			// Race guard: original handoff must still be the accepted one after async capture.
-			// A different handoffId means the original was resolved mid-capture; abort silently.
-			if (getAcceptedHandoff()?.handoffId !== accepted.handoffId) return;
+			if (abortedByRaceGuard) return;
 
-			const now = new Date().toISOString();
 			input.broker.control.handoffBackRelay?.({
 				handoffId: accepted.handoffId,
 				nextHandoffId: `handoff_${now.replace(/[^0-9]/g, "")}`,
