@@ -20,6 +20,7 @@ export interface WorkflowStartDeps {
 	now: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function runWorkflowStart(deps: WorkflowStartDeps): Promise<{ workflowId: string }> {
 	return deps.broker.control.createWorkflow({
 		collabId: deps.collabId,

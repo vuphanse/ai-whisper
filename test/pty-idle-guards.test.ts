@@ -15,7 +15,7 @@ function makeBrokerForGuard(handoffStatus: "pending" | "deferred" | "accepted" |
           senderAgent: "codex" as const,
           targetAgent: "claude" as const,
           requestText: "Do the work",
-          status: handoffStatus as "pending" | "deferred" | "accepted",
+          status: handoffStatus,
         };
   return {
     control: {

@@ -146,7 +146,7 @@ function makeRelayForIdle(opts: {
 					senderAgent: "codex" as const,
 					targetAgent: "claude" as const,
 					requestText: "Do the work",
-					status: handoffStatus as "pending" | "deferred" | "accepted",
+					status: handoffStatus,
 				};
 
 	const broker = {

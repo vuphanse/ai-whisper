@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runWorkflowStart } from "../packages/cli/src/commands/workflow/start.ts";
 import { runWorkflowList } from "../packages/cli/src/commands/workflow/list.ts";
-import { runWorkflowInspect } from "../packages/cli/src/commands/workflow/inspect.ts";
 import { runWorkflowResume } from "../packages/cli/src/commands/workflow/resume.ts";
 import { runWorkflowCancel } from "../packages/cli/src/commands/workflow/cancel.ts";
 import { runWorkflowTypes } from "../packages/cli/src/commands/workflow/types.ts";

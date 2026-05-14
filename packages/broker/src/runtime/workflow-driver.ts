@@ -132,12 +132,12 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 		// Determine sender/target from phase initialHandoffStep
 		const sender: "claude" | "codex" =
 			phase.initialHandoffStep === "review"
-				? (implementerAgent as "claude" | "codex")
-				: (reviewerAgent as "claude" | "codex");
+				? (implementerAgent)
+				: (reviewerAgent);
 		const target: "claude" | "codex" =
 			phase.initialHandoffStep === "review"
-				? (reviewerAgent as "claude" | "codex")
-				: (implementerAgent as "claude" | "codex");
+				? (reviewerAgent)
+				: (implementerAgent);
 
 		// Read HEAD sha for execute phases
 		let executionBaseHeadSha: string | undefined;

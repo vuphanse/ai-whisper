@@ -66,7 +66,7 @@ async function readWorkspaceHead(cId: string): Promise<string> {
 			"git",
 			["-C", workspaceRoot, "rev-parse", "HEAD"],
 			(err, stdout) => {
-				if (err) reject(err);
+				if (err) reject(err instanceof Error ? err : new Error(JSON.stringify(err)));
 				else resolve(stdout.trim());
 			},
 		);

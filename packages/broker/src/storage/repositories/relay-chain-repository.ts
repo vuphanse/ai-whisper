@@ -64,7 +64,7 @@ export function incrementChainRound(
 	input: { chainId: string; now: string },
 ): void {
 	db.prepare(
-		`UPDATE relay_chains SET current_round = current_round + 1, updated_at = ? WHERE chain_id = ?`,
+		"UPDATE relay_chains SET current_round = current_round + 1, updated_at = ? WHERE chain_id = ?",
 	).run(input.now, input.chainId);
 }
 

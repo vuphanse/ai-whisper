@@ -38,6 +38,7 @@ export interface WorkflowInspectDeps {
 	workflowId: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function runWorkflowInspect(
 	deps: WorkflowInspectDeps,
 ): Promise<{ workflow: WorkflowRecord; phaseRuns: WorkflowPhaseRunRecord[] }> {

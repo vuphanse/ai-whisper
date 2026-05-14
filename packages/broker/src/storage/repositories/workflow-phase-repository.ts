@@ -82,7 +82,7 @@ export function listPhaseRunsForWorkflow(
 ): WorkflowPhaseRunRecord[] {
 	const rows = db
 		.prepare(
-			`SELECT * FROM workflow_phases WHERE workflow_id = ? ORDER BY started_at ASC`,
+			"SELECT * FROM workflow_phases WHERE workflow_id = ? ORDER BY started_at ASC",
 		)
 		.all(workflowId) as Array<Parameters<typeof rowToRecord>[0]>;
 	return rows.map(rowToRecord);
@@ -93,7 +93,7 @@ export function closeWorkflowPhaseRun(
 	input: { phaseRunId: string; outcome: WorkflowPhaseOutcome; now: string },
 ): void {
 	db.prepare(
-		`UPDATE workflow_phases SET ended_at = ?, outcome = ? WHERE phase_run_id = ?`,
+		"UPDATE workflow_phases SET ended_at = ?, outcome = ? WHERE phase_run_id = ?",
 	).run(input.now, input.outcome, input.phaseRunId);
 }
 

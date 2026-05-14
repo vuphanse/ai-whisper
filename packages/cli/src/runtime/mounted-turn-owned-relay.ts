@@ -468,11 +468,11 @@ export function createMountedTurnOwnedRelay(input: {
 			}
 			if (composed === null) {
 				if (handoff && isAutonomousHandoff(handoff.handoffId, input.broker)) {
-					await input.broker.control.applyOrchestratorVerdict?.({
+					input.broker.control.applyOrchestratorVerdict?.({
 						handoffId: handoff.handoffId,
 						verdict: "escalate",
 						confidence: 1.0,
-						reason: `capture-failure: composer returned null`,
+						reason: "capture-failure: composer returned null",
 						now: new Date().toISOString(),
 					});
 				}

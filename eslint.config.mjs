@@ -17,6 +17,7 @@ export default tseslint.config(
 			"**/.worktrees/**",
 			"**/deprecated/**",
 			"docs/**",
+			"scripts/**",
 		],
 	},
 	js.configs.recommended,
@@ -51,6 +52,22 @@ export default tseslint.config(
 				projectService: true,
 				tsconfigRootDir: import.meta.dirname,
 			},
+		},
+		rules: {
+			"@typescript-eslint/no-unused-vars": [
+				"error",
+				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+			],
+		},
+	},
+	{
+		// Test files routinely define mock methods that satisfy an async-returning
+		// interface contract without actually awaiting anything.
+		files: ["test/**/*.ts"],
+		rules: {
+			"@typescript-eslint/require-await": "off",
+			"@typescript-eslint/no-unsafe-assignment": "off",
+			"@typescript-eslint/await-thenable": "off",
 		},
 	},
 );

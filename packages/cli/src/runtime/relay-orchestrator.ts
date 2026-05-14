@@ -217,7 +217,7 @@ export function createRelayOrchestrator(input: {
 				}
 
 				try {
-					await input.broker.control.applyOrchestratorVerdict({
+					input.broker.control.applyOrchestratorVerdict({
 						handoffId: claimed.handoffId,
 						verdict: wfVerdict.verdict,
 						confidence: wfVerdict.confidence,

@@ -37,11 +37,11 @@ function rowToRecord(row: {
 		workflowType: row.workflow_type,
 		name: row.name,
 		specPath: row.spec_path,
-		roleBindings: JSON.parse(row.role_bindings),
+		roleBindings: JSON.parse(row.role_bindings) as Record<string, "claude" | "codex">,
 		status: row.status as WorkflowStatus,
 		currentPhaseIndex: row.current_phase_index,
 		haltReason: row.halt_reason,
-		workflowContext: JSON.parse(row.workflow_context),
+		workflowContext: JSON.parse(row.workflow_context) as Record<string, unknown>,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
@@ -139,7 +139,7 @@ export function updateWorkflowContext(
 	}
 	const merged = { ...existing.workflowContext, ...input.patch };
 	db.prepare(
-		`UPDATE workflows SET workflow_context = ?, updated_at = ? WHERE workflow_id = ?`,
+		"UPDATE workflows SET workflow_context = ?, updated_at = ? WHERE workflow_id = ?",
 	).run(JSON.stringify(merged), input.now, input.workflowId);
 }
 

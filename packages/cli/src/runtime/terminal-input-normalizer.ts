@@ -37,6 +37,7 @@ function stripTerminalResponses(raw: string): string {
 // Drop release events outright; strip the `:<event>` subparam from press/
 // repeat so they reduce to the legacy xterm-style modifier form.
 const csiNavigationWithEventTypePattern =
+	// eslint-disable-next-line no-control-regex -- intentional: match CSI escape sequences
 	/\x1b\[(\d+);(\d+):(\d+)([A-Z~])/g;
 
 function stripKeyboardProgressiveEnhancement(raw: string): string {
