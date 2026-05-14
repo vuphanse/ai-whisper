@@ -11,6 +11,7 @@ import {
 	createRelayOrchestratorEvaluator,
 	type EvaluatorProviderConfig,
 } from "../runtime/relay-orchestrator-evaluator.js";
+import { buildEvaluatorObserverCallback } from "../runtime/evaluator-observer.js";
 import { execFile } from "node:child_process";
 
 loadDotEnv();
@@ -53,6 +54,7 @@ const evaluator = (() => {
 	return createRelayOrchestratorEvaluator({
 		primary,
 		...(fallback !== undefined ? { fallback } : {}),
+		onCall: buildEvaluatorObserverCallback({ broker }),
 	});
 })();
 
