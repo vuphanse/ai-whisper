@@ -315,21 +315,34 @@ function isProviderUnavailableError(error: unknown): boolean {
 
 function buildAnthropicCaller(
 	config: AnthropicProviderConfig,
-): (systemPrompt: string, payload: EvaluatorAnyInput) => Promise<string> {
+): (systemPrompt: string, payload: EvaluatorAnyInput) => Promise<{
+	raw: string;
+	inputTokens?: number;
+	outputTokens?: number;
+}> {
 	const client = config.client ?? new Anthropic({ apiKey: config.apiKey });
 	const model = config.model ?? "claude-haiku-4-5-20251001";
 
-	return async function (systemPrompt: string, payload: EvaluatorAnyInput): Promise<string> {
+	return async function (systemPrompt: string, payload: EvaluatorAnyInput): Promise<{
+		raw: string;
+		inputTokens?: number;
+		outputTokens?: number;
+	}> {
 		const response = await client.messages.create({
 			model,
 			max_tokens: 400,
 			system: systemPrompt,
 			messages: [{ role: "user", content: JSON.stringify(payload) }],
 		});
-		return response.content
+		const raw = response.content
 			.filter((block) => block.type === "text")
 			.map((block) => (block as { type: "text"; text: string }).text)
 			.join("");
+		return {
+			raw,
+			...(typeof response.usage?.input_tokens === "number" ? { inputTokens: response.usage.input_tokens } : {}),
+			...(typeof response.usage?.output_tokens === "number" ? { outputTokens: response.usage.output_tokens } : {}),
+		};
 	};
 }
 
@@ -339,7 +352,7 @@ function buildOllamaCaller(
 	systemPrompt: string,
 	payload: EvaluatorAnyInput,
 	jsonSchema: Record<string, unknown>,
-) => Promise<string> {
+) => Promise<{ raw: string }> {
 	const client: OllamaClientLike =
 		config.client ?? new Ollama({ host: config.host ?? "http://localhost:11434" });
 	const model = config.model ?? "qwen2.5:7b-instruct";
@@ -348,7 +361,7 @@ function buildOllamaCaller(
 		systemPrompt: string,
 		payload: EvaluatorAnyInput,
 		jsonSchema: Record<string, unknown>,
-	): Promise<string> {
+	): Promise<{ raw: string }> {
 		const response = await client.chat({
 			model,
 			messages: [
@@ -358,7 +371,7 @@ function buildOllamaCaller(
 			format: jsonSchema,
 			options: { temperature: 0.3 },
 		});
-		return response.message.content;
+		return { raw: response.message.content };
 	};
 }
 
@@ -369,14 +382,14 @@ function buildEvaluator(
 		const call = buildAnthropicCaller(config);
 		return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
 			const branch = selectBranch(payload);
-			const raw = await call(branch.systemPrompt, payload);
+			const { raw } = await call(branch.systemPrompt, payload);
 			return branch.parse(raw);
 		};
 	}
 	const call = buildOllamaCaller(config);
 	return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
 		const branch = selectBranch(payload);
-		const raw = await call(branch.systemPrompt, payload, branch.jsonSchema);
+		const { raw } = await call(branch.systemPrompt, payload, branch.jsonSchema);
 		return branch.parse(raw);
 	};
 }
