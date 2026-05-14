@@ -156,6 +156,7 @@ function makeRelayForIdle(opts: {
 				turnOwner: "claude" as const,
 				waitingAgent: "codex" as const,
 				unresolvedHandoffId: handoff ? handoffId : null,
+				// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- vi.fn wrapper widens to `string` without it
 				handoffState: (handoffStatus === "none" ? "idle" : handoffStatus) as
 					| "idle"
 					| "pending"

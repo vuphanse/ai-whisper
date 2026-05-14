@@ -213,6 +213,7 @@ describe("applyOrchestratorVerdict — review step", () => {
 	it("illegal step verdict (fix + approve) normalized to escalate", () => {
 		const { broker, workflowId } = setup();
 		const firstHandoff = broker.control.getWorkflowPhaseRuns(workflowId)[0];
+		if (!firstHandoff) throw new Error("expected a phase run");
 		const firstRow = broker.db
 			.prepare("SELECT handoff_id FROM relay_handoff WHERE phase_run_id = ?")
 			.get(firstHandoff.phaseRunId) as { handoff_id: string };
@@ -267,6 +268,7 @@ describe("applyOrchestratorVerdict — advancing into plan-execution requires wo
 				"SELECT handoff_id FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at",
 			)
 			.all(workflowId) as Array<{ handoff_id: string }>;
+		if (!handoffs[0]) throw new Error("expected at least one handoff");
 		broker.control.applyOrchestratorVerdict({
 			handoffId: handoffs[0].handoff_id,
 			verdict: "approve",

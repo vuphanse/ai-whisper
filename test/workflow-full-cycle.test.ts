@@ -83,6 +83,7 @@ describe("workflow full cycle (mock orchestrator)", () => {
 				evaluate: async () => {
 					const v = verdicts[step];
 					step += 1;
+					if (!v) throw new Error(`unexpected eval step ${step - 1}`);
 					return { verdict: v, confidence: 0.9, reason: "mock" };
 				},
 				readWorkspaceHead: async () => gitHead(),
@@ -239,13 +240,14 @@ describe("workflow full cycle (mock orchestrator)", () => {
 				evaluate: async () => {
 					const v = verdicts[step];
 					step += 1;
+					if (!v) throw new Error(`unexpected eval step ${step - 1}`);
 					if (v === "findings") {
 						return {
 							verdict: "findings" as const,
 							confidence: 0.9,
 							reason: "mock findings",
 							followUpMessage: "Please address the spec gaps.",
-						} as { verdict: "findings"; confidence: number; reason: string; followUpMessage: string };
+						};
 					}
 					return { verdict: v, confidence: 0.9, reason: "mock" };
 				},

@@ -49,8 +49,8 @@ describe("cli launcher integration", () => {
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));
-		expect(state?.launch.mode).toBe("tmux");
-		expect(state?.launch.tmuxSession).toMatch(/^whisper-collab_/);
+		expect(state?.launch?.mode).toBe("tmux");
+		expect(state?.launch?.tmuxSession).toMatch(/^whisper-collab_/);
 		// ownedSessions stays empty — mountedSessions is populated when mount
 		// panes complete their attach claim.
 		expect(state?.ownedSessions).toEqual({});

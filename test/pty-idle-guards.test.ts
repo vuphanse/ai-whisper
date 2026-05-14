@@ -24,6 +24,7 @@ function makeBrokerForGuard(handoffStatus: "pending" | "deferred" | "accepted" |
         turnOwner: "claude" as const,
         waitingAgent: "codex" as "codex" | "claude" | null,
         unresolvedHandoffId: handoff ? "handoff_guard_1" : null,
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- vi.fn wrapper widens to `string` without it
         handoffState: (handoffStatus === "none" ? "idle" : handoffStatus) as
           | "idle"
           | "pending"
