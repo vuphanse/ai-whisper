@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { createRelayOrchestrator } from "../packages/cli/src/runtime/relay-orchestrator.ts";
+import type { EvaluatorCall } from "../packages/cli/src/runtime/relay-orchestrator-evaluator.ts";
 
 function boot() {
 	const broker = createBrokerRuntime({
@@ -103,8 +104,8 @@ describe("RelayOrchestrator — workflow-aware routing", () => {
 		const orchestrator = createRelayOrchestrator({
 			broker,
 			collabId: "collab_c1",
-			evaluate: async (wfInput) => {
-				expect((wfInput as { evaluatorPromptKey?: string }).evaluatorPromptKey).toBe("review-loop");
+			evaluate: async (call: EvaluatorCall) => {
+				expect((call.payload as { evaluatorPromptKey?: string }).evaluatorPromptKey).toBe("review-loop");
 				return {
 					verdict: "approve",
 					confidence: 0.95,

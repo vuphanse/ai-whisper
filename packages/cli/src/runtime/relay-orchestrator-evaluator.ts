@@ -1,6 +1,24 @@
+import * as crypto from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { Ollama } from "ollama";
 import { z } from "zod";
+
+// Minimal structural interface covering only the messages.create path we use.
+// Defined here (not imported from `@anthropic-ai/sdk`) so tests can pass plain
+// mocks without depending on the SDK being hoisted to root node_modules.
+export type AnthropicClientLike = {
+	messages: {
+		create(request: {
+			model: string;
+			max_tokens: number;
+			system: string;
+			messages: Array<{ role: string; content: string }>;
+		}): Promise<{
+			content: Array<{ type: string; text?: string }>;
+			usage?: { input_tokens?: number; output_tokens?: number };
+		}>;
+	};
+};
 
 // Minimal structural interface covering only the non-streaming chat path we use.
 // Defined here (not imported from `ollama`) so tests can pass plain mocks without
@@ -48,6 +66,36 @@ export type WorkflowEvaluatorVerdict =
 
 export type EvaluatorAnyInput = EvaluatorInput | WorkflowEvaluatorInput;
 export type EvaluatorAnyVerdict = RelayOrchestratorVerdict | WorkflowEvaluatorVerdict;
+
+export type ObserverContext = {
+	handoffId: string;
+	collabId: string;
+	chainId: string | null;
+	workflowId: string | null;
+	phaseRunId: string | null;
+};
+
+export type EvaluatorCall = {
+	payload: EvaluatorAnyInput;
+	context: ObserverContext;
+};
+
+export type EvaluatorCallEvent = {
+	callGroupId: string;
+	context: ObserverContext;
+	branch: "legacy" | "review" | "delivered" | "execution";
+	provider: "anthropic" | "ollama";
+	attemptKind: "primary" | "fallback";
+	outcome: "ok" | "parse_error" | "validation_error" | "provider_unavailable" | "unknown_error";
+	latencyMs: number;
+	rawResponse: string | null;
+	error: Error | null;
+	verdict: EvaluatorAnyVerdict | null;
+	inputTokens: number | null;
+	outputTokens: number | null;
+	systemPrompt: string;
+	payload: EvaluatorAnyInput;
+};
 
 const baseFields = {
 	confidence: z.number().min(0).max(1),
@@ -284,7 +332,7 @@ export type AnthropicProviderConfig = {
 	provider: "anthropic";
 	apiKey: string;
 	model?: string;
-	client?: Anthropic;
+	client?: Anthropic | AnthropicClientLike;
 };
 
 export type OllamaProviderConfig = {
@@ -313,6 +361,32 @@ function isProviderUnavailableError(error: unknown): boolean {
 	return false;
 }
 
+function classifyEvaluatorError(
+	error: unknown,
+): "parse_error" | "validation_error" | "provider_unavailable" | "unknown_error" {
+	if (error instanceof z.ZodError) return "validation_error";
+	if (isProviderUnavailableError(error)) return "provider_unavailable";
+	if (error instanceof Error) {
+		if (error.message === "No JSON object found in evaluator response") return "parse_error";
+		if (error instanceof SyntaxError) return "parse_error";
+	}
+	return "unknown_error";
+}
+
+function safeEmitOnCall(
+	onCall: ((event: EvaluatorCallEvent) => void) | undefined,
+	event: EvaluatorCallEvent,
+): void {
+	if (onCall === undefined) return;
+	try {
+		onCall(event);
+	} catch (observerErr) {
+		console.warn(
+			`[ai-whisper] evaluator onCall observer threw: ${observerErr instanceof Error ? observerErr.message : String(observerErr)}`,
+		);
+	}
+}
+
 function buildAnthropicCaller(
 	config: AnthropicProviderConfig,
 ): (systemPrompt: string, payload: EvaluatorAnyInput) => Promise<{
@@ -320,7 +394,7 @@ function buildAnthropicCaller(
 	inputTokens?: number;
 	outputTokens?: number;
 }> {
-	const client = config.client ?? new Anthropic({ apiKey: config.apiKey });
+	const client = (config.client ?? new Anthropic({ apiKey: config.apiKey })) as AnthropicClientLike;
 	const model = config.model ?? "claude-haiku-4-5-20251001";
 
 	return async function (systemPrompt: string, payload: EvaluatorAnyInput): Promise<{
@@ -375,42 +449,169 @@ function buildOllamaCaller(
 	};
 }
 
-function buildEvaluator(
+// ─────────────────────────────────────────────────────────────────────────────
+// New factory: EvaluatorCall wrapper + observer hook + outcome classification
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CallResult =
+	| { ok: true; verdict: EvaluatorAnyVerdict; raw: string; inputTokens: number | null; outputTokens: number | null }
+	| { ok: false; error: Error; raw: string | null; inputTokens: number | null; outputTokens: number | null };
+
+function buildSingleProviderCaller(
 	config: EvaluatorProviderConfig,
-): (payload: EvaluatorAnyInput) => Promise<EvaluatorAnyVerdict> {
+): (payload: EvaluatorAnyInput, branch: Branch<EvaluatorAnyVerdict>) => Promise<CallResult> {
 	if (config.provider === "anthropic") {
 		const call = buildAnthropicCaller(config);
-		return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
-			const branch = selectBranch(payload);
-			const { raw } = await call(branch.systemPrompt, payload);
-			return branch.parse(raw);
+		return async function (payload, branch) {
+			try {
+				const { raw, inputTokens, outputTokens } = await call(branch.systemPrompt, payload);
+				try {
+					const verdict = branch.parse(raw);
+					return {
+						ok: true,
+						verdict,
+						raw,
+						inputTokens: inputTokens ?? null,
+						outputTokens: outputTokens ?? null,
+					};
+				} catch (parseErr) {
+					return {
+						ok: false,
+						error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
+						raw,
+						inputTokens: inputTokens ?? null,
+						outputTokens: outputTokens ?? null,
+					};
+				}
+			} catch (callErr) {
+				return {
+					ok: false,
+					error: callErr instanceof Error ? callErr : new Error(String(callErr)),
+					raw: null,
+					inputTokens: null,
+					outputTokens: null,
+				};
+			}
 		};
 	}
 	const call = buildOllamaCaller(config);
-	return async function (payload: EvaluatorAnyInput): Promise<EvaluatorAnyVerdict> {
-		const branch = selectBranch(payload);
-		const { raw } = await call(branch.systemPrompt, payload, branch.jsonSchema);
-		return branch.parse(raw);
+	return async function (payload, branch) {
+		try {
+			const { raw } = await call(branch.systemPrompt, payload, branch.jsonSchema);
+			try {
+				const verdict = branch.parse(raw);
+				return { ok: true, verdict, raw, inputTokens: null, outputTokens: null };
+			} catch (parseErr) {
+				return {
+					ok: false,
+					error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
+					raw,
+					inputTokens: null,
+					outputTokens: null,
+				};
+			}
+		} catch (callErr) {
+			return {
+				ok: false,
+				error: callErr instanceof Error ? callErr : new Error(String(callErr)),
+				raw: null,
+				inputTokens: null,
+				outputTokens: null,
+			};
+		}
 	};
 }
 
 export function createRelayOrchestratorEvaluator(input: {
 	primary: EvaluatorProviderConfig;
 	fallback?: EvaluatorProviderConfig;
+	onCall?: (event: EvaluatorCallEvent) => void;
 }) {
-	const primaryFn = buildEvaluator(input.primary);
-	const fallbackFn = input.fallback ? buildEvaluator(input.fallback) : null;
+	const primaryProvider = input.primary.provider;
+	const fallbackProvider = input.fallback?.provider ?? null;
+	const primaryFn = buildSingleProviderCaller(input.primary);
+	const fallbackFn = input.fallback ? buildSingleProviderCaller(input.fallback) : null;
 
 	return async function evaluateRelayHandoff(
-		payload: EvaluatorAnyInput,
+		call: EvaluatorCall,
 	): Promise<EvaluatorAnyVerdict> {
-		try {
-			return await primaryFn(payload);
-		} catch (error) {
-			if (fallbackFn !== null && isProviderUnavailableError(error)) {
-				return await fallbackFn(payload);
+		const callGroupId = crypto.randomUUID();
+		const branch = selectBranch(call.payload);
+		const branchName: EvaluatorCallEvent["branch"] =
+			branch === legacyBranch
+				? "legacy"
+				: branch === reviewBranch
+					? "review"
+					: branch === deliveredBranch
+						? "delivered"
+						: "execution";
+
+		async function runOne(
+			attemptKind: "primary" | "fallback",
+			runner: (p: EvaluatorAnyInput, b: Branch<EvaluatorAnyVerdict>) => Promise<CallResult>,
+			provider: "anthropic" | "ollama",
+		): Promise<
+			| { verdict: EvaluatorAnyVerdict }
+			| {
+					error: Error;
+					outcome: "parse_error" | "validation_error" | "provider_unavailable" | "unknown_error";
+			  }
+		> {
+			const started = Date.now();
+			const result = await runner(call.payload, branch);
+			const latencyMs = Date.now() - started;
+
+			if (result.ok) {
+				safeEmitOnCall(input.onCall, {
+					callGroupId,
+					context: call.context,
+					branch: branchName,
+					provider,
+					attemptKind,
+					outcome: "ok",
+					latencyMs,
+					rawResponse: result.raw,
+					error: null,
+					verdict: result.verdict,
+					inputTokens: result.inputTokens,
+					outputTokens: result.outputTokens,
+					systemPrompt: branch.systemPrompt,
+					payload: call.payload,
+				});
+				return { verdict: result.verdict };
 			}
-			throw error;
+			const outcome = classifyEvaluatorError(result.error);
+			safeEmitOnCall(input.onCall, {
+				callGroupId,
+				context: call.context,
+				branch: branchName,
+				provider,
+				attemptKind,
+				outcome,
+				latencyMs,
+				rawResponse: result.raw,
+				error: result.error,
+				verdict: null,
+				inputTokens: result.inputTokens,
+				outputTokens: result.outputTokens,
+				systemPrompt: branch.systemPrompt,
+				payload: call.payload,
+			});
+			return { error: result.error, outcome };
 		}
+
+		const primaryResult = await runOne("primary", primaryFn, primaryProvider);
+		if ("verdict" in primaryResult) return primaryResult.verdict;
+
+		if (
+			fallbackFn !== null &&
+			fallbackProvider !== null &&
+			primaryResult.outcome === "provider_unavailable"
+		) {
+			const fallbackResult = await runOne("fallback", fallbackFn, fallbackProvider);
+			if ("verdict" in fallbackResult) return fallbackResult.verdict;
+			throw fallbackResult.error;
+		}
+		throw primaryResult.error;
 	};
 }

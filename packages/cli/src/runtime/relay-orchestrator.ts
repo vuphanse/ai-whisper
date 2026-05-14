@@ -1,5 +1,7 @@
 import type {
+	EvaluatorCall,
 	EvaluatorInput,
+	ObserverContext,
 	RelayOrchestratorVerdict,
 	WorkflowEvaluatorInput,
 	WorkflowEvaluatorVerdict,
@@ -9,6 +11,7 @@ type BrokerLike = {
 	control: {
 		listRelayHandoffsPendingOrchestration: (collabId: string) => Array<{
 			handoffId: string;
+			chainId: string | null;
 			requestText: string;
 			captureStatus: string | null;
 			roundNumber: number | null;
@@ -23,6 +26,7 @@ type BrokerLike = {
 			claimedAt: string;
 		}) => {
 			handoffId: string;
+			chainId: string | null;
 			captureStatus: string | null;
 			roundNumber: number | null;
 			maxRounds: number;
@@ -114,7 +118,7 @@ function buildEvaluatorInput(claimed: ClaimedHandoff): EvaluatorInput {
 export function createRelayOrchestrator(input: {
 	broker: BrokerLike;
 	collabId: string;
-	evaluate: (payload: EvaluatorInput | WorkflowEvaluatorInput) => Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict>;
+	evaluate: (call: EvaluatorCall) => Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict>;
 	pollIntervalMs?: number;
 	clock?: () => string;
 	createHandoffId?: () => string;
@@ -126,12 +130,12 @@ export function createRelayOrchestrator(input: {
 
 	let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
-	async function evaluateWithRetry(payload: EvaluatorInput | WorkflowEvaluatorInput): Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict> {
+	async function evaluateWithRetry(call: EvaluatorCall): Promise<RelayOrchestratorVerdict | WorkflowEvaluatorVerdict> {
 		try {
-			return await input.evaluate(payload);
+			return await input.evaluate(call);
 		} catch (firstError) {
 			input.logger?.warn?.("relay orchestrator evaluator failed; retrying once", firstError);
-			return await input.evaluate(payload);
+			return await input.evaluate(call);
 		}
 	}
 
@@ -161,7 +165,7 @@ export function createRelayOrchestrator(input: {
 				const evaluatorPromptKey: "review-loop" | "execution-gate" =
 					handoffStep === "execute" ? "execution-gate" : "review-loop";
 
-				const wfInput: WorkflowEvaluatorInput = {
+				const wfPayload: WorkflowEvaluatorInput = {
 					...buildEvaluatorInput(claimed),
 					evaluatorPromptKey,
 					workflowId: meta.workflowId,
@@ -170,9 +174,17 @@ export function createRelayOrchestrator(input: {
 					handoffStep,
 				};
 
+				const wfContext: ObserverContext = {
+					handoffId: claimed.handoffId,
+					collabId: input.collabId,
+					chainId: claimed.chainId ?? null,
+					workflowId: meta.workflowId ?? null,
+					phaseRunId: meta.phaseRunId ?? null,
+				};
+
 				let wfVerdict: WorkflowEvaluatorVerdict;
 				try {
-					wfVerdict = (await evaluateWithRetry(wfInput)) as WorkflowEvaluatorVerdict;
+					wfVerdict = (await evaluateWithRetry({ payload: wfPayload, context: wfContext })) as WorkflowEvaluatorVerdict;
 				} catch (error) {
 					input.logger?.error?.("relay orchestrator evaluator failed after retry", error);
 					input.broker.control.applyOrchestratorVerdict({
@@ -281,9 +293,17 @@ export function createRelayOrchestrator(input: {
 			}
 
 			// LLM evaluation with one retry
+			const legacyPayload = buildEvaluatorInput(claimed);
+			const legacyContext: ObserverContext = {
+				handoffId: claimed.handoffId,
+				collabId: input.collabId,
+				chainId: claimed.chainId ?? null,
+				workflowId: null,
+				phaseRunId: null,
+			};
 			let verdict: RelayOrchestratorVerdict;
 			try {
-				verdict = (await evaluateWithRetry(buildEvaluatorInput(claimed))) as RelayOrchestratorVerdict;
+				verdict = (await evaluateWithRetry({ payload: legacyPayload, context: legacyContext })) as RelayOrchestratorVerdict;
 			} catch (error) {
 				input.logger?.error?.("relay orchestrator evaluator failed after retry", error);
 				input.broker.control.markRelayChainEscalated({

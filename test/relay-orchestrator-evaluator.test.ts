@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { ZodError } from "zod";
 import {
 	createRelayOrchestratorEvaluator,
+	type AnthropicClientLike,
+	type EvaluatorCallEvent,
 	type EvaluatorInput,
+	type ObserverContext,
 	type OllamaClientLike,
 	type WorkflowEvaluatorInput,
 } from "../packages/cli/src/runtime/relay-orchestrator-evaluator.ts";
@@ -40,6 +44,17 @@ function makeOllamaClient(content: string): OllamaClientLike {
 	} as OllamaClientLike;
 }
 
+function makeContext(overrides: Partial<ObserverContext> = {}): ObserverContext {
+	return {
+		handoffId: "handoff_test_1",
+		collabId: "collab_test_1",
+		chainId: "chain_test_1",
+		workflowId: null,
+		phaseRunId: null,
+		...overrides,
+	};
+}
+
 describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 	it("parses a done verdict", async () => {
 		const client = makeOllamaClient(
@@ -47,7 +62,7 @@ describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 
-		const result = await evaluate(makePayload());
+		const result = await evaluate({ payload: makePayload(), context: makeContext() });
 
 		expect(result.verdict).toBe("done");
 		expect(result.confidence).toBe(0.95);
@@ -64,7 +79,7 @@ describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 
-		const result = await evaluate(makePayload());
+		const result = await evaluate({ payload: makePayload(), context: makeContext() });
 
 		expect(result.verdict).toBe("loop");
 		if (result.verdict === "loop") {
@@ -81,7 +96,7 @@ describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 		});
 		const payload = makePayload();
 
-		await evaluate(payload);
+		await evaluate({ payload, context: makeContext() });
 
 		const callArg = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
 			messages: Array<{ role: string; content: string }>;
@@ -97,7 +112,7 @@ describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 
-		await evaluate(makePayload());
+		await evaluate({ payload: makePayload(), context: makeContext() });
 
 		const callArg = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
 			model: string;
@@ -111,7 +126,7 @@ describe("createRelayOrchestratorEvaluator — Ollama provider", () => {
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 
-		await expect(evaluate(makePayload())).rejects.toThrow();
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
 	});
 });
 
@@ -132,7 +147,7 @@ describe("createRelayOrchestratorEvaluator — fallback", () => {
 			fallback: { provider: "ollama", client: fallbackClient },
 		});
 
-		const result = await evaluate(makePayload());
+		const result = await evaluate({ payload: makePayload(), context: makeContext() });
 
 		expect(result.verdict).toBe("done");
 		expect((fallbackClient.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
@@ -151,7 +166,7 @@ describe("createRelayOrchestratorEvaluator — fallback", () => {
 			fallback: { provider: "ollama", client: fallbackClient },
 		});
 
-		await expect(evaluate(makePayload())).rejects.toThrow();
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
 		expect((fallbackClient.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
 	});
 
@@ -169,7 +184,7 @@ describe("createRelayOrchestratorEvaluator — fallback", () => {
 			fallback: { provider: "ollama", client: fallbackClient },
 		});
 
-		await expect(evaluate(makePayload())).rejects.toThrow();
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
 		expect((fallbackClient.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
 	});
 
@@ -187,7 +202,7 @@ describe("createRelayOrchestratorEvaluator — fallback", () => {
 			fallback: { provider: "ollama", client: fallbackClient },
 		});
 
-		const result = await evaluate(makePayload());
+		const result = await evaluate({ payload: makePayload(), context: makeContext() });
 
 		expect(result.verdict).toBe("done");
 	});
@@ -204,7 +219,7 @@ describe("createRelayOrchestratorEvaluator — workflow review step", () => {
 			JSON.stringify({ verdict: "approve", confidence: 0.9, reason: "spec is clear" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "review" }), context: makeContext() });
 		expect(result.verdict).toBe("approve");
 	});
 
@@ -218,7 +233,7 @@ describe("createRelayOrchestratorEvaluator — workflow review step", () => {
 			}),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "review" }), context: makeContext() });
 		expect(result.verdict).toBe("findings");
 		if (result.verdict === "findings") {
 			expect(result.followUpMessage).toContain("acceptance criteria");
@@ -230,7 +245,7 @@ describe("createRelayOrchestratorEvaluator — workflow review step", () => {
 			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "contradictory spec" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "review" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "review" }), context: makeContext() });
 		expect(result.verdict).toBe("escalate");
 	});
 
@@ -239,7 +254,7 @@ describe("createRelayOrchestratorEvaluator — workflow review step", () => {
 			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		await expect(evaluate(makeWorkflowPayload({ handoffStep: "review" }))).rejects.toThrow();
+		await expect(evaluate({ payload: makeWorkflowPayload({ handoffStep: "review" }), context: makeContext() })).rejects.toThrow();
 	});
 });
 
@@ -254,7 +269,7 @@ describe("createRelayOrchestratorEvaluator — workflow implement/fix step", () 
 			JSON.stringify({ verdict: "delivered", confidence: 0.9, reason: "commits made" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "implement" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "implement" }), context: makeContext() });
 		expect(result.verdict).toBe("delivered");
 	});
 
@@ -263,7 +278,7 @@ describe("createRelayOrchestratorEvaluator — workflow implement/fix step", () 
 			JSON.stringify({ verdict: "delivered", confidence: 0.85, reason: "fix landed" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "fix" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "fix" }), context: makeContext() });
 		expect(result.verdict).toBe("delivered");
 	});
 
@@ -272,7 +287,7 @@ describe("createRelayOrchestratorEvaluator — workflow implement/fix step", () 
 			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "blocked on missing dep" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(makeWorkflowPayload({ handoffStep: "implement" }));
+		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "implement" }), context: makeContext() });
 		expect(result.verdict).toBe("escalate");
 	});
 
@@ -281,7 +296,7 @@ describe("createRelayOrchestratorEvaluator — workflow implement/fix step", () 
 			JSON.stringify({ verdict: "approve", confidence: 0.9, reason: "ok" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		await expect(evaluate(makeWorkflowPayload({ handoffStep: "implement" }))).rejects.toThrow();
+		await expect(evaluate({ payload: makeWorkflowPayload({ handoffStep: "implement" }), context: makeContext() })).rejects.toThrow();
 	});
 });
 
@@ -296,9 +311,10 @@ describe("createRelayOrchestratorEvaluator — workflow execute step", () => {
 			JSON.stringify({ verdict: "execution-pass", confidence: 0.95, reason: "tests pass" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(
-			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
-		);
+		const result = await evaluate({
+			payload: makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+			context: makeContext(),
+		});
 		expect(result.verdict).toBe("execution-pass");
 	});
 
@@ -307,9 +323,10 @@ describe("createRelayOrchestratorEvaluator — workflow execute step", () => {
 			JSON.stringify({ verdict: "execution-fail", confidence: 0.9, reason: "tests failed" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(
-			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
-		);
+		const result = await evaluate({
+			payload: makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+			context: makeContext(),
+		});
 		expect(result.verdict).toBe("execution-fail");
 	});
 
@@ -318,9 +335,10 @@ describe("createRelayOrchestratorEvaluator — workflow execute step", () => {
 			JSON.stringify({ verdict: "escalate", confidence: 1, reason: "infra missing" }),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
-		const result = await evaluate(
-			makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
-		);
+		const result = await evaluate({
+			payload: makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+			context: makeContext(),
+		});
 		expect(result.verdict).toBe("escalate");
 	});
 
@@ -330,9 +348,289 @@ describe("createRelayOrchestratorEvaluator — workflow execute step", () => {
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 		await expect(
-			evaluate(
-				makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
-			),
+			evaluate({
+				payload: makeWorkflowPayload({ evaluatorPromptKey: "execution-gate", handoffStep: "execute" }),
+				context: makeContext(),
+			}),
 		).rejects.toThrow();
+	});
+});
+
+describe("createRelayOrchestratorEvaluator — observer hook", () => {
+	it("fires onCall once on success with outcome=ok and a callGroupId", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+
+		await evaluate({ payload: makePayload(), context: makeContext() });
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.outcome).toBe("ok");
+		expect(events[0]?.attemptKind).toBe("primary");
+		expect(events[0]?.provider).toBe("ollama");
+		expect(events[0]?.verdict?.verdict).toBe("done");
+		expect(typeof events[0]?.callGroupId).toBe("string");
+		expect(events[0]?.callGroupId.length).toBeGreaterThan(0);
+		expect(typeof events[0]?.latencyMs).toBe("number");
+	});
+
+	it("fires onCall twice on fallback with shared callGroupId", async () => {
+		const primaryClient: OllamaClientLike = {
+			chat: vi.fn(() => Promise.reject(Object.assign(new Error("conn refused"), { code: "ECONNREFUSED" }))),
+		} as OllamaClientLike;
+		const fallbackClient = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.7, reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client: primaryClient },
+			fallback: { provider: "ollama", client: fallbackClient },
+			onCall: (e) => events.push(e),
+		});
+
+		await evaluate({ payload: makePayload(), context: makeContext() });
+
+		expect(events).toHaveLength(2);
+		expect(events[0]?.attemptKind).toBe("primary");
+		expect(events[0]?.outcome).toBe("provider_unavailable");
+		expect(events[1]?.attemptKind).toBe("fallback");
+		expect(events[1]?.outcome).toBe("ok");
+		expect(events[0]?.callGroupId).toBe(events[1]?.callGroupId);
+	});
+
+	it("threads context through to the observer (not via payload)", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+
+		await evaluate({
+			payload: makePayload(),
+			context: makeContext({ handoffId: "h_special", collabId: "c_special" }),
+		});
+
+		expect(events[0]?.context.handoffId).toBe("h_special");
+		expect(events[0]?.context.collabId).toBe("c_special");
+	});
+
+	it("payload sent to the LLM does NOT contain context IDs", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
+
+		await evaluate({
+			payload: makePayload(),
+			context: makeContext({ handoffId: "h_secret", collabId: "c_secret" }),
+		});
+
+		const callArg = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			messages: Array<{ role: string; content: string }>;
+		};
+		const userMessage = callArg?.messages?.[1];
+		expect(typeof userMessage?.content).toBe("string");
+		expect(userMessage?.content).not.toContain("h_secret");
+		expect(userMessage?.content).not.toContain("c_secret");
+		expect(userMessage?.content).not.toContain("handoffId");
+		expect(userMessage?.content).not.toContain("collabId");
+	});
+});
+
+describe("createRelayOrchestratorEvaluator — outcome classification", () => {
+	it("classifies a response with no JSON object as parse_error", async () => {
+		const client = makeOllamaClient("just plain text, no JSON anywhere");
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
+		expect(events[0]?.outcome).toBe("parse_error");
+	});
+
+	it("classifies malformed JSON as parse_error", async () => {
+		const client = makeOllamaClient("{ this is { not valid JSON");
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
+		expect(events[0]?.outcome).toBe("parse_error");
+	});
+
+	it("classifies invalid verdict enum as validation_error", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "not_a_real_verdict", confidence: 0.9, reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toBeInstanceOf(ZodError);
+		expect(events[0]?.outcome).toBe("validation_error");
+	});
+
+	it("classifies wrong-typed confidence as validation_error", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: "high", reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toBeInstanceOf(ZodError);
+		expect(events[0]?.outcome).toBe("validation_error");
+	});
+
+	it("classifies ECONNREFUSED as provider_unavailable", async () => {
+		const client: OllamaClientLike = {
+			chat: vi.fn(() => Promise.reject(Object.assign(new Error("conn refused"), { code: "ECONNREFUSED" }))),
+		} as OllamaClientLike;
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
+		expect(events[0]?.outcome).toBe("provider_unavailable");
+	});
+
+	it("classifies HTTP 429 as provider_unavailable", async () => {
+		const client: OllamaClientLike = {
+			chat: vi.fn(() => Promise.reject(Object.assign(new Error("rate limited"), { status: 429 }))),
+		} as OllamaClientLike;
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
+		expect(events[0]?.outcome).toBe("provider_unavailable");
+	});
+
+	it("classifies plain Error as unknown_error", async () => {
+		const client: OllamaClientLike = {
+			chat: vi.fn(() => Promise.reject(new Error("something completely different"))),
+		} as OllamaClientLike;
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow();
+		expect(events[0]?.outcome).toBe("unknown_error");
+	});
+});
+
+describe("createRelayOrchestratorEvaluator — outer-retry semantics", () => {
+	it("generates a fresh callGroupId per invocation (supports orchestrator's evaluateWithRetry)", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+
+		await evaluate({ payload: makePayload(), context: makeContext() });
+		await evaluate({ payload: makePayload(), context: makeContext() });
+
+		expect(events).toHaveLength(2);
+		expect(typeof events[0]?.callGroupId).toBe("string");
+		expect(typeof events[1]?.callGroupId).toBe("string");
+		expect(events[0]?.callGroupId).not.toBe(events[1]?.callGroupId);
+	});
+});
+
+describe("createRelayOrchestratorEvaluator — observer error isolation", () => {
+	it("does NOT propagate observer exceptions to the caller (success path)", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const evaluate = createRelayOrchestratorEvaluator({
+				primary: { provider: "ollama", client },
+				onCall: () => { throw new Error("observer blew up"); },
+			});
+
+			const verdict = await evaluate({ payload: makePayload(), context: makeContext() });
+			expect(verdict).toMatchObject({ verdict: "done" });
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("evaluator onCall observer threw"),
+			);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("does NOT swallow the underlying provider error when the observer also throws (failure path)", async () => {
+		const client: OllamaClientLike = {
+			chat: vi.fn(() => Promise.reject(Object.assign(new Error("conn refused"), { code: "ECONNREFUSED" }))),
+		} as OllamaClientLike;
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const evaluate = createRelayOrchestratorEvaluator({
+				primary: { provider: "ollama", client },
+				onCall: () => { throw new Error("observer blew up too"); },
+			});
+
+			await expect(evaluate({ payload: makePayload(), context: makeContext() })).rejects.toThrow(/conn refused/);
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("evaluator onCall observer threw"),
+			);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+});
+
+describe("createRelayOrchestratorEvaluator — token usage", () => {
+	it("populates inputTokens/outputTokens from Anthropic response.usage", async () => {
+		const captured: Partial<EvaluatorCallEvent>[] = [];
+		const fakeClient: AnthropicClientLike = {
+			messages: {
+				create: vi.fn(async () => ({
+					content: [{ type: "text" as const, text: JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }) }],
+					usage: { input_tokens: 412, output_tokens: 64 },
+				})),
+			},
+		};
+
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "anthropic", apiKey: "test", client: fakeClient },
+			onCall: (e) => captured.push(e),
+		});
+
+		await evaluate({ payload: makePayload(), context: makeContext() });
+		expect(captured[0]?.inputTokens).toBe(412);
+		expect(captured[0]?.outputTokens).toBe(64);
+	});
+
+	it("leaves inputTokens/outputTokens NULL for Ollama (no usage surface)", async () => {
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+		);
+		const captured: Partial<EvaluatorCallEvent>[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => captured.push(e),
+		});
+		await evaluate({ payload: makePayload(), context: makeContext() });
+		expect(captured[0]?.inputTokens).toBeNull();
+		expect(captured[0]?.outputTokens).toBeNull();
 	});
 });
