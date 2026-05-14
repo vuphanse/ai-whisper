@@ -97,8 +97,18 @@ export function insertCaptureDiagnostic(
 export function listCaptureDiagnosticsByCollab(
 	db: Database.Database,
 	collabId: string,
-	limit: number,
+	limit: number | null,
 ): RelayCaptureDiagnosticRecord[] {
+	if (limit === null) {
+		const rows = db
+			.prepare(
+				`SELECT * FROM relay_capture_diagnostics
+				 WHERE collab_id = ?
+				 ORDER BY created_at DESC`,
+			)
+			.all(collabId) as Row[];
+		return rows.map(rowToRecord);
+	}
 	const rows = db
 		.prepare(
 			`SELECT * FROM relay_capture_diagnostics
@@ -114,8 +124,18 @@ export function listCaptureDiagnosticsByCollabAndChain(
 	db: Database.Database,
 	collabId: string,
 	chainId: string,
-	limit: number,
+	limit: number | null,
 ): RelayCaptureDiagnosticRecord[] {
+	if (limit === null) {
+		const rows = db
+			.prepare(
+				`SELECT * FROM relay_capture_diagnostics
+				 WHERE collab_id = ? AND chain_id = ?
+				 ORDER BY created_at DESC`,
+			)
+			.all(collabId, chainId) as Row[];
+		return rows.map(rowToRecord);
+	}
 	const rows = db
 		.prepare(
 			`SELECT * FROM relay_capture_diagnostics

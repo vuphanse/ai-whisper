@@ -1142,14 +1142,14 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		listCaptureDiagnosticsByCollab(
 			collabId: string,
-			limit: number,
+			limit: number | null,
 		): RelayCaptureDiagnosticRecord[] {
 			return queryListCaptureDiagnosticsByCollab(db, collabId, limit);
 		},
 		listCaptureDiagnosticsByCollabAndChain(
 			collabId: string,
 			chainId: string,
-			limit: number,
+			limit: number | null,
 		): RelayCaptureDiagnosticRecord[] {
 			return queryListCaptureDiagnosticsByCollabAndChain(db, collabId, chainId, limit);
 		},

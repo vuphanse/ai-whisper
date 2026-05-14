@@ -164,6 +164,55 @@ describe("relay-capture-diagnostics repository", () => {
 		}
 	});
 
+	it("limit: null on listByCollab returns every row (no LIMIT clause)", () => {
+		const broker = newBroker();
+		try {
+			for (let i = 0; i < 25; i += 1) {
+				insertCaptureDiagnostic(broker.db, {
+					captureId: `capture_n${i}`,
+					handoffId: `handoff_n${i}`,
+					collabId: "collab_unbounded",
+					chainId: null, workflowId: null,
+					targetProvider: "codex", captureStatus: "ok",
+					clipLen: 0, turnLen: 0, turnConfidence: "low",
+					jaccardScore: null, containmentScore: null,
+					clipSample: null, turnSample: null,
+					abortedByRaceGuard: false,
+					createdAt: `2026-05-14T10:${String(i).padStart(2, "0")}:00.000Z`,
+				});
+			}
+			const rows = listCaptureDiagnosticsByCollab(broker.db, "collab_unbounded", null);
+			expect(rows).toHaveLength(25);
+		} finally {
+			void broker.stop();
+		}
+	});
+
+	it("limit: null on listByCollabAndChain returns every row for the chain (no LIMIT clause)", () => {
+		const broker = newBroker();
+		try {
+			for (let i = 0; i < 20; i += 1) {
+				insertCaptureDiagnostic(broker.db, {
+					captureId: `capture_nc${i}`,
+					handoffId: `handoff_nc${i}`,
+					collabId: "collab_c",
+					chainId: "chain_unbounded",
+					workflowId: null,
+					targetProvider: "codex", captureStatus: "ok",
+					clipLen: 0, turnLen: 0, turnConfidence: "low",
+					jaccardScore: null, containmentScore: null,
+					clipSample: null, turnSample: null,
+					abortedByRaceGuard: false,
+					createdAt: `2026-05-14T11:${String(i).padStart(2, "0")}:00.000Z`,
+				});
+			}
+			const rows = listCaptureDiagnosticsByCollabAndChain(broker.db, "collab_c", "chain_unbounded", null);
+			expect(rows).toHaveLength(20);
+		} finally {
+			void broker.stop();
+		}
+	});
+
 	it("deleteOlderThan removes rows strictly older than the cutoff", () => {
 		const broker = newBroker();
 		try {

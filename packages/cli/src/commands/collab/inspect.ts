@@ -10,8 +10,8 @@ import { readCliCollabState, writeCliCollabState } from "../../runtime/state-fil
 // any string → list rows for that chain id
 export type CapturesArg = true | string;
 
-const ALL_LIMIT = 100_000;
 const DEFAULT_LIMIT = 20;
+const NO_LIMIT = null;
 
 export async function runCollabInspect(input: {
 	workspaceRoot: string;
@@ -65,7 +65,7 @@ export async function runCollabInspect(input: {
 					return formatCapturesView({ rows, collabId: state.collabId });
 				}
 				if (captures === "all") {
-					const rows = broker.control.listCaptureDiagnosticsByCollab(state.collabId, ALL_LIMIT);
+					const rows = broker.control.listCaptureDiagnosticsByCollab(state.collabId, NO_LIMIT);
 					return formatCapturesView({ rows, collabId: state.collabId });
 				}
 				// Treat any other string as a chain id, scoped to the active collab so
@@ -73,7 +73,7 @@ export async function runCollabInspect(input: {
 				const rows = broker.control.listCaptureDiagnosticsByCollabAndChain(
 					state.collabId,
 					captures,
-					ALL_LIMIT,
+					NO_LIMIT,
 				);
 				return formatCapturesView({ rows, collabId: state.collabId });
 			}
