@@ -21,10 +21,14 @@
 		"@ai-whisper/companion-core": "workspace:*",
 		"@ai-whisper/shared": "workspace:*",
 		"@anthropic-ai/sdk": "^0.88.0",
+		"better-sqlite3": "^11.8.1",
 		"commander": "^13.1.0",
 		"node-pty": "^1.1.0",
 		"ollama": "^0.6.3",
 		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.12"
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
