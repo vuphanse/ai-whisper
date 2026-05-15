@@ -44,6 +44,7 @@ async function main(): Promise<void> {
 		// The daemon owns workflow driving and diagnostics retention.
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 	const provider = createProviderForTarget(agentArg);
 	const interactiveSession = createInteractiveSessionForTarget({

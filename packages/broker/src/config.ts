@@ -14,6 +14,11 @@ export const brokerConfigSchema = z.object({
 	// etc.) must pass `false` so they do not spin up a per-process maintenance
 	// timer that ticks until the next short-lived stop().
 	runDiagnosticsSweep: z.boolean().default(true),
+	// Same rationale as runWorkflowDriver / runDiagnosticsSweep: only the
+	// authoritative broker daemon should tick the heartbeat for its collab.
+	// Transient CLI brokers must pass `false` so their inspections do not
+	// overwrite last_heartbeat_at for a collab they do not own.
+	runDaemonHeartbeat: z.boolean().default(true),
 });
 
 export type BrokerConfig = z.input<typeof brokerConfigSchema>;

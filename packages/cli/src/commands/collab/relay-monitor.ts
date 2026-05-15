@@ -36,6 +36,7 @@ export async function runCollabRelayMonitor(input: {
 		port,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 
 	const monitorId = `monitor_${randomBytes(9).toString("base64url")}`;

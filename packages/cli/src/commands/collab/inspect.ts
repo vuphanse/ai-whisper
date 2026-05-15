@@ -62,6 +62,7 @@ export async function runCollabInspect(input: {
 			port: state.broker.port,
 			runWorkflowDriver: false,
 			runDiagnosticsSweep: false,
+			runDaemonHeartbeat: false,
 		});
 
 		try {

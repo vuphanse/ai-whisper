@@ -39,6 +39,7 @@ export async function runCollabTell(input: {
 		port: state.broker.port,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 
 	const artifactPaths = normalizeArtifactPaths(

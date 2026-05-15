@@ -32,6 +32,7 @@ export async function runCollabReconnect(input: {
 		port: state.broker.port,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 
 	const current = broker.control

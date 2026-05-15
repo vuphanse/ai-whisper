@@ -10,6 +10,7 @@ import {
 	createBrokerEventBus,
 	type BrokerEventBus,
 } from "./broker-event-bus.js";
+import { createDaemonHeartbeat } from "./daemon-heartbeat.js";
 import { createDiagnosticsSweep } from "./diagnostics-sweep.js";
 import { createWorkflowDriver } from "./workflow-driver.js";
 import { createWorkspaceHeadReader } from "./workspace-head-reader.js";
@@ -55,6 +56,16 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 		? createDiagnosticsSweep({ broker: { control } })
 		: null;
 	diagnosticsSweep?.start();
+	const heartbeatCollabId = process.env.AI_WHISPER_DAEMON_COLLAB_ID;
+	const heartbeat = config.runDaemonHeartbeat && heartbeatCollabId
+		? createDaemonHeartbeat({
+				db,
+				collabId: heartbeatCollabId,
+				intervalMs: Number(process.env.AI_WHISPER_HEARTBEAT_MS ?? 10_000),
+				now: () => new Date().toISOString(),
+			})
+		: null;
+	heartbeat?.start();
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -80,6 +91,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			});
 		},
 		async stop(): Promise<void> {
+			heartbeat?.stop();
 			diagnosticsSweep?.stop();
 			workflowDriver?.stop();
 			await app.close();

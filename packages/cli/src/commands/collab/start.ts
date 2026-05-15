@@ -100,6 +100,7 @@ export async function runCollabStart(input: {
 		port: brokerPort,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 
 	const collabId = createCliCollabId(input.now);

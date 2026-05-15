@@ -25,6 +25,7 @@ export async function connectToWorkspaceBroker(
 		// kickoffs against broker.stop() on command exit.
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
 	});
 
 	return { broker, collabId: state.collabId };
