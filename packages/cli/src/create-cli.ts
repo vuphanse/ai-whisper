@@ -324,9 +324,12 @@ export function createCli(): Command {
 	collab
 		.command("relay-monitor")
 		.description("Run the relay monitor in the current terminal (renders the relay conversation stream)")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (opts: WorkspaceOpts) => {
-			await runCollabRelayMonitor({ workspaceRoot: opts.workspace });
+		.option("--collab <id>", "Monitor a specific collab id (defaults to the active collab for cwd)")
+		.action(async (opts: { collab?: string }) => {
+			await runCollabRelayMonitor({
+				cwd: process.cwd(),
+				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+			});
 		});
 
 	collab
