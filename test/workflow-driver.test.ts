@@ -39,7 +39,7 @@ describe("WorkflowDriver", () => {
 		driver.start();
 		const { workflowId } = broker.control.createWorkflow({
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",
@@ -55,7 +55,7 @@ describe("WorkflowDriver", () => {
 		broker.db
 			.prepare(
 				`INSERT INTO workflows (workflow_id, collab_id, workflow_type, name, spec_path, role_bindings, status, current_phase_index, halt_reason, workflow_context, created_at, updated_at)
-				 VALUES ('wf_seed', 'collab_c1', 'superpowers-feature-development', NULL, 'docs/spec.md', '{"implementer":"claude","reviewer":"codex"}', 'running', 0, NULL, '{}', '2026-04-21T00:00:00Z', '2026-04-21T00:00:00Z')`,
+				 VALUES ('wf_seed', 'collab_c1', 'spec-driven-development', NULL, 'docs/spec.md', '{"implementer":"claude","reviewer":"codex"}', 'running', 0, NULL, '{}', '2026-04-21T00:00:00Z', '2026-04-21T00:00:00Z')`,
 			)
 			.run();
 
@@ -75,7 +75,7 @@ describe("WorkflowDriver", () => {
 		// Create workflow and begin a phase run to simulate it being in progress
 		const { workflowId } = broker.control.createWorkflow({
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",
@@ -130,7 +130,7 @@ describe("WorkflowDriver", () => {
 		broker.db
 			.prepare(
 				`INSERT INTO workflows (workflow_id, collab_id, workflow_type, name, spec_path, role_bindings, status, current_phase_index, halt_reason, workflow_context, created_at, updated_at)
-				 VALUES ('wf_x', 'collab_c1', 'superpowers-feature-development', NULL, 'docs/spec.md', '{"implementer":"claude","reviewer":"codex"}', 'running', 0, NULL, '{}', '2026-04-21T00:00:00Z', '2026-04-21T00:00:00Z')`,
+				 VALUES ('wf_x', 'collab_c1', 'spec-driven-development', NULL, 'docs/spec.md', '{"implementer":"claude","reviewer":"codex"}', 'running', 0, NULL, '{}', '2026-04-21T00:00:00Z', '2026-04-21T00:00:00Z')`,
 			)
 			.run();
 		const driver = createWorkflowDriver({

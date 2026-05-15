@@ -38,7 +38,7 @@ describe("whisper workflow commands", () => {
 		const result = await runWorkflowStart({
 			broker,
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			implementer: "claude",
 			reviewer: "codex",
@@ -54,7 +54,7 @@ describe("whisper workflow commands", () => {
 		await runWorkflowStart({
 			broker,
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			implementer: "claude",
 			reviewer: "codex",
@@ -68,7 +68,7 @@ describe("whisper workflow commands", () => {
 
 	it("types enumerates registry", async () => {
 		const types = await runWorkflowTypes();
-		expect(types).toContain("superpowers-feature-development");
+		expect(types).toContain("spec-driven-development");
 	});
 
 	it("cancel + resume rejects", async () => {
@@ -76,7 +76,7 @@ describe("whisper workflow commands", () => {
 		const { workflowId } = await runWorkflowStart({
 			broker,
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			implementer: "claude",
 			reviewer: "codex",

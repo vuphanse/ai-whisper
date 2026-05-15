@@ -28,7 +28,7 @@ function setup() {
 	}
 	const { workflowId } = broker.control.createWorkflow({
 		collabId: COLLAB_ID,
-		workflowType: "superpowers-feature-development",
+		workflowType: "spec-driven-development",
 		specPath: "docs/spec.md",
 		roleBindings: { implementer: "claude", reviewer: "codex" },
 		now: "2026-04-21T00:00:00Z",

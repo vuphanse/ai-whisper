@@ -26,7 +26,7 @@ function setup() {
 	}
 	const { workflowId } = broker.control.createWorkflow({
 		collabId: "collab_c1",
-		workflowType: "superpowers-feature-development",
+		workflowType: "spec-driven-development",
 		specPath: "docs/spec.md",
 		roleBindings: { implementer: "claude", reviewer: "codex" },
 		now: "2026-04-21T00:00:00Z",
@@ -89,7 +89,7 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		// Start a second, now-running workflow
 		broker.control.createWorkflow({
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec2.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:06:00Z",

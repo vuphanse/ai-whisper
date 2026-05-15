@@ -4,7 +4,7 @@ Local collaboration bridge for paired AI agent sessions.
 
 ## Current Scope
 
-This repository is being built in incremental phases. Phase 7 is complete and delivers recovery, operator monitoring, terminal-first mounted sessions, and the relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `superpowers-feature-development`) run on top of the same relay. Earlier `attach` and `adopt` flows (Phase 7A / 7D) have been shelved; see [`docs/legacy-attach.md`](docs/legacy-attach.md).
+This repository is being built in incremental phases. Phase 7 is complete and delivers recovery, operator monitoring, terminal-first mounted sessions, and the relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `spec-driven-development`) run on top of the same relay. Earlier `attach` and `adopt` flows (Phase 7A / 7D) have been shelved; see [`docs/legacy-attach.md`](docs/legacy-attach.md).
 
 For the full handoff lifecycle reference — manual chats, autonomous workflows, capture classification, hotkeys, and per-step verdicts — see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md).
 
@@ -373,13 +373,13 @@ When orchestrator is disabled (default), the collab uses the traditional manual 
 
 ### Autonomous workflows
 
-Multi-phase pipelines that drive both agents through a structured task. Today the only registered workflow type is `superpowers-feature-development`, which runs spec-refining → plan-writing → plan-execution → code-review.
+Multi-phase pipelines that drive both agents through a structured task. Today the only registered workflow type is `spec-driven-development`, which runs spec-refining → plan-writing → plan-execution → code-review.
 
 Start a workflow once you have a collab running and both agents mounted:
 
 ```bash
 whisper workflow start \
-  --type superpowers-feature-development \
+  --type spec-driven-development \
   --spec docs/path/to/spec.md \
   --implementer claude \
   --reviewer codex

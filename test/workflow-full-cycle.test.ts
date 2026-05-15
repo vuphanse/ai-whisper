@@ -92,7 +92,7 @@ describe("workflow full cycle (mock orchestrator)", () => {
 
 			const { workflowId } = broker.control.createWorkflow({
 				collabId: "collab_c1",
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "spec.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:00Z",
@@ -257,7 +257,7 @@ describe("workflow full cycle (mock orchestrator)", () => {
 
 			const { workflowId } = broker.control.createWorkflow({
 				collabId: "collab_c2",
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "spec.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:00Z",

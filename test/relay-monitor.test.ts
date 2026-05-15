@@ -252,7 +252,7 @@ describe("relay monitor", () => {
 			}
 			const { workflowId } = broker.control.createWorkflow({
 				collabId,
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "docs/spec.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-23T00:00:00Z",

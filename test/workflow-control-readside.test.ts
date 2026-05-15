@@ -40,7 +40,7 @@ describe("workflow-control (read + create)", () => {
 
 		const { workflowId } = broker.control.createWorkflow({
 			collabId: TEST_COLLAB_ID,
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",
@@ -59,7 +59,7 @@ describe("workflow-control (read + create)", () => {
 		expect(() =>
 			broker.control.createWorkflow({
 				collabId: TEST_COLLAB_ID,
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "docs/spec.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:00Z",
@@ -85,7 +85,7 @@ describe("workflow-control (read + create)", () => {
 		expect(() =>
 			broker.control.createWorkflow({
 				collabId: TEST_COLLAB_ID,
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "docs/spec.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:00Z",
@@ -97,7 +97,7 @@ describe("workflow-control (read + create)", () => {
 		const broker = setupCollab();
 		broker.control.createWorkflow({
 			collabId: TEST_COLLAB_ID,
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",
@@ -105,7 +105,7 @@ describe("workflow-control (read + create)", () => {
 		expect(() =>
 			broker.control.createWorkflow({
 				collabId: TEST_COLLAB_ID,
-				workflowType: "superpowers-feature-development",
+				workflowType: "spec-driven-development",
 				specPath: "docs/spec2.md",
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:01Z",
@@ -122,7 +122,7 @@ describe("workflow-control (read + create)", () => {
 		const broker = setupCollab();
 		broker.control.createWorkflow({
 			collabId: TEST_COLLAB_ID,
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",
@@ -152,7 +152,7 @@ describe("workflow-control (read + create)", () => {
 		const broker = setupCollab();
 		const { workflowId } = broker.control.createWorkflow({
 			collabId: "collab_c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },
 			now: "2026-04-21T00:00:00Z",

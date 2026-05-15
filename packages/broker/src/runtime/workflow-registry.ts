@@ -21,9 +21,9 @@ export interface WorkflowDefinition {
 	phases: PhaseConfig[];
 }
 
-export const SUPERPOWERS_FEATURE_DEVELOPMENT: WorkflowDefinition = {
-	type: "superpowers-feature-development",
-	displayName: "Superpowers Feature Development",
+export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
+	type: "spec-driven-development",
+	displayName: "Spec-Driven Development",
 	description: "Spec refining → plan writing → execution → code review",
 	phases: [
 		{
@@ -94,7 +94,7 @@ export const SUPERPOWERS_FEATURE_DEVELOPMENT: WorkflowDefinition = {
 };
 
 const REGISTRY: Record<string, WorkflowDefinition> = {
-	[SUPERPOWERS_FEATURE_DEVELOPMENT.type]: SUPERPOWERS_FEATURE_DEVELOPMENT,
+	[SPEC_DRIVEN_DEVELOPMENT.type]: SPEC_DRIVEN_DEVELOPMENT,
 };
 
 export function getWorkflowDefinition(

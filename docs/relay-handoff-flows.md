@@ -5,7 +5,7 @@ ai-whisper uses a turn-based relay between two mounted agent panes (claude and c
 This document explains the two flows the relay supports today:
 
 1. [Manual chats](#1-manual-chats) — free-form back-and-forth driven by you, the operator
-2. [Autonomous workflows](#2-autonomous-workflows) — multi-phase pipelines like `superpowers-feature-development` driven by the broker
+2. [Autonomous workflows](#2-autonomous-workflows) — multi-phase pipelines like `spec-driven-development` driven by the broker
 
 Both flows share the same handoff state machine, the same idle auto-fire timing, and the same orchestrator. They differ in **who decides** what each verdict means.
 
@@ -162,13 +162,13 @@ A bad capture (`captureStatus != "ok"`) bypasses the LLM and forces a re-issue a
 
 ## 2. Autonomous workflows
 
-An autonomous workflow is a multi-phase pipeline that drives both agents through a structured task. Today the only registered type is `superpowers-feature-development`.
+An autonomous workflow is a multi-phase pipeline that drives both agents through a structured task. Today the only registered type is `spec-driven-development`.
 
 ### Starting a workflow
 
 ```bash
 whisper workflow start \
-  --type superpowers-feature-development \
+  --type spec-driven-development \
   --spec docs/path/to/spec.md \
   --implementer claude \
   --reviewer codex

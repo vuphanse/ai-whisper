@@ -410,7 +410,7 @@ async function runOne(name) {
 
 	const { workflowId } = broker.control.createWorkflow({
 		collabId,
-		workflowType: "superpowers-feature-development",
+		workflowType: "spec-driven-development",
 		specPath: "spec.md",
 		roleBindings: { implementer: "claude", reviewer: "codex" },
 		now: new Date().toISOString(),

@@ -29,7 +29,7 @@ describe("workflow-repository", () => {
 		insertWorkflow(db, {
 			workflowId: "wf_1",
 			collabId: "c1",
-			workflowType: "superpowers-feature-development",
+			workflowType: "spec-driven-development",
 			name: "feature x",
 			specPath: "docs/spec.md",
 			roleBindings: { implementer: "claude", reviewer: "codex" },

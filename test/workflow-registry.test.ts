@@ -4,12 +4,12 @@ import {
 	getWorkflowDefinition,
 	listWorkflowTypes,
 	renderTemplate,
-	SUPERPOWERS_FEATURE_DEVELOPMENT,
+	SPEC_DRIVEN_DEVELOPMENT,
 } from "../packages/broker/src/runtime/workflow-registry.ts";
 
 describe("workflow-registry", () => {
-	it("has superpowers-feature-development with 4 phases", () => {
-		const def = getWorkflowDefinition("superpowers-feature-development");
+	it("has spec-driven-development with 4 phases", () => {
+		const def = getWorkflowDefinition("spec-driven-development");
 		expect(def).toBeDefined();
 		expect(def?.phases).toHaveLength(4);
 		expect(def?.phases.map((p) => p.name)).toEqual([
@@ -21,7 +21,7 @@ describe("workflow-registry", () => {
 	});
 
 	it("each phase has a non-empty stepTemplate for its initialHandoffStep", () => {
-		const def = SUPERPOWERS_FEATURE_DEVELOPMENT;
+		const def = SPEC_DRIVEN_DEVELOPMENT;
 		for (const phase of def.phases) {
 			const template = phase.stepTemplates[phase.initialHandoffStep];
 			expect(template, `phase ${phase.name}`).toBeTruthy();
@@ -30,7 +30,7 @@ describe("workflow-registry", () => {
 	});
 
 	it("plan-execution has reviewerRole=null and maxRounds=1", () => {
-		const def = SUPERPOWERS_FEATURE_DEVELOPMENT;
+		const def = SPEC_DRIVEN_DEVELOPMENT;
 		const exec = def.phases.find((p) => p.name === "plan-execution");
 		expect(exec?.reviewerRole).toBeNull();
 		expect(exec?.maxRounds).toBe(1);
@@ -38,7 +38,7 @@ describe("workflow-registry", () => {
 	});
 
 	it("listWorkflowTypes includes the one registered type", () => {
-		expect(listWorkflowTypes()).toContain("superpowers-feature-development");
+		expect(listWorkflowTypes()).toContain("spec-driven-development");
 	});
 });
 

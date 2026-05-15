@@ -260,7 +260,7 @@ export function createCli(): Command {
 	workflow
 		.command("start")
 		.description("Start a new workflow")
-		.requiredOption("--type <type>", "Workflow type (e.g. superpowers-feature-development)")
+		.requiredOption("--type <type>", "Workflow type (e.g. spec-driven-development)")
 		.requiredOption("--spec <path>", "Spec file path")
 		.requiredOption("--implementer <agent>", "Implementer agent: claude or codex")
 		.requiredOption("--reviewer <agent>", "Reviewer agent: claude or codex")
