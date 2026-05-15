@@ -238,13 +238,56 @@ export function createCli(): Command {
 	collab
 		.command("recover")
 		.description("Recover the current workspace collab after broker loss")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (opts: WorkspaceOpts) => {
+		.option("--collab <id>", "Recover a specific collab id (defaults to the active collab for cwd)")
+		.option("--port <port>", "Explicit port to bind for the recovered daemon", (v) =>
+			Number.parseInt(v, 10),
+		)
+		.action(async (opts: { collab?: string; port?: number }) => {
 			const result = await runCollabRecover({
-				workspaceRoot: opts.workspace,
-				now: new Date().toISOString(),
+				cwd: process.cwd(),
+				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+				...(opts.port !== undefined ? { explicitPort: opts.port } : {}),
+				now: () => new Date().toISOString(),
+				isPortFreeOs: (port: number) => isPortFree(port),
+				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
+					spawnBrokerDaemon(sqlitePath, host, port, collabId),
+				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
+					const start = Date.now();
+					const delayMs = 100;
+					while (Date.now() - start < timeoutMs) {
+						const db = openDatabase(getSharedSqlitePath());
+						const row = db
+							.prepare(
+								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
+							)
+							.get(collabId) as { pid: number | null } | undefined;
+						db.close();
+						const pid = row?.pid ?? 0;
+						if (pid > 0) {
+							const health = await assessBrokerDaemon({
+								host,
+								port,
+								pid,
+							});
+							if (health.ok) return true;
+						}
+						await new Promise<void>((resolve) =>
+							setTimeout(resolve, delayMs),
+						);
+					}
+					return false;
+				},
+				signalProcess: (pid, signal) => {
+					try {
+						process.kill(pid, signal);
+					} catch {
+						// ignore
+					}
+				},
 			});
-			console.log(`Collab recovered: ${result.bindings.length} remembered role bindings restored`);
+			console.log(
+				`Collab recovered: ${result.collabId} (pid ${result.pid}, port ${result.port})`,
+			);
 		});
 
 	collab
