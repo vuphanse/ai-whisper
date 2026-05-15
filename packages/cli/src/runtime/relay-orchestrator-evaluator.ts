@@ -454,8 +454,8 @@ function buildOllamaCaller(
 // ─────────────────────────────────────────────────────────────────────────────
 
 type CallResult =
-	| { ok: true; verdict: EvaluatorAnyVerdict; raw: string; inputTokens: number | null; outputTokens: number | null }
-	| { ok: false; error: Error; raw: string | null; inputTokens: number | null; outputTokens: number | null };
+	| { ok: true; verdict: EvaluatorAnyVerdict; raw: string; inputTokens: number | null; outputTokens: number | null; providerLatencyMs: number }
+	| { ok: false; error: Error; raw: string | null; inputTokens: number | null; outputTokens: number | null; providerLatencyMs: number };
 
 function buildSingleProviderCaller(
 	config: EvaluatorProviderConfig,
@@ -463,60 +463,75 @@ function buildSingleProviderCaller(
 	if (config.provider === "anthropic") {
 		const call = buildAnthropicCaller(config);
 		return async function (payload, branch) {
+			const started = Date.now();
+			let providerResult: { raw: string; inputTokens?: number; outputTokens?: number };
 			try {
-				const { raw, inputTokens, outputTokens } = await call(branch.systemPrompt, payload);
-				try {
-					const verdict = branch.parse(raw);
-					return {
-						ok: true,
-						verdict,
-						raw,
-						inputTokens: inputTokens ?? null,
-						outputTokens: outputTokens ?? null,
-					};
-				} catch (parseErr) {
-					return {
-						ok: false,
-						error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
-						raw,
-						inputTokens: inputTokens ?? null,
-						outputTokens: outputTokens ?? null,
-					};
-				}
+				providerResult = await call(branch.systemPrompt, payload);
 			} catch (callErr) {
+				const providerLatencyMs = Date.now() - started;
 				return {
 					ok: false,
 					error: callErr instanceof Error ? callErr : new Error(String(callErr)),
 					raw: null,
 					inputTokens: null,
 					outputTokens: null,
+					providerLatencyMs,
+				};
+			}
+			const providerLatencyMs = Date.now() - started;
+			// Parse happens AFTER the timer stops — does NOT contribute to providerLatencyMs.
+			try {
+				const verdict = branch.parse(providerResult.raw);
+				return {
+					ok: true,
+					verdict,
+					raw: providerResult.raw,
+					inputTokens: providerResult.inputTokens ?? null,
+					outputTokens: providerResult.outputTokens ?? null,
+					providerLatencyMs,
+				};
+			} catch (parseErr) {
+				return {
+					ok: false,
+					error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
+					raw: providerResult.raw,
+					inputTokens: providerResult.inputTokens ?? null,
+					outputTokens: providerResult.outputTokens ?? null,
+					providerLatencyMs,
 				};
 			}
 		};
 	}
 	const call = buildOllamaCaller(config);
 	return async function (payload, branch) {
+		const started = Date.now();
+		let raw: string;
 		try {
-			const { raw } = await call(branch.systemPrompt, payload, branch.jsonSchema);
-			try {
-				const verdict = branch.parse(raw);
-				return { ok: true, verdict, raw, inputTokens: null, outputTokens: null };
-			} catch (parseErr) {
-				return {
-					ok: false,
-					error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
-					raw,
-					inputTokens: null,
-					outputTokens: null,
-				};
-			}
+			({ raw } = await call(branch.systemPrompt, payload, branch.jsonSchema));
 		} catch (callErr) {
+			const providerLatencyMs = Date.now() - started;
 			return {
 				ok: false,
 				error: callErr instanceof Error ? callErr : new Error(String(callErr)),
 				raw: null,
 				inputTokens: null,
 				outputTokens: null,
+				providerLatencyMs,
+			};
+		}
+		const providerLatencyMs = Date.now() - started;
+		// Parse happens AFTER the timer stops — does NOT contribute to providerLatencyMs.
+		try {
+			const verdict = branch.parse(raw);
+			return { ok: true, verdict, raw, inputTokens: null, outputTokens: null, providerLatencyMs };
+		} catch (parseErr) {
+			return {
+				ok: false,
+				error: parseErr instanceof Error ? parseErr : new Error(String(parseErr)),
+				raw,
+				inputTokens: null,
+				outputTokens: null,
+				providerLatencyMs,
 			};
 		}
 	};
@@ -557,9 +572,8 @@ export function createRelayOrchestratorEvaluator(input: {
 					outcome: "parse_error" | "validation_error" | "provider_unavailable" | "unknown_error";
 			  }
 		> {
-			const started = Date.now();
 			const result = await runner(call.payload, branch);
-			const latencyMs = Date.now() - started;
+			const latencyMs = result.providerLatencyMs;
 
 			if (result.ok) {
 				safeEmitOnCall(input.onCall, {

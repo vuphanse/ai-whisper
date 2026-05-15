@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRelayOrchestrator } from "../packages/cli/src/runtime/relay-orchestrator.ts";
+import {
+	createRelayOrchestratorEvaluator,
+	type EvaluatorCallEvent,
+	type OllamaClientLike,
+} from "../packages/cli/src/runtime/relay-orchestrator-evaluator.ts";
 import type { RelayHandoffRecord } from "../packages/broker/src/storage/repositories/relay-handoff-repository.ts";
 
 function makeHandedBack(overrides: Partial<RelayHandoffRecord> = {}): RelayHandoffRecord {
@@ -200,5 +205,52 @@ describe("relay orchestrator", () => {
 				reason: "response is contradictory",
 			}),
 		);
+	});
+});
+
+describe("relay orchestrator — through-orchestrator retry with real evaluator", () => {
+	it("outer retry produces a fresh callGroupId on the second attempt", async () => {
+		let providerCallCount = 0;
+		const client: OllamaClientLike = {
+			chat: vi.fn(() => {
+				providerCallCount += 1;
+				if (providerCallCount === 1) {
+					return Promise.reject(new Error("transient infra glitch"));
+				}
+				return Promise.resolve({
+					message: {
+						content: JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+					},
+				});
+			}),
+		} as OllamaClientLike;
+		const events: EvaluatorCallEvent[] = [];
+		const realEvaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+
+		const broker = makeBrokerDouble({
+			claimable: [makeHandedBack({ handoffId: "handoff_retry_test" })],
+		});
+
+		const orchestrator = createRelayOrchestrator({
+			broker,
+			collabId: "collab_chain",
+			evaluate: realEvaluate,
+			createHandoffId: () => "handoff_retry_next",
+		});
+
+		await orchestrator.pollOnce();
+
+		expect(events).toHaveLength(2);
+		expect(events[0]?.attemptKind).toBe("primary");
+		expect(events[1]?.attemptKind).toBe("primary");
+		// First attempt: provider rejected with plain Error → unknown_error
+		expect(events[0]?.outcome).toBe("unknown_error");
+		// Retry: provider succeeded
+		expect(events[1]?.outcome).toBe("ok");
+		// Critical assertion: distinct callGroupIds across the two attempts
+		expect(events[0]?.callGroupId).not.toBe(events[1]?.callGroupId);
 	});
 });

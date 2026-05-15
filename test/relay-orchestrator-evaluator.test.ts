@@ -634,3 +634,27 @@ describe("createRelayOrchestratorEvaluator — token usage", () => {
 		expect(captured[0]?.outputTokens).toBeNull();
 	});
 });
+
+describe("createRelayOrchestratorEvaluator — latencyMs boundary", () => {
+	it("latencyMs measures the provider call only (excludes parse/zod overhead)", async () => {
+		const client: OllamaClientLike = {
+			chat: vi.fn(() =>
+				Promise.resolve({
+					message: {
+						content: JSON.stringify({ verdict: "done", confidence: 0.9, reason: "ok" }),
+					},
+				}),
+			),
+		} as OllamaClientLike;
+		const events: EvaluatorCallEvent[] = [];
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+			onCall: (e) => events.push(e),
+		});
+		await evaluate({ payload: makePayload(), context: makeContext() });
+
+		expect(events[0]?.latencyMs).toBeGreaterThanOrEqual(0);
+		expect(Number.isFinite(events[0]?.latencyMs ?? NaN)).toBe(true);
+		expect((client.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+	});
+});
