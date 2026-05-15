@@ -16,20 +16,9 @@ describe("cli collab lifecycle", () => {
 			launchMode: "terminals",
 		});
 
-		expect(
-			await runCollabStatus({
-				workspaceRoot,
-				assessBroker: () =>
-					Promise.resolve({
-						pidAlive: true,
-						httpReachable: true,
-						ok: true,
-					}),
-			}),
-		).toMatchObject({
-			active: true,
-			workspaceRoot: realpathSync(workspaceRoot),
-		});
+		const status = await runCollabStatus({ cwd: workspaceRoot });
+		expect(status).toContain("status: active");
+		expect(status).toContain(`workspace: ${realpathSync(workspaceRoot)}`);
 
 		expect(
 			await runCollabStop({

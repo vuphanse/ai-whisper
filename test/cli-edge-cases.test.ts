@@ -1,16 +1,11 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import {
-	getBrokerSqlitePath,
-	getStateFilePath,
-} from "../packages/cli/src/runtime/paths.ts";
-import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("cli edge cases", () => {
@@ -72,51 +67,20 @@ describe("cli edge cases", () => {
 		expect(result).toEqual({ stopped: false, message: "No active collab." });
 	});
 
-	// Edge case 4: status when broker sqlite is corrupted
-	it("status returns active:false when broker sqlite is corrupted", async () => {
-		const workspaceRoot = mkdtempSync(
-			join(tmpdir(), "ai-whisper-edge-corrupt-db-"),
-		);
-
-		writeCliCollabState(getStateFilePath(workspaceRoot), {
-			version: 5,
-			collabId: "collab_20260403000000000",
-			workspaceRoot,
-			broker: {
-				sqlitePath: getBrokerSqlitePath(workspaceRoot),
-				host: "127.0.0.1",
-				port: 4311,
-				pid: 99999,
-			},
-			launch: { mode: "terminals" },
-			ownedSessions: {
-				codex: {
-					sessionId: "session_codex_20260403000000000",
-					providerId: "openai-codex-cli",
-					launchMode: "terminals",
-				},
-				claude: {
-					sessionId: "session_claude_20260403000000000",
-					providerId: "anthropic-claude-cli",
-					launchMode: "terminals",
-				},
-			},
-			startedAt: "2026-04-03T00:00:00.000Z",
-			recovery: {
-				state: "normal",
-				idleAfterRecovery: false,
-				recoveredAt: null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
-		// Overwrite sqlite with invalid bytes
-		writeFileSync(getBrokerSqlitePath(workspaceRoot), "not a sqlite file");
-
-		// Broker daemon assess returns ok:true so we reach the SQLite open step which fails
-		const assessHealthy = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
-		const result = await runCollabStatus({ workspaceRoot, assessBroker: assessHealthy });
-		expect(result.active).toBe(false);
+	// Edge case 4: status when no collab exists for cwd
+	it("status returns a 'no active collab' message when shared DB has no collab for cwd", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "ai-whisper-edge-no-collab-"));
+		const prior = process.env.AI_WHISPER_STATE_ROOT;
+		process.env.AI_WHISPER_STATE_ROOT = tmp;
+		try {
+			const result = await runCollabStatus({ cwd: tmp });
+			expect(result).toContain("no active collab");
+		} finally {
+			if (prior !== undefined) {
+				process.env.AI_WHISPER_STATE_ROOT = prior;
+			} else {
+				delete process.env.AI_WHISPER_STATE_ROOT;
+			}
+		}
 	});
 });

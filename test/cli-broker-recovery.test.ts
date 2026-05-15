@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
@@ -9,7 +9,11 @@ import { runCollabRecover } from "../packages/cli/src/commands/collab/recover.ts
 import { runCollabReconnect } from "../packages/cli/src/commands/collab/reconnect.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { createBrokerRuntime, upsertRecoveryState, upsertWorkspace } from "../packages/broker/src/index.ts";
+import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
+import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
+import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
 
 describe("cli recovery state", () => {
 	it("normalizes v2 state into v3 recovery defaults", () => {
@@ -546,62 +550,38 @@ describe("broker latch", () => {
 });
 
 describe("status command recovery awareness", () => {
-	it("shows recovery_required state in status when broker is unavailable", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-status-recovery-"));
-		const sqlitePath = join(dir, "broker.sqlite");
-		const collabId = "collab_status_recovery";
-		const now = "2026-04-05T16:05:00.000Z";
+	it("shows recovery_required state in status when collab is marked recovery_required", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "ai-whisper-status-recovery-"));
+		process.env.AI_WHISPER_STATE_ROOT = tmp;
+		try {
+			const ws = join(tmp, "ws");
+			mkdirSync(ws);
+			const collabId = "collab_status_recovery";
+			const now = "2026-04-05T16:05:00.000Z";
 
-		// Set up a minimal SQLite database for the collab
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4400 });
-		broker.control.startCollab({
-			collabId,
-			workspaceRoot: dir,
-			displayName: "status recovery test",
-			now,
-		});
-		await broker.stop();
-
-		// Write state file
-		const runtimeDir = join(dir, ".ai-whisper", "runtime");
-		const statePath = join(runtimeDir, "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: {
-				sqlitePath,
-				host: "127.0.0.1",
-				port: 4400,
-				pid: 99123,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: {
-				state: "normal",
+			const sharedDb = openDatabase(getSharedSqlitePath());
+			applyMigrations(sharedDb);
+			const wsId = workspaceIdFromPath(ws);
+			upsertWorkspace(sharedDb, { id: wsId, workspaceRoot: ws, now });
+			sharedDb
+				.prepare(
+					"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, created_at, updated_at) VALUES (?, ?, 'status recovery test', 'active', ?, 'none', ?, ?)",
+				)
+				.run(collabId, ws, wsId, now, now);
+			upsertRecoveryState(sharedDb, {
+				collabId,
+				state: "recovery_required",
 				idleAfterRecovery: false,
 				recoveredAt: null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
+			});
+			sharedDb.close();
 
-		const mockAssessBroker = vi.fn(() => Promise.resolve({
-			pidAlive: false as const,
-			httpReachable: false as const,
-			ok: false as const,
-		}));
-
-		const status = await runCollabStatus({
-			workspaceRoot: dir,
-			assessBroker: mockAssessBroker,
-		});
-
-		expect(status.active).toBe(true);
-		if (status.active) {
-			expect(status.brokerHealth.ok).toBe(false);
-			expect(status.recovery?.state).toBe("recovery_required");
+			const output = await runCollabStatus({ cwd: ws });
+			expect(output).toContain(collabId);
+			expect(output).toContain("recovery: recovery_required");
+			expect(output).toContain("daemon: not running");
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
 		}
 	});
 });

@@ -183,33 +183,13 @@ export function createCli(): Command {
 	collab
 		.command("status")
 		.description("Show current collaboration status")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (opts: WorkspaceOpts) => {
-			const status = await runCollabStatus({ workspaceRoot: opts.workspace });
-			if (!status.active) {
-				console.log(status.message);
-			} else {
-				console.log(`Collab active: ${status.collabId}`);
-
-				if (status.recovery.state === "recovery_required") {
-					console.log("  Recovery required: run `whisper collab recover`");
-				} else if (status.recovery.state === "recovered") {
-					console.log("  Recovered (idle): run `whisper collab reconnect <codex|claude>`");
-				}
-
-				for (const [role, binding] of [["Codex", status.roles.codex], ["Claude", status.roles.claude]] as const) {
-					const health = "healthState" in binding && binding.healthState ? ` (${binding.healthState})` : "";
-					const source = "bindingSource" in binding && binding.bindingSource ? ` [${binding.bindingSource}]` : "";
-					console.log(`  ${role}: ${binding.bindingState}${health}${source}`);
-				}
-
-				console.log(
-					`  Broker health: ${status.brokerHealth.ok ? "ok" : "degraded"}`,
-				);
-				if (status.activeThread) {
-					console.log(`  Active thread: ${status.activeThread.title}`);
-				}
-			}
+		.option("--collab <id>", "Inspect a specific collab id (defaults to the active collab for cwd)")
+		.action((opts: { collab?: string }) => {
+			const output = runCollabStatus({
+				cwd: process.cwd(),
+				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+			});
+			console.log(output);
 		});
 
 	collab

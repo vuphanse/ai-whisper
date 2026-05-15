@@ -1,147 +1,43 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
-import type { SessionBinding } from "@ai-whisper/shared";
-import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
-import { getStateFilePath } from "../../runtime/paths.js";
-import { readCliCollabState } from "../../runtime/state-file.js";
+import Database from "better-sqlite3";
+import { existsSync } from "node:fs";
+import {
+	resolveCollab,
+	CollabResolverError,
+} from "../../runtime/collab-resolver.js";
+import { getSharedSqlitePath } from "../../runtime/state-root.js";
 
-export async function runCollabStatus(input: {
-	workspaceRoot: string;
-	assessBroker?: typeof assessBrokerDaemon;
-}) {
-	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
-
-	if (!state) {
-		return { active: false as const, message: "No active collab." };
+export function runCollabStatus(input: {
+	cwd: string;
+	collabIdOverride?: string;
+}): string {
+	const sqlitePath = getSharedSqlitePath();
+	if (!existsSync(sqlitePath)) {
+		return `no active collab for ${input.cwd}`;
 	}
-
-	const brokerAssess = await (input.assessBroker ?? assessBrokerDaemon)({
-		host: state.broker.host,
-		port: state.broker.port,
-		pid: state.broker.pid,
-	});
-
-	if (!brokerAssess.ok) {
-		// Read last-known bindings from SQLite (accessible without daemon)
-		let lastKnownRoles: {
-			codex: (SessionBinding & { healthState: string | null }) | { agentType: "codex"; bindingState: "unbound"; healthState: null };
-			claude: (SessionBinding & { healthState: string | null }) | { agentType: "claude"; bindingState: "unbound"; healthState: null };
-		};
-		try {
-			const offlineBroker = createBrokerRuntime({
-				sqlitePath: state.broker.sqlitePath,
-				host: state.broker.host,
-				port: state.broker.port,
-				runWorkflowDriver: false,
-				runDiagnosticsSweep: false,
-				runDaemonHeartbeat: false,
-				runBrokerDaemonSweep: false,
-			});
-			const bindings = offlineBroker.control.listSessionBindings(state.collabId);
-			const sessions = offlineBroker.control.listSessions(state.collabId);
-			const codexBinding = bindings.find((b) => b.agentType === "codex");
-			const claudeBinding = bindings.find((b) => b.agentType === "claude");
-			void offlineBroker.stop();
-
-			const offlineHealthState = (binding: SessionBinding | undefined): string | null => {
-				if (!binding?.activeSessionId) return null;
-				return sessions.find((s) => s.sessionId === binding.activeSessionId)?.healthState ?? null;
-			};
-
-			lastKnownRoles = {
-				codex: codexBinding
-					? { ...codexBinding, healthState: offlineHealthState(codexBinding) }
-					: { agentType: "codex" as const, bindingState: "unbound" as const, healthState: null },
-				claude: claudeBinding
-					? { ...claudeBinding, healthState: offlineHealthState(claudeBinding) }
-					: { agentType: "claude" as const, bindingState: "unbound" as const, healthState: null },
-			};
-		} catch {
-			lastKnownRoles = {
-				codex: { agentType: "codex" as const, bindingState: "unbound" as const, healthState: null },
-				claude: { agentType: "claude" as const, bindingState: "unbound" as const, healthState: null },
-			};
-		}
-		return {
-			active: true as const,
-			collabId: state.collabId,
-			workspaceRoot: state.workspaceRoot,
-			recovery: {
-				state: "recovery_required" as const,
-				idleAfterRecovery: state.recovery.idleAfterRecovery,
-			},
-			brokerHealth: { ok: false as const },
-			roles: lastKnownRoles,
-			activeThread: null,
-		};
-	}
-
-	let broker;
+	const db = new Database(sqlitePath, { readonly: true });
 	try {
-		broker = createBrokerRuntime({
-			sqlitePath: state.broker.sqlitePath,
-			host: state.broker.host,
-			port: state.broker.port,
-			runWorkflowDriver: false,
-			runDiagnosticsSweep: false,
-			runDaemonHeartbeat: false,
-			runBrokerDaemonSweep: false,
+		const r = resolveCollab({
+			db,
+			cwd: input.cwd,
+			...(input.collabIdOverride ? { collabIdOverride: input.collabIdOverride } : {}),
 		});
-	} catch {
-		return {
-			active: false as const,
-			message: "Broker database is unavailable.",
-		};
-	}
-
-	const threads = broker.control.listThreads(state.collabId);
-	const activeThread = threads.find((t) => t.active) ?? null;
-	const brokerHealth = broker.getHealth();
-
-	const bindings = broker.control.listSessionBindings(state.collabId);
-	const sessions = broker.control.listSessions(state.collabId);
-	const codexBinding = bindings.find((b) => b.agentType === "codex");
-	const claudeBinding = bindings.find((b) => b.agentType === "claude");
-
-	const turn = broker.control.getRelayTurnState(state.collabId);
-
-	await broker.stop();
-
-	function enrichBinding(
-		binding: SessionBinding | undefined,
-		agentType: "codex" | "claude",
-	): (SessionBinding & { healthState: string | null }) | { agentType: "codex" | "claude"; bindingState: "unbound"; healthState: null } {
-		if (!binding) {
-			return { agentType, bindingState: "unbound" as const, healthState: null };
+		const daemonStr = r.daemon
+			? `daemon: ${r.daemon.host}:${r.daemon.port} pid=${r.daemon.pid}`
+			: "daemon: not running";
+		return [
+			`collabId: ${r.collabId}`,
+			`workspace: ${r.workspaceRoot}`,
+			`status: ${r.status}`,
+			`launch: ${r.launch.mode}${r.launch.tmuxSession ? ` (tmux=${r.launch.tmuxSession})` : ""}`,
+			daemonStr,
+			`recovery: ${r.recovery.state}`,
+		].join("\n");
+	} catch (err) {
+		if (err instanceof CollabResolverError && err.kind === "NoCollabFoundForCwd") {
+			return `no active collab for ${input.cwd}`;
 		}
-		const session = binding.activeSessionId
-			? sessions.find((s) => s.sessionId === binding.activeSessionId)
-			: null;
-		return {
-			...binding,
-			healthState: session?.healthState ?? null,
-		};
+		throw err;
+	} finally {
+		db.close();
 	}
-
-	return {
-		active: true as const,
-		collabId: state.collabId,
-		workspaceRoot: state.workspaceRoot,
-		recovery: state.recovery,
-		brokerHealth,
-		roles: {
-			codex: enrichBinding(codexBinding, "codex"),
-			claude: enrichBinding(claudeBinding, "claude"),
-		},
-		idleAfterRecovery: state.recovery.idleAfterRecovery,
-		activeThread: activeThread
-			? { threadId: activeThread.threadId, title: activeThread.title }
-			: null,
-		turnOwner: turn.turnOwner,
-		waitingAgent: turn.waitingAgent,
-		handoffState: turn.handoffState,
-		orchestratorEnabled: turn.orchestratorEnabled,
-		currentRound: turn.currentRound,
-		maxRounds: turn.maxRounds,
-		chainStatus: turn.chainStatus,
-	};
 }

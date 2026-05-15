@@ -112,17 +112,16 @@ describe("cli binary commands", () => {
 			writeStartedState(input);
 			return Promise.resolve(createStartResult());
 		});
-		runCollabStatusMock.mockResolvedValue({
-			active: true,
-			collabId: "collab_test",
-			roles: {
-				codex: { bindingState: "unbound" },
-				claude: { bindingState: "unbound" },
-			},
-			brokerHealth: { ok: true },
-			recovery: { state: "normal" },
-			activeThread: null,
-		});
+		runCollabStatusMock.mockReturnValue(
+			[
+				"collabId: collab_test",
+				"workspace: /tmp/ws",
+				"status: active",
+				"launch: none",
+				"daemon: not running",
+				"recovery: normal",
+			].join("\n"),
+		);
 
 		const startCli = createCli();
 		await startCli.parseAsync([
@@ -146,8 +145,6 @@ describe("cli binary commands", () => {
 				"whisper",
 				"collab",
 				"status",
-				"--workspace",
-				workspaceRoot,
 			]);
 		} finally {
 			console.log = originalLog;

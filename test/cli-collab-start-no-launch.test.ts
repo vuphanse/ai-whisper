@@ -8,27 +8,16 @@ import { createBrokerRuntime } from "@ai-whisper/broker";
 import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 
 describe("cli collab start --no-launch", () => {
-	it("creates an active collab with both roles unbound", async () => {
+	it("reports active status after start", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-"));
 		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T13:00:00.000Z",
 			launchMode: "none",
 		});
-		const status = await runCollabStatus({
-			workspaceRoot,
-			assessBroker: () =>
-				Promise.resolve({
-					pidAlive: true,
-					httpReachable: true,
-					ok: true,
-				}),
-		});
-		expect(status.active).toBe(true);
-		if (status.active) {
-			expect(status.roles.codex).toMatchObject({ bindingState: "unbound" });
-			expect(status.roles.claude).toMatchObject({ bindingState: "unbound" });
-		}
+		const status = await runCollabStatus({ cwd: workspaceRoot });
+		expect(status).toContain("status: active");
+		expect(status).toContain("launch: none");
 	});
 
 	it("awaits waitForReady before resolving the start call", async () => {
