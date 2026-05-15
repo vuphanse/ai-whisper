@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { openDatabase } from "@ai-whisper/broker";
 import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
@@ -8,7 +9,20 @@ import { runCollabStart } from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
 import { runCollabTell } from "./commands/collab/tell.js";
-import { chooseLaunchMode, detectTmux } from "./runtime/launcher.js";
+import {
+	assessBrokerDaemon,
+	spawnBrokerDaemon,
+} from "./runtime/broker-daemon.js";
+import {
+	chooseLaunchMode,
+	detectTmux,
+	launchSessions,
+} from "./runtime/launcher.js";
+import { getStateFilePath } from "./runtime/paths.js";
+import { isPortFree } from "./runtime/port-utils.js";
+import { getSharedSqlitePath } from "./runtime/state-root.js";
+import { writeCliCollabState } from "./runtime/state-file.js";
+import { canonicalWorkspaceRoot } from "./runtime/workspace-id.js";
 import { runWorkflowStart } from "./commands/workflow/start.js";
 import { runWorkflowList } from "./commands/workflow/list.js";
 import { runWorkflowInspect } from "./commands/workflow/inspect.js";
@@ -60,17 +74,106 @@ export function createCli(): Command {
 				launchMode === "tmux" &&
 				Boolean(process.stdin.isTTY) &&
 				Boolean(process.stdout.isTTY);
-			const result = await runCollabStart({
-				workspaceRoot: opts.workspace,
-				now: new Date().toISOString(),
+			const workspaceRoot = canonicalWorkspaceRoot(opts.workspace);
+			const startedAt = new Date().toISOString();
+			const tmuxSessionName =
+				launchMode === "tmux" ? undefined : undefined; // resolved below from collabId
+			const r = await runCollabStart({
+				cwd: opts.workspace,
+				displayName: "phase5",
 				launchMode,
-				attachTmux,
+				...(tmuxSessionName ? { tmuxSession: tmuxSessionName } : {}),
+				now: () => new Date().toISOString(),
+				isPortFreeOs: (port: number) => isPortFree(port),
+				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
+					spawnBrokerDaemon(sqlitePath, host, port, collabId),
+				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
+					const start = Date.now();
+					const delayMs = 100;
+					while (Date.now() - start < timeoutMs) {
+						const db = openDatabase(getSharedSqlitePath());
+						const row = db
+							.prepare(
+								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
+							)
+							.get(collabId) as { pid: number | null } | undefined;
+						db.close();
+						const pid = row?.pid ?? 0;
+						if (pid > 0) {
+							const health = await assessBrokerDaemon({
+								host,
+								port,
+								pid,
+							});
+							if (health.ok) return true;
+						}
+						await new Promise<void>((resolve) =>
+							setTimeout(resolve, delayMs),
+						);
+					}
+					return false;
+				},
+				signalProcess: (pid, signal) => {
+					try {
+						process.kill(pid, signal);
+					} catch {
+						// ignore
+					}
+				},
 			});
+
+			// LEGACY BRIDGE (kept until Task 24): writeCliCollabState
+			const sharedSqlitePath = getSharedSqlitePath();
+			const tmuxSession =
+				launchMode === "tmux" ? `whisper-${r.collabId}` : undefined;
+			writeCliCollabState(getStateFilePath(workspaceRoot), {
+				version: 5,
+				collabId: r.collabId,
+				workspaceRoot,
+				broker: {
+					sqlitePath: sharedSqlitePath,
+					host: r.host as "127.0.0.1",
+					port: r.port,
+					pid: r.pid,
+				},
+				launch: {
+					mode: launchMode,
+					...(tmuxSession ? { tmuxSession } : {}),
+				},
+				ownedSessions: {},
+				startedAt,
+				recovery: {
+					state: "normal",
+					idleAfterRecovery: false,
+					recoveredAt: null,
+				},
+				adoptedSessions: {},
+				mountedSessions: {},
+			});
+
+			// THEN launchSessions (unmigrated mount panes still read state.json).
+			if (launchMode !== "none") {
+				launchSessions({
+					launchMode,
+					...(attachTmux !== undefined ? { attachTmux } : {}),
+					collabId: r.collabId,
+					workspaceRoot,
+					brokerSqlitePath: sharedSqlitePath,
+					brokerHost: r.host,
+					brokerPort: r.port,
+				});
+			}
+
 			console.log(
-				`Collab started: ${result.collabId} (launch: ${result.launchMode})`,
+				`Collab started: ${r.collabId} (launch: ${launchMode})`,
 			);
+			if (launchMode === "none") {
+				console.log(
+					"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
+				);
+			}
 			if (launchMode === "tmux" && !attachTmux) {
-				const session = `whisper-${result.collabId}`;
+				const session = `whisper-${r.collabId}`;
 				console.log(
 					`\nNot attached (stdin/stdout is not a TTY). To view the tmux session, run:\n  tmux attach -t ${session}`,
 				);

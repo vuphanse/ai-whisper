@@ -1,196 +1,230 @@
 import { mkdirSync } from "node:fs";
-import { dirname as pathDirname } from "node:path";
-import { createBrokerRuntime } from "@ai-whisper/broker";
 import {
-	assessBrokerDaemon,
-	spawnBrokerDaemon,
-} from "../../runtime/broker-daemon.js";
+	applyMigrations,
+	deleteBrokerDaemonByCollab,
+	getBrokerDaemonByCollab,
+	insertBrokerDaemon,
+	openDatabase,
+	upsertRecoveryState,
+	upsertWorkspace,
+} from "@ai-whisper/broker";
 import { createCliCollabId } from "../../runtime/id-factory.js";
+import type { LaunchMode } from "../../runtime/launcher.js";
+import { DEFAULT_PORT_RANGE } from "../../runtime/port-allocator.js";
 import {
-	launchSessions,
-	type ExecFn,
-	type LaunchMode,
-	type SpawnFn,
-} from "../../runtime/launcher.js";
-import { getBrokerSqlitePath, getStateFilePath } from "../../runtime/paths.js";
+	getSharedSqlitePath,
+	getStateRoot,
+} from "../../runtime/state-root.js";
 import {
-	findPortOwnerPid as defaultFindPortOwnerPid,
-	isPortFree as defaultIsPortFree,
-} from "../../runtime/port-utils.js";
-import {
-	readCliCollabState,
-	writeCliCollabState,
-} from "../../runtime/state-file.js";
+	canonicalWorkspaceRoot,
+	workspaceIdFromPath,
+} from "../../runtime/workspace-id.js";
 
-async function waitForBrokerReady(input: {
-	host: string;
+export interface CollabStartResult {
+	collabId: string;
 	port: number;
+	host: string;
 	pid: number;
-	assessBroker?: typeof assessBrokerDaemon;
-	sleep?: (ms: number) => Promise<void>;
-	attempts?: number;
-	delayMs?: number;
-}) {
-	const assess = input.assessBroker ?? assessBrokerDaemon;
-	const sleep =
-		input.sleep ??
-		((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-	const attempts = input.attempts ?? 20;
-	const delayMs = input.delayMs ?? 100;
-
-	for (let attempt = 0; attempt < attempts; attempt += 1) {
-		const health = await assess({
-			host: input.host,
-			port: input.port,
-			pid: input.pid,
-		});
-		if (health.ok) {
-			return;
-		}
-		await sleep(delayMs);
-	}
-
-	throw new Error("Broker daemon failed to become ready.");
 }
 
-export async function runCollabStart(input: {
-	workspaceRoot: string;
-	now: string;
+export interface CollabStartOpts {
+	cwd: string;
+	displayName: string;
 	launchMode: LaunchMode;
-	attachTmux?: boolean;
-	spawn?: SpawnFn;
-	exec?: ExecFn;
-	spawnBroker?: (sqlitePath: string, host: string, port: number, collabId: string) => number;
-	assessBroker?: typeof assessBrokerDaemon;
-	sleep?: (ms: number) => Promise<void>;
-	isPortFree?: (port: number) => Promise<boolean>;
-	findPortOwnerPid?: (port: number) => number | null;
-}) {
-	const statePath = getStateFilePath(input.workspaceRoot);
-	const existing = readCliCollabState(statePath);
-	if (existing) {
-		throw new Error(
-			`A collab is already active (${existing.collabId}). Run \`whisper collab stop\` first.`,
-		);
-	}
+	tmuxSession?: string;
+	explicitPort?: number;
+	portRange?: readonly [number, number];
+	now: () => string;
+	isPortFreeOs: (port: number) => Promise<boolean>;
+	spawnBroker: (input: {
+		collabId: string;
+		host: string;
+		port: number;
+		sqlitePath: string;
+	}) => number;
+	waitForReady: (input: {
+		host: string;
+		port: number;
+		collabId: string;
+		timeoutMs: number;
+	}) => Promise<boolean>;
+	signalProcess: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
+	readyTimeoutMs?: number;
+}
 
-	const sqlitePath = getBrokerSqlitePath(input.workspaceRoot);
-	const brokerHost = "127.0.0.1";
-	const brokerPort = 4311;
+const READY_TIMEOUT_DEFAULT = 30_000;
 
-	const isPortFree = input.isPortFree ?? defaultIsPortFree;
-	const findPortOwnerPid =
-		input.findPortOwnerPid ?? defaultFindPortOwnerPid;
-	if (!(await isPortFree(brokerPort))) {
-		const ownerPid = findPortOwnerPid(brokerPort);
-		const ownerHint = ownerPid !== null ? ` (pid ${ownerPid})` : "";
-		throw new Error(
-			`Port ${brokerPort} is already in use${ownerHint}. A stale broker daemon may be running. Run \`whisper collab stop\` first, or kill the process manually.`,
-		);
-	}
-	const sqliteDir = pathDirname(sqlitePath);
-	mkdirSync(sqliteDir, { recursive: true });
+export async function runCollabStart(
+	opts: CollabStartOpts,
+): Promise<CollabStartResult> {
+	const root = getStateRoot();
+	mkdirSync(root, { recursive: true });
+	const sqlitePath = getSharedSqlitePath();
+	const db = openDatabase(sqlitePath);
+	applyMigrations(db);
 
-	// Use in-process broker for initial setup (create collab, register sessions).
-	// This broker is torn down once the daemon takes over the SQLite + port, so
-	// it must not run any background drivers — the daemon owns those.
-	const broker = createBrokerRuntime({
-		sqlitePath,
-		host: brokerHost,
-		port: brokerPort,
-		runWorkflowDriver: false,
-		runDiagnosticsSweep: false,
-		runDaemonHeartbeat: false,
-		runBrokerDaemonSweep: false,
-	});
+	const workspaceRoot = canonicalWorkspaceRoot(opts.cwd);
+	const workspaceId = workspaceIdFromPath(opts.cwd);
+	const now = opts.now();
+	const collabId = createCliCollabId(now);
+	const host = "127.0.0.1";
 
-	const collabId = createCliCollabId(input.now);
-
-	const orchestratorEnabled = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED !== "0";
+	const orchestratorEnabled =
+		process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED !== "0";
 	const orchestratorMaxRounds = Math.max(
 		1,
 		Number(process.env.AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS ?? "3") || 3,
 	);
 
-	broker.control.startCollab({
-		collabId,
-		workspaceRoot: input.workspaceRoot,
-		displayName: "phase5",
-		orchestratorEnabled,
-		orchestratorMaxRounds,
-		now: input.now,
-	});
+	// Phase A: OS-probe candidate ports outside the tx (async).
+	const range = opts.portRange ?? DEFAULT_PORT_RANGE;
+	const osFreeCandidates: number[] = [];
+	if (opts.explicitPort !== undefined) {
+		if (!(await opts.isPortFreeOs(opts.explicitPort))) {
+			db.close();
+			throw new Error(
+				`port ${opts.explicitPort} is in use by another process`,
+			);
+		}
+		osFreeCandidates.push(opts.explicitPort);
+	} else {
+		for (let p = range[0]; p <= range[1]; p++) {
+			if (await opts.isPortFreeOs(p)) osFreeCandidates.push(p);
+		}
+		if (osFreeCandidates.length === 0) {
+			db.close();
+			throw new Error(
+				`No OS-free port in range [${range[0]}, ${range[1]}]`,
+			);
+		}
+	}
 
-	// Close in-process broker so the daemon can claim the SQLite file and port
-	await broker.stop();
+	// Phase B: registry check + port pick + insert atomically.
+	let allocatedPort = 0;
+	const tx = db.transaction(() => {
+		upsertWorkspace(db, { id: workspaceId, workspaceRoot, now });
 
-	const startBroker = input.spawnBroker ?? spawnBrokerDaemon;
-	const brokerPid = startBroker(sqlitePath, brokerHost, brokerPort, collabId);
-	await waitForBrokerReady({
-		host: brokerHost,
-		port: brokerPort,
-		pid: brokerPid,
-		...(input.assessBroker ? { assessBroker: input.assessBroker } : {}),
-		...(input.sleep ? { sleep: input.sleep } : {}),
-	});
+		const active = db
+			.prepare(
+				"SELECT collab_id FROM collab WHERE workspace_id = ? AND status = 'active' LIMIT 1",
+			)
+			.get(workspaceId) as { collab_id: string } | undefined;
+		if (active) {
+			throw new Error(
+				`active collab ${active.collab_id} already exists for workspace ${workspaceRoot}`,
+			);
+		}
 
-	const tmuxSession =
-		input.launchMode === "tmux" ? `whisper-${collabId}` : undefined;
+		const takenPorts = new Set(
+			(
+				db
+					.prepare("SELECT port FROM broker_daemon")
+					.all() as Array<{ port: number }>
+			).map((r) => r.port),
+		);
+		const picked = osFreeCandidates.find((p) => !takenPorts.has(p));
+		if (picked === undefined) throw new Error("ALL_CANDIDATES_TAKEN");
+		if (
+			opts.explicitPort !== undefined &&
+			picked !== opts.explicitPort
+		) {
+			throw new Error(
+				`port ${opts.explicitPort} already in use by another daemon`,
+			);
+		}
+		allocatedPort = picked;
 
-	// Write state file BEFORE launching panes so mount/relay-monitor panes can read it.
-	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-		version: 5,
-		collabId,
-		workspaceRoot: input.workspaceRoot,
-		broker: {
-			sqlitePath,
-			host: brokerHost,
-			port: brokerPort,
-			pid: brokerPid,
-		},
-		launch: {
-			mode: input.launchMode,
-			...(tmuxSession ? { tmuxSession } : {}),
-		},
-		ownedSessions: {},
-		startedAt: input.now,
-		recovery: {
+		db.prepare(
+			"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at, orchestrator_enabled, orchestrator_max_rounds) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)",
+		).run(
+			collabId,
+			workspaceRoot,
+			opts.displayName,
+			workspaceId,
+			opts.launchMode,
+			opts.tmuxSession ?? null,
+			now,
+			now,
+			orchestratorEnabled ? 1 : 0,
+			orchestratorMaxRounds,
+		);
+		insertBrokerDaemon(db, {
+			collabId,
+			host,
+			port: allocatedPort,
+			startedAt: now,
+			lastHeartbeatAt: now,
+		});
+		upsertRecoveryState(db, {
+			collabId,
 			state: "normal",
 			idleAfterRecovery: false,
 			recoveredAt: null,
-		},
-		adoptedSessions: {},
-		mountedSessions: {},
+		});
 	});
 
-	if (input.launchMode === "none") {
-		console.log(
-			"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
-		);
-		return {
-			collabId,
-			launchMode: "none" as const,
-			launched: false as const,
-			brokerPid,
-		};
+	try {
+		tx.immediate();
+	} catch (err) {
+		if ((err as Error).message === "ALL_CANDIDATES_TAKEN") {
+			db.close();
+			throw new Error(
+				`every OS-free port in [${range[0]}, ${range[1]}] is reserved in the registry`,
+			);
+		}
+		db.close();
+		throw err;
 	}
 
-	const launch = launchSessions({
-		launchMode: input.launchMode,
-		...(input.attachTmux !== undefined ? { attachTmux: input.attachTmux } : {}),
+	const childPid = opts.spawnBroker({
 		collabId,
-		workspaceRoot: input.workspaceRoot,
-		brokerSqlitePath: sqlitePath,
-		brokerHost,
-		brokerPort,
-		...(input.spawn ? { spawn: input.spawn } : {}),
-		...(input.exec ? { exec: input.exec } : {}),
+		host,
+		port: allocatedPort,
+		sqlitePath,
 	});
 
+	const cleanupOnFailure = (msg: string): never => {
+		const cleanup = db.transaction(() => {
+			deleteBrokerDaemonByCollab(db, collabId);
+			db.prepare(
+				"UPDATE collab SET status='stopped', stopped_at=?, updated_at=? WHERE collab_id = ?",
+			).run(opts.now(), opts.now(), collabId);
+		});
+		cleanup.immediate();
+		try {
+			opts.signalProcess(childPid, "SIGTERM");
+		} catch {
+			// ignore
+		}
+		db.close();
+		throw new Error(msg);
+	};
+
+	const ready = await opts.waitForReady({
+		host,
+		port: allocatedPort,
+		collabId,
+		timeoutMs: opts.readyTimeoutMs ?? READY_TIMEOUT_DEFAULT,
+	});
+	if (!ready) {
+		cleanupOnFailure(
+			`broker readiness check timed out for collab ${collabId}`,
+		);
+	}
+
+	const finalRow = getBrokerDaemonByCollab(db, collabId);
+	if (!finalRow || finalRow.pid === null) {
+		cleanupOnFailure(
+			`daemon did not write its PID for collab ${collabId}`,
+		);
+	}
+
+	db.close();
 	return {
 		collabId,
-		launchMode: launch.launchMode,
-		launched: launch.launched,
-		brokerPid,
+		port: allocatedPort,
+		host,
+		// biome-ignore lint/style/noNonNullAssertion: guarded by cleanupOnFailure
+		pid: finalRow!.pid!,
 	};
 }
