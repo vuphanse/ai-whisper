@@ -40,6 +40,7 @@ export async function runCollabTell(input: {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 
 	const artifactPaths = normalizeArtifactPaths(

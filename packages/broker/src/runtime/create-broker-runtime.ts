@@ -10,6 +10,10 @@ import {
 	createBrokerEventBus,
 	type BrokerEventBus,
 } from "./broker-event-bus.js";
+import {
+	defaultIsAlive,
+	sweepStaleBrokerDaemons,
+} from "./broker-daemon-sweep.js";
 import { createDaemonHeartbeat } from "./daemon-heartbeat.js";
 import { createDiagnosticsSweep } from "./diagnostics-sweep.js";
 import { createWorkflowDriver } from "./workflow-driver.js";
@@ -66,6 +70,24 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			})
 		: null;
 	heartbeat?.start();
+	const daemonSweepIntervalMs = Number(
+		process.env.AI_WHISPER_DAEMON_SWEEP_MS ?? 60_000,
+	);
+	const daemonStaleMs = Number(
+		process.env.AI_WHISPER_DAEMON_STALE_MS ?? 90_000,
+	);
+	let daemonSweepTimer: NodeJS.Timeout | null = null;
+	if (config.runBrokerDaemonSweep) {
+		daemonSweepTimer = setInterval(() => {
+			const cutoff = new Date(Date.now() - daemonStaleMs).toISOString();
+			void sweepStaleBrokerDaemons({
+				db,
+				cutoffIso: cutoff,
+				isAlive: defaultIsAlive,
+			});
+		}, daemonSweepIntervalMs);
+		daemonSweepTimer.unref();
+	}
 	const app = createBrokerApp({
 		getStatus: () => ({
 			version: 1 as const,
@@ -91,6 +113,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 			});
 		},
 		async stop(): Promise<void> {
+			if (daemonSweepTimer) clearInterval(daemonSweepTimer);
 			heartbeat?.stop();
 			diagnosticsSweep?.stop();
 			workflowDriver?.stop();

@@ -38,6 +38,7 @@ export async function runCollabRecover(input: {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 
 	const prepared = broker.control.prepareCollabRecovery({

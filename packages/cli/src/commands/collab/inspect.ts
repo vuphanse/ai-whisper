@@ -63,6 +63,7 @@ export async function runCollabInspect(input: {
 			runWorkflowDriver: false,
 			runDiagnosticsSweep: false,
 			runDaemonHeartbeat: false,
+			runBrokerDaemonSweep: false,
 		});
 
 		try {

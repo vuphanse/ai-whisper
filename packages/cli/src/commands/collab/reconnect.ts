@@ -33,6 +33,7 @@ export async function runCollabReconnect(input: {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 
 	const current = broker.control

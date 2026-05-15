@@ -34,6 +34,7 @@ export async function runCollabStatus(input: {
 				runWorkflowDriver: false,
 				runDiagnosticsSweep: false,
 				runDaemonHeartbeat: false,
+				runBrokerDaemonSweep: false,
 			});
 			const bindings = offlineBroker.control.listSessionBindings(state.collabId);
 			const sessions = offlineBroker.control.listSessions(state.collabId);
@@ -83,6 +84,7 @@ export async function runCollabStatus(input: {
 			runWorkflowDriver: false,
 			runDiagnosticsSweep: false,
 			runDaemonHeartbeat: false,
+			runBrokerDaemonSweep: false,
 		});
 	} catch {
 		return {

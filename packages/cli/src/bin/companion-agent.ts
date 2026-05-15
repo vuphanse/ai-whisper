@@ -45,6 +45,7 @@ async function main(): Promise<void> {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 	const provider = createProviderForTarget(agentArg);
 	const interactiveSession = createInteractiveSessionForTarget({

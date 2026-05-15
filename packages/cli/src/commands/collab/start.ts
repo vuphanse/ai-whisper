@@ -101,6 +101,7 @@ export async function runCollabStart(input: {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 
 	const collabId = createCliCollabId(input.now);

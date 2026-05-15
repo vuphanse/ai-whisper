@@ -26,6 +26,7 @@ export async function connectToWorkspaceBroker(
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 
 	return { broker, collabId: state.collabId };

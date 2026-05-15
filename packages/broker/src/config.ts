@@ -19,6 +19,11 @@ export const brokerConfigSchema = z.object({
 	// Transient CLI brokers must pass `false` so their inspections do not
 	// overwrite last_heartbeat_at for a collab they do not own.
 	runDaemonHeartbeat: z.boolean().default(true),
+	// Same rationale as runDaemonHeartbeat: only the authoritative broker
+	// daemon should run the broker_daemon stale-row sweep. Transient CLI
+	// brokers must pass `false` so their short-lived processes do not spin up
+	// a maintenance timer that ticks until stop().
+	runBrokerDaemonSweep: z.boolean().default(true),
 });
 
 export type BrokerConfig = z.input<typeof brokerConfigSchema>;

@@ -42,6 +42,7 @@ export async function runCollabMount(input: {
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
 	let brokerHandedOff = false;
 	try {

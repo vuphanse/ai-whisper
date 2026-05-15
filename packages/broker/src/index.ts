@@ -9,6 +9,11 @@ export {
 	createBrokerRuntime,
 	type BrokerRuntime,
 } from "./runtime/create-broker-runtime.js";
+export {
+	sweepStaleBrokerDaemons,
+	defaultIsAlive,
+	type IsAliveResult,
+} from "./runtime/broker-daemon-sweep.js";
 export { applyMigrations } from "./storage/apply-migrations.js";
 export { openDatabase } from "./storage/open-database.js";
 export { getBrokerState } from "./storage/repositories/broker-state-repository.js";
