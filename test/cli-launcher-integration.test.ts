@@ -2,30 +2,27 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
-import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("cli launcher integration", () => {
-	it("start returns launched session info with chosen launch mode", async () => {
+	it("start returns broker connection info for the chosen launch mode", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-launcher-int-"),
 		);
 
-		const result = await runCollabStart({
+		const result = await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
-			spawn: () => {},
 		});
 
 		expect(result).toMatchObject({
 			collabId: expect.stringMatching(/^collab_/) as unknown,
-			launchMode: "terminals",
-			launched: true,
+			host: "127.0.0.1",
+			port: expect.any(Number) as number,
+			pid: expect.any(Number) as number,
 		});
 		// Start no longer pre-registers sessions — mount runtime binds them when
 		// the mount panes finish claiming their TTY.
@@ -38,14 +35,10 @@ describe("cli launcher integration", () => {
 			join(tmpdir(), "ai-whisper-launcher-state-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "tmux",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
-			spawn: () => {},
-			exec: () => {},
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));

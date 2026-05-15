@@ -3,9 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 import { registerLaunchedBindings } from "./helpers/register-launched-bindings.ts";
 
 const assessBroker = vi.fn(() => Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }));
@@ -18,13 +17,10 @@ describe("cli collab tell repeat", () => {
 		const planPath = join(workspaceRoot, "plan.md");
 		writeFileSync(planPath, "# Plan\n");
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,

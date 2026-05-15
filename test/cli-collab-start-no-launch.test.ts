@@ -2,23 +2,28 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { createBrokerRuntime } from "@ai-whisper/broker";
-import { getBrokerSqlitePath } from "../packages/cli/src/runtime/paths.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 
 describe("cli collab start --no-launch", () => {
 	it("creates an active collab with both roles unbound", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-"));
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T13:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: vi.fn().mockResolvedValue({ pidAlive: true, httpReachable: true, ok: true }) as never,
 		});
-		const status = await runCollabStatus({ workspaceRoot });
+		const status = await runCollabStatus({
+			workspaceRoot,
+			assessBroker: () =>
+				Promise.resolve({
+					pidAlive: true,
+					httpReachable: true,
+					ok: true,
+				}),
+		});
 		expect(status.active).toBe(true);
 		if (status.active) {
 			expect(status.roles.codex).toMatchObject({ bindingState: "unbound" });
@@ -26,65 +31,55 @@ describe("cli collab start --no-launch", () => {
 		}
 	});
 
-	it("prints relay-monitor instruction in no-launch mode", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-msg-"));
-		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		try {
-			await runCollabStart({
-				workspaceRoot,
-				now: "2026-04-05T13:00:00.000Z",
-				launchMode: "none",
-				spawnBroker: fakeBrokerSpawn(),
-				assessBroker: vi.fn().mockResolvedValue({ pidAlive: true, httpReachable: true, ok: true }) as never,
-			});
-			const allOutput = logSpy.mock.calls.flat().join("\n");
-			expect(allOutput).toContain("relay-monitor");
-		} finally {
-			logSpy.mockRestore();
-		}
-	});
+	it("awaits waitForReady before resolving the start call", async () => {
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-no-launch-ready-"),
+		);
+		let waitForReadyResolved = false;
+		const waitForReady = vi.fn(async () => {
+			await new Promise<void>((r) => setTimeout(r, 10));
+			waitForReadyResolved = true;
+			return true;
+		});
 
-	it("waits for the broker daemon to become healthy before finishing no-launch startup", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-ready-"));
-		const assessBroker = vi
-			.fn()
-			.mockResolvedValueOnce({ pidAlive: true, httpReachable: false, ok: false })
-			.mockResolvedValueOnce({ pidAlive: true, httpReachable: false, ok: false })
-			.mockResolvedValueOnce({ pidAlive: true, httpReachable: true, ok: true });
-		const sleep = vi.fn(() => Promise.resolve());
-
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T13:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: assessBroker as never,
-			sleep,
+			waitForReady,
 		});
 
-		expect(assessBroker).toHaveBeenCalledTimes(3);
-		expect(sleep).toHaveBeenCalledTimes(2);
+		expect(waitForReady).toHaveBeenCalledTimes(1);
+		expect(waitForReadyResolved).toBe(true);
 	});
 
 	it("defaults orchestratorEnabled to true when env var is unset", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-orch-default-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-no-launch-orch-default-"),
+		);
 		const prior = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
 		delete process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
 
 		try {
-			const result = await runCollabStart({
+			const result = await startCollabForTest({
 				workspaceRoot,
 				now: "2026-04-29T00:00:00.000Z",
 				launchMode: "none",
-				spawnBroker: fakeBrokerSpawn(),
-				assessBroker: healthyBrokerAssess,
 			});
 
-			const sqlitePath = getBrokerSqlitePath(workspaceRoot);
-			const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4311 });
+			const broker = createBrokerRuntime({
+				sqlitePath: getSharedSqlitePath(),
+				host: "127.0.0.1",
+				port: result.port,
+				runWorkflowDriver: false,
+				runDiagnosticsSweep: false,
+				runDaemonHeartbeat: false,
+				runBrokerDaemonSweep: false,
+			});
 			expect(broker.control.getCollab(result.collabId)).toEqual(
 				expect.objectContaining({ orchestratorEnabled: true }),
 			);
+			await broker.stop();
 		} finally {
 			if (prior !== undefined) {
 				process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = prior;
@@ -93,24 +88,32 @@ describe("cli collab start --no-launch", () => {
 	});
 
 	it("disables orchestrator when env var is explicitly '0'", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-no-launch-orch-off-"));
+		const workspaceRoot = mkdtempSync(
+			join(tmpdir(), "ai-whisper-no-launch-orch-off-"),
+		);
 		const prior = process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
 		process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = "0";
 
 		try {
-			const result = await runCollabStart({
+			const result = await startCollabForTest({
 				workspaceRoot,
 				now: "2026-04-29T00:00:00.000Z",
 				launchMode: "none",
-				spawnBroker: fakeBrokerSpawn(),
-				assessBroker: healthyBrokerAssess,
 			});
 
-			const sqlitePath = getBrokerSqlitePath(workspaceRoot);
-			const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4311 });
+			const broker = createBrokerRuntime({
+				sqlitePath: getSharedSqlitePath(),
+				host: "127.0.0.1",
+				port: result.port,
+				runWorkflowDriver: false,
+				runDiagnosticsSweep: false,
+				runDaemonHeartbeat: false,
+				runBrokerDaemonSweep: false,
+			});
 			expect(broker.control.getCollab(result.collabId)).toEqual(
 				expect.objectContaining({ orchestratorEnabled: false }),
 			);
+			await broker.stop();
 		} finally {
 			if (prior !== undefined) {
 				process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED = prior;
@@ -126,22 +129,28 @@ describe("cli collab start --no-launch", () => {
 		process.env.AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS = "5";
 
 		try {
-			const result = await runCollabStart({
+			const result = await startCollabForTest({
 				workspaceRoot,
 				now: "2026-04-11T00:00:00.000Z",
 				launchMode: "none",
-				spawnBroker: fakeBrokerSpawn(),
-				assessBroker: healthyBrokerAssess,
 			});
 
-			const sqlitePath = getBrokerSqlitePath(workspaceRoot);
-			const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4311 });
+			const broker = createBrokerRuntime({
+				sqlitePath: getSharedSqlitePath(),
+				host: "127.0.0.1",
+				port: result.port,
+				runWorkflowDriver: false,
+				runDiagnosticsSweep: false,
+				runDaemonHeartbeat: false,
+				runBrokerDaemonSweep: false,
+			});
 			expect(broker.control.getCollab(result.collabId)).toEqual(
 				expect.objectContaining({
 					orchestratorEnabled: true,
 					orchestratorMaxRounds: 5,
 				}),
 			);
+			await broker.stop();
 		} finally {
 			delete process.env.AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED;
 			delete process.env.AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS;

@@ -2,12 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
-import {
-	fakeBrokerSpawn,
-	healthyBrokerAssess,
-} from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("cli collab stop port fallback", () => {
 	it("kills port owner when state pid is already dead but port still held", async () => {
@@ -15,12 +11,10 @@ describe("cli collab stop port fallback", () => {
 			join(tmpdir(), "ai-whisper-stop-port-fallback-"),
 		);
 
-		await runCollabStart({
+		const result = await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-19T05:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
 		});
 
 		const killCalls: Array<{ pid: number; signal: NodeJS.Signals }> = [];
@@ -39,7 +33,7 @@ describe("cli collab stop port fallback", () => {
 			return portHeld ? stalePortOwner : null;
 		});
 
-		const result = await runCollabStop({
+		const stopResult = await runCollabStop({
 			workspaceRoot,
 			killProcess,
 			pidAlive,
@@ -48,9 +42,9 @@ describe("cli collab stop port fallback", () => {
 			sleep: async () => {},
 		});
 
-		expect(result.stopped).toBe(true);
-		// lookup + kill of the port owner must have happened
-		expect(findPortOwnerPid).toHaveBeenCalledWith(4311);
+		expect(stopResult.stopped).toBe(true);
+		// lookup + kill of the port owner must have happened on the allocated port
+		expect(findPortOwnerPid).toHaveBeenCalledWith(result.port);
 		expect(killCalls.some((c) => c.pid === 99999)).toBe(true);
 	});
 
@@ -59,12 +53,10 @@ describe("cli collab stop port fallback", () => {
 			join(tmpdir(), "ai-whisper-stop-sigkill-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-19T05:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
 		});
 
 		const killed: Array<{ pid: number; signal: NodeJS.Signals }> = [];

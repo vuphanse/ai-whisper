@@ -28,9 +28,10 @@ vi.mock("../packages/cli/src/commands/collab/stop.ts", () => ({
 import { createCli } from "../packages/cli/src/create-cli.ts";
 
 type StartArgs = {
-	workspaceRoot: string;
-	now: string;
+	cwd: string;
+	displayName: string;
 	launchMode: "none" | "terminals" | "tmux";
+	now: () => string;
 };
 
 type StopArgs = {
@@ -38,13 +39,13 @@ type StopArgs = {
 };
 
 function writeStartedState(input: StartArgs) {
-	writeCliCollabState(getStateFilePath(input.workspaceRoot), {
+	writeCliCollabState(getStateFilePath(input.cwd), {
 		version: 5,
 		collabId: "collab_test",
-		workspaceRoot: input.workspaceRoot,
+		workspaceRoot: input.cwd,
 		broker: {
 			sqlitePath: join(
-				input.workspaceRoot,
+				input.cwd,
 				".ai-whisper",
 				"runtime",
 				"broker.sqlite",
@@ -55,7 +56,7 @@ function writeStartedState(input: StartArgs) {
 		},
 		launch: { mode: input.launchMode },
 		ownedSessions: {},
-		startedAt: input.now,
+		startedAt: input.now(),
 		recovery: {
 			state: "normal",
 			idleAfterRecovery: false,
@@ -66,12 +67,12 @@ function writeStartedState(input: StartArgs) {
 	});
 }
 
-function createStartResult(input: StartArgs) {
+function createStartResult() {
 	return {
 		collabId: "collab_test",
-		launchMode: input.launchMode,
-		launched: true,
-		brokerPid: 99123,
+		host: "127.0.0.1" as const,
+		port: 4311,
+		pid: 99123,
 	};
 }
 
@@ -86,7 +87,7 @@ describe("cli binary commands", () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-bin-start-"));
 		runCollabStartMock.mockImplementation((input: StartArgs) => {
 			writeStartedState(input);
-			return Promise.resolve(createStartResult(input));
+			return Promise.resolve(createStartResult());
 		});
 
 		const cli = createCli();
@@ -109,7 +110,7 @@ describe("cli binary commands", () => {
 
 		runCollabStartMock.mockImplementation((input: StartArgs) => {
 			writeStartedState(input);
-			return Promise.resolve(createStartResult(input));
+			return Promise.resolve(createStartResult());
 		});
 		runCollabStatusMock.mockResolvedValue({
 			active: true,
@@ -161,7 +162,7 @@ describe("cli binary commands", () => {
 
 		runCollabStartMock.mockImplementation((input: StartArgs) => {
 			writeStartedState(input);
-			return Promise.resolve(createStartResult(input));
+			return Promise.resolve(createStartResult());
 		});
 		runCollabStopMock.mockImplementation((input: StopArgs) => {
 			rmSync(getStateFilePath(input.workspaceRoot), { force: true });

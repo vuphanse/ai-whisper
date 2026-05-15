@@ -2,23 +2,19 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
 import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
-import { fakeBrokerSpawn, healthyBrokerAssess } from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("broker lifecycle", () => {
 	it("start records broker PID in state file", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-broker-pid-"));
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
-			spawn: () => {},
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot));
@@ -31,16 +27,20 @@ describe("broker lifecycle", () => {
 			join(tmpdir(), "ai-whisper-broker-stop-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBrokerAssess,
-			spawn: () => {},
 		});
 
-		const result = await runCollabStop({ workspaceRoot });
+		const result = await runCollabStop({
+			workspaceRoot,
+			killProcess: () => {},
+			pidAlive: () => false,
+			isPortFree: async () => true,
+			findPortOwnerPid: () => null,
+			sleep: async () => {},
+		});
 		expect(result.stopped).toBe(true);
 		expect(readCliCollabState(getStateFilePath(workspaceRoot))).toBeNull();
 	});

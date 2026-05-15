@@ -3,10 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 import { registerLaunchedBindings } from "./helpers/register-launched-bindings.ts";
 import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
@@ -22,13 +21,10 @@ describe("cli collab status enriched", () => {
 		const planPath = join(workspaceRoot, "plan.md");
 		writeFileSync(planPath, "# Plan\n");
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,
@@ -66,13 +62,10 @@ describe("cli collab status enriched", () => {
 			join(tmpdir(), "ai-whisper-status-no-thread-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,
@@ -149,13 +142,10 @@ describe("cli collab status enriched", () => {
 			join(tmpdir(), "ai-whisper-status-broker-down-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,
@@ -180,13 +170,10 @@ describe("cli collab status enriched", () => {
 			join(tmpdir(), "ai-whisper-status-broker-down-health-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,
@@ -209,13 +196,10 @@ describe("cli collab status enriched", () => {
 			join(tmpdir(), "ai-whisper-status-health-"),
 		);
 
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-05T00:00:00.000Z",
 			launchMode: "terminals",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker: healthyBroker,
-			spawn: () => {},
 		});
 		await registerLaunchedBindings({
 			workspaceRoot,

@@ -4,11 +4,10 @@ import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/run
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
 import { runCollabMount } from "../packages/cli/src/commands/collab/mount.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
-import { fakeBrokerSpawn } from "./helpers/fake-broker-spawn.ts";
+import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 const assessBroker = vi.fn(() =>
 	Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const }),
@@ -17,12 +16,10 @@ const assessBroker = vi.fn(() =>
 describe("mount gate — relay monitor check", () => {
 	it("rejects mount when no relay monitor connects within the timeout", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-gate-"));
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-06T10:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker,
 		});
 
 		await expect(
@@ -41,12 +38,10 @@ describe("mount gate — relay monitor check", () => {
 
 	it("proceeds past relay monitor check when monitor is registered", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-connected-"));
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-06T10:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker,
 		});
 
 		// Register a fresh relay monitor so isRelayMonitorConnected returns true
@@ -83,12 +78,10 @@ describe("mount gate — relay monitor check", () => {
 
 	it("retries and succeeds when monitor registers after the first poll", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-mount-retry-"));
-		await runCollabStart({
+		await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-06T10:00:00.000Z",
 			launchMode: "none",
-			spawnBroker: fakeBrokerSpawn(),
-			assessBroker,
 		});
 
 		const state = readCliCollabState(getStateFilePath(workspaceRoot))!;
