@@ -73,3 +73,10 @@ export {
 	listAllBrokerDaemons,
 	type BrokerDaemonRecord,
 } from "./storage/repositories/broker-daemon-repository.js";
+export {
+	upsertRecoveryState,
+	getRecoveryState,
+	deleteRecoveryState,
+	type RecoveryStateRecord,
+	type RecoveryStateValue,
+} from "./storage/repositories/recovery-state-repository.js";

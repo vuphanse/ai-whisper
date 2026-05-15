@@ -278,6 +278,13 @@ CREATE TABLE IF NOT EXISTS broker_daemon (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS broker_daemon_port ON broker_daemon(port);
 
+CREATE TABLE IF NOT EXISTS recovery_state (
+  collab_id            TEXT PRIMARY KEY REFERENCES collab(collab_id) ON DELETE CASCADE,
+  state                TEXT NOT NULL,
+  idle_after_recovery  INTEGER NOT NULL,
+  recovered_at         TEXT
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 2, 1)
 ON CONFLICT(id) DO UPDATE SET
