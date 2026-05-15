@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 
+export const CURRENT_SCHEMA_VERSION = 2;
+
 const initMigrationSql = `
 CREATE TABLE IF NOT EXISTS broker_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -285,14 +287,38 @@ CREATE TABLE IF NOT EXISTS recovery_state (
   recovered_at         TEXT
 );
 
-INSERT INTO broker_state (id, schema_version, migrated)
-VALUES (1, 2, 1)
-ON CONFLICT(id) DO UPDATE SET
-  schema_version = excluded.schema_version,
-  migrated = excluded.migrated;
 `;
 
+function ensureBrokerStateRow(db: Database.Database): void {
+	db.prepare(
+		`INSERT INTO broker_state (id, schema_version, migrated)
+		VALUES (1, ?, 1)
+		ON CONFLICT(id) DO UPDATE SET
+		  schema_version = excluded.schema_version,
+		  migrated = 1`,
+	).run(CURRENT_SCHEMA_VERSION);
+}
+
 export function applyMigrations(db: Database.Database): void {
+	const current = db.pragma("user_version", { simple: true }) as number;
+	if (current >= CURRENT_SCHEMA_VERSION) {
+		ensureBrokerStateRow(db);
+		return;
+	}
+
+	db.exec("BEGIN EXCLUSIVE");
+	try {
+		runMigrationBody(db);
+		db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
+		ensureBrokerStateRow(db);
+		db.exec("COMMIT");
+	} catch (err) {
+		db.exec("ROLLBACK");
+		throw err;
+	}
+}
+
+function runMigrationBody(db: Database.Database): void {
 	db.exec(initMigrationSql);
 
 	const attachClaimColumns = db
