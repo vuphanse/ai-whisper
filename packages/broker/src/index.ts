@@ -55,6 +55,14 @@ export {
 	type WorkspaceRecord,
 } from "./storage/repositories/workspace-repository.js";
 export {
+	upsertSessionAttachment,
+	listSessionAttachmentsByCollab,
+	deleteSessionAttachment,
+	type SessionAttachmentRecord,
+	type AgentType,
+	type AttachmentKind,
+} from "./storage/repositories/session-attachment-repository.js";
+export {
 	insertBrokerDaemon,
 	updateBrokerDaemonPid,
 	updateBrokerDaemonHeartbeat,

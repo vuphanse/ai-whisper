@@ -253,6 +253,20 @@ CREATE TABLE IF NOT EXISTS workspace (
   last_seen_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS session_attachment (
+  collab_id        TEXT NOT NULL REFERENCES collab(collab_id) ON DELETE CASCADE,
+  agent_type       TEXT NOT NULL,
+  attachment_kind  TEXT NOT NULL,
+  session_id       TEXT,
+  provider_id      TEXT,
+  launch_mode      TEXT,
+  tty_path         TEXT,
+  pid              INTEGER,
+  window_label     TEXT,
+  attached_at      TEXT NOT NULL,
+  PRIMARY KEY (collab_id, agent_type, attachment_kind)
+);
+
 CREATE TABLE IF NOT EXISTS broker_daemon (
   collab_id          TEXT PRIMARY KEY REFERENCES collab(collab_id) ON DELETE CASCADE,
   host               TEXT NOT NULL,
