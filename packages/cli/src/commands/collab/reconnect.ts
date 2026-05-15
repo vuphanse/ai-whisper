@@ -1,8 +1,47 @@
-import { createBrokerRuntime, type BrokerRuntime } from "@ai-whisper/broker";
+import { createBrokerRuntime, openDatabase, type BrokerRuntime } from "@ai-whisper/broker";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { resolveCurrentTty as defaultResolveCurrentTty } from "../../runtime/current-tty.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
+import { resolveCollab } from "../../runtime/collab-resolver.js";
+import { getSharedSqlitePath } from "../../runtime/state-root.js";
+
+export interface ReattachableSession {
+	agentType: "codex" | "claude";
+	attachmentKind: "mounted" | "adopted";
+	ttyPath: string;
+	pid: number | null;
+}
+
+export function listReattachableSessions(input: {
+	cwd: string;
+	collabIdOverride?: string;
+}): ReattachableSession[] {
+	const db = openDatabase(getSharedSqlitePath());
+	try {
+		const r = resolveCollab({
+			db,
+			cwd: input.cwd,
+			...(input.collabIdOverride !== undefined
+				? { collabIdOverride: input.collabIdOverride }
+				: {}),
+		});
+		return r.attachments
+			.filter(
+				(a) =>
+					(a.attachmentKind === "mounted" || a.attachmentKind === "adopted") &&
+					a.ttyPath !== null,
+			)
+			.map((a) => ({
+				agentType: a.agentType,
+				attachmentKind: a.attachmentKind as "mounted" | "adopted",
+				ttyPath: a.ttyPath as string,
+				pid: a.pid,
+			}));
+	} finally {
+		db.close();
+	}
+}
 
 export async function runCollabReconnect(input: {
 	workspaceRoot: string;
