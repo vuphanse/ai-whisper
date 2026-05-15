@@ -1,10 +1,49 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
+import {
+	createBrokerRuntime,
+	openDatabase,
+	upsertSessionAttachment,
+} from "@ai-whisper/broker";
 import { readCliCollabState } from "../../runtime/state-file.js";
 import { getStateFilePath } from "../../runtime/paths.js";
 import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import { resolveCurrentTty } from "../../runtime/current-tty.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
+import { resolveCollab } from "../../runtime/collab-resolver.js";
+import { getSharedSqlitePath } from "../../runtime/state-root.js";
+
+export async function recordMountedSession(input: {
+	cwd: string;
+	agentType: "codex" | "claude";
+	ttyPath: string;
+	pid: number;
+	collabIdOverride?: string;
+}): Promise<void> {
+	const db = openDatabase(getSharedSqlitePath());
+	try {
+		const r = resolveCollab({
+			db,
+			cwd: input.cwd,
+			...(input.collabIdOverride !== undefined
+				? { collabIdOverride: input.collabIdOverride }
+				: {}),
+		});
+		upsertSessionAttachment(db, {
+			collabId: r.collabId,
+			agentType: input.agentType,
+			attachmentKind: "mounted",
+			sessionId: null,
+			providerId: null,
+			launchMode: null,
+			ttyPath: input.ttyPath,
+			pid: input.pid,
+			windowLabel: null,
+			attachedAt: new Date().toISOString(),
+		});
+	} finally {
+		db.close();
+	}
+}
 
 const MONITOR_WAIT_TIMEOUT_MS = 10_000;
 const MONITOR_POLL_INTERVAL_MS = 250;

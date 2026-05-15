@@ -10,6 +10,7 @@ import { createContextInjector } from "./context-injector.js";
 import { createCliSessionId } from "./id-factory.js";
 import { updateCliCollabState } from "./state-file.js";
 import { getStateFilePath } from "./paths.js";
+import { recordMountedSession } from "../commands/collab/mount.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
 import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
 import {
@@ -330,6 +331,21 @@ export function createMountSessionRuntime(input: {
 						})();
 					}, 1000);
 					mountedTurnRelay.refreshOwnerView();
+
+				// Dual-write to shared DB: record session_attachment(kind='mounted').
+				// Legacy state.json write below is kept for reconnect/mount-session-main
+				// until Task 19 migrates those callers.
+				try {
+					await recordMountedSession({
+						cwd: input.workspaceRoot,
+						agentType: input.target,
+						ttyPath: input.ttyPath,
+						pid: process.pid,
+						collabIdOverride: resolvedClaim!.collabId,
+					});
+				} catch {
+					// Best-effort; shared-DB write failures must not break legacy mount flow.
+				}
 
 				// Update state file: record mounted session metadata + clear recovery state.
 				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
