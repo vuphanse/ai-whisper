@@ -30,6 +30,7 @@ import { runWorkflowResume } from "./commands/workflow/resume.js";
 import { runWorkflowCancel } from "./commands/workflow/cancel.js";
 import { runWorkflowTypes } from "./commands/workflow/types.js";
 import { connectToWorkspaceBroker } from "./runtime/broker-connect.js";
+import { CollabResolverError } from "./runtime/collab-resolver.js";
 
 interface WorkspaceOpts {
 	workspace: string;
@@ -335,13 +336,37 @@ export function createCli(): Command {
 	collab
 		.command("stop")
 		.description("Stop the active collaboration session")
-		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (opts: WorkspaceOpts) => {
-			const result = await runCollabStop({ workspaceRoot: opts.workspace });
-			if (result.stopped) {
-				console.log(`Collab stopped: ${result.collabId}`);
-			} else {
-				console.log(result.message);
+		.option(
+			"--collab <id>",
+			"Stop a specific collab id (defaults to the active collab for cwd)",
+		)
+		.action(async (opts: { collab?: string }) => {
+			try {
+				await runCollabStop({
+					cwd: process.cwd(),
+					...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+					now: () => new Date().toISOString(),
+					signalProcess: (pid, signal) => {
+						try {
+							process.kill(pid, signal);
+						} catch {
+							// process may already be dead
+						}
+					},
+				});
+				console.log("Collab stopped.");
+			} catch (err) {
+				if (err instanceof CollabResolverError) {
+					if (err.kind === "NoCollabFoundForCwd") {
+						console.log("No active collab.");
+						return;
+					}
+					if (err.kind === "CollabAlreadyStopped") {
+						console.log(err.message);
+						return;
+					}
+				}
+				throw err;
 			}
 		});
 
