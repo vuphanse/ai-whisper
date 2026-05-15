@@ -253,6 +253,17 @@ CREATE TABLE IF NOT EXISTS workspace (
   last_seen_at    TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS broker_daemon (
+  collab_id          TEXT PRIMARY KEY REFERENCES collab(collab_id) ON DELETE CASCADE,
+  host               TEXT NOT NULL,
+  port               INTEGER NOT NULL,
+  pid                INTEGER,
+  pid_start_time     TEXT,
+  started_at         TEXT NOT NULL,
+  last_heartbeat_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS broker_daemon_port ON broker_daemon(port);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 2, 1)
 ON CONFLICT(id) DO UPDATE SET

@@ -54,3 +54,14 @@ export {
 	listWorkspaces,
 	type WorkspaceRecord,
 } from "./storage/repositories/workspace-repository.js";
+export {
+	insertBrokerDaemon,
+	updateBrokerDaemonPid,
+	updateBrokerDaemonHeartbeat,
+	getBrokerDaemonByCollab,
+	getBrokerDaemonByPort,
+	deleteBrokerDaemonByCollab,
+	listStaleBrokerDaemons,
+	listAllBrokerDaemons,
+	type BrokerDaemonRecord,
+} from "./storage/repositories/broker-daemon-repository.js";
