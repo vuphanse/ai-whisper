@@ -372,179 +372,105 @@ describe("reconnect command", () => {
 });
 
 describe("recovery guards", () => {
-	async function buildGuardFixture(recoveryState: "recovery_required" | "recovered") {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-guard-"));
-		const sqlitePath = join(dir, "broker.sqlite");
+	async function buildTellNoDaemonFixture(opts: { recoveryState: "recovery_required" | "recovered" }) {
+		const tmp = mkdtempSync(join(tmpdir(), "ai-whisper-guard-"));
+		process.env.AI_WHISPER_STATE_ROOT = tmp;
+		const ws = join(tmp, "ws");
+		mkdirSync(ws);
 		const collabId = "collab_guard_test";
 		const now = "2026-04-05T18:00:00.000Z";
 
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4420 });
-		broker.control.startCollab({
+		const db = openDatabase(getSharedSqlitePath());
+		applyMigrations(db);
+		const wsId = workspaceIdFromPath(ws);
+		upsertWorkspace(db, { id: wsId, workspaceRoot: ws, now });
+		db.prepare(
+			"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES (?, ?, 'guard test', 'active', ?, 'none', null, ?, ?)",
+		).run(collabId, ws, wsId, now, now);
+		upsertRecoveryState(db, {
 			collabId,
-			workspaceRoot: dir,
-			displayName: "guard test",
-			now,
+			state: opts.recoveryState,
+			idleAfterRecovery: opts.recoveryState === "recovered",
+			recoveredAt: opts.recoveryState === "recovered" ? now : null,
 		});
-		broker.control.registerSession({
-			sessionId: "session_codex_guard",
-			collabId,
-			agentType: "codex",
-			capabilities: {
-				supportsDirectPackets: true,
-				supportsNormalization: false,
-				supportsRelayInterception: true,
-				supportsLocalBuffering: true,
-				supportsLaunchHooks: false,
-				extensions: {},
-			},
-			now,
-		});
-		await broker.stop();
+		// No broker_daemon row → resolveCollab(requireDaemon=true) throws NoLiveDaemonForCollab.
+		db.close();
 
-		const runtimeDir = join(dir, ".ai-whisper", "runtime");
-		const statePath = join(runtimeDir, "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: {
-				sqlitePath,
-				host: "127.0.0.1",
-				port: 4420,
-				pid: 99123,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: {
-				state: recoveryState,
-				idleAfterRecovery: recoveryState === "recovered",
-				recoveredAt: recoveryState === "recovered" ? now : null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
-		return { dir, now };
+		return { ws, now };
 	}
 
-	it("tells the operator to run recover when tell is attempted against a collab that needs recovery", async () => {
-		const { dir, now } = await buildGuardFixture("recovery_required");
+	it("throws when tell is attempted against a collab whose daemon is not live (recovery_required)", async () => {
+		const { ws, now } = await buildTellNoDaemonFixture({ recoveryState: "recovery_required" });
 
-		await expect(
-			runCollabTell({
-				workspaceRoot: dir,
-				target: "codex",
-				instruction: "review this",
-				artifactPaths: [],
-				now,
-			}),
-		).rejects.toThrow(/whisper collab recover/i);
+		try {
+			await expect(
+				runCollabTell({
+					cwd: ws,
+					target: "codex",
+					instruction: "review this",
+					artifactPaths: [],
+					now,
+				}),
+			).rejects.toThrow(/no live daemon/i);
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
 	});
 
-	it("tells the operator to run reconnect when tell is attempted against a recovered collab", async () => {
-		const { dir, now } = await buildGuardFixture("recovered");
+	it("throws when tell is attempted against a recovered collab whose daemon is not live", async () => {
+		const { ws, now } = await buildTellNoDaemonFixture({ recoveryState: "recovered" });
 
-		await expect(
-			runCollabTell({
-				workspaceRoot: dir,
-				target: "codex",
-				instruction: "review this",
-				artifactPaths: [],
-				now,
-			}),
-		).rejects.toThrow(/whisper collab reconnect/i);
+		try {
+			await expect(
+				runCollabTell({
+					cwd: ws,
+					target: "codex",
+					instruction: "review this",
+					artifactPaths: [],
+					now,
+				}),
+			).rejects.toThrow(/no live daemon/i);
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
 	});
 
 });
 
 describe("broker latch", () => {
-	async function buildNormalStateFixture() {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-latch-"));
-		const sqlitePath = join(dir, "broker.sqlite");
-		const collabId = "collab_latch_test";
-		const now = "2026-04-05T19:00:00.000Z";
+	it("tell fails fast with NoLiveDaemonForCollab when broker_daemon row has pid IS NULL", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "ai-whisper-latch-"));
+		process.env.AI_WHISPER_STATE_ROOT = tmp;
+		try {
+			const ws = join(tmp, "ws");
+			mkdirSync(ws);
+			const collabId = "collab_latch_test";
+			const now = "2026-04-05T19:00:00.000Z";
 
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4430 });
-		broker.control.startCollab({
-			collabId,
-			workspaceRoot: dir,
-			displayName: "latch test",
-			now,
-		});
-		broker.control.registerSession({
-			sessionId: "session_codex_latch",
-			collabId,
-			agentType: "codex",
-			capabilities: {
-				supportsDirectPackets: true,
-				supportsNormalization: false,
-				supportsRelayInterception: true,
-				supportsLocalBuffering: true,
-				supportsLaunchHooks: false,
-				extensions: {},
-			},
-			now,
-		});
-		broker.control.setSessionBinding({
-			collabId,
-			agentType: "codex",
-			sessionId: "session_codex_latch",
-			bindingSource: "attached",
-			now,
-		});
-		await broker.stop();
+			const db = openDatabase(getSharedSqlitePath());
+			applyMigrations(db);
+			const wsId = workspaceIdFromPath(ws);
+			upsertWorkspace(db, { id: wsId, workspaceRoot: ws, now });
+			db.prepare(
+				"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES (?, ?, 'latch test', 'active', ?, 'none', null, ?, ?)",
+			).run(collabId, ws, wsId, now, now);
+			db.prepare(
+				"INSERT INTO broker_daemon (collab_id, host, port, started_at, last_heartbeat_at) VALUES (?, '127.0.0.1', 4430, ?, ?)",
+			).run(collabId, now, now);
+			db.close();
 
-		const runtimeDir = join(dir, ".ai-whisper", "runtime");
-		const statePath = join(runtimeDir, "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: {
-				sqlitePath,
-				host: "127.0.0.1",
-				port: 4430,
-				pid: 99123,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: {
-				state: "normal",
-				idleAfterRecovery: false,
-				recoveredAt: null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
-		return { dir, statePath, collabId, sqlitePath, now };
-	}
-
-	it("latches recovery_required into state file when tell is called with a dead broker", async () => {
-		const { dir } = await buildNormalStateFixture();
-		const now = "2026-04-05T19:00:00.000Z";
-
-		const mockAssessBroker = vi.fn(() => Promise.resolve({
-			pidAlive: false as const,
-			httpReachable: false as const,
-			ok: false as const,
-		}));
-
-		await expect(
-			runCollabTell({
-				workspaceRoot: dir,
-				target: "codex",
-				instruction: "review this",
-				artifactPaths: [],
-				now,
-				assessBroker: mockAssessBroker,
-			}),
-		).rejects.toThrow(/whisper collab recover/i);
-
-		const updatedState = readCliCollabState(getStateFilePath(dir));
-		expect(updatedState?.recovery.state).toBe("recovery_required");
+			await expect(
+				runCollabTell({
+					cwd: ws,
+					target: "codex",
+					instruction: "review this",
+					artifactPaths: [],
+					now,
+				}),
+			).rejects.toThrow(/no live daemon/i);
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
 	});
 
 });

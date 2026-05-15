@@ -46,7 +46,7 @@ describe("cli edge cases", () => {
 
 		await expect(
 			runCollabTell({
-				workspaceRoot,
+				cwd: workspaceRoot,
 				target: "gpt4o" as "codex" | "claude",
 				instruction: "do something",
 				artifactPaths: [],

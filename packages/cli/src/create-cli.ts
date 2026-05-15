@@ -40,8 +40,9 @@ interface StartOpts extends WorkspaceOpts {
 	launch: boolean;
 }
 
-interface TellOpts extends WorkspaceOpts {
+interface TellOpts {
 	target: string;
+	collab?: string;
 	action?: string;
 	artifact?: string[];
 	title?: string;
@@ -196,7 +197,7 @@ export function createCli(): Command {
 		.command("tell")
 		.description("Send an instruction to an agent")
 		.requiredOption("--target <agent>", "Target agent: codex or claude")
-		.option("--workspace <path>", "Workspace root", process.cwd())
+		.option("--collab <id>", "Send to a specific collab id (defaults to the active collab for cwd)")
 		.option("--action <action>", "Explicit requested action")
 		.option(
 			"--artifact <path>",
@@ -208,12 +209,15 @@ export function createCli(): Command {
 		.argument("<instruction>", "The instruction to send")
 		.action(async (instruction: string, opts: TellOpts) => {
 			const tellInput: Parameters<typeof runCollabTell>[0] = {
-				workspaceRoot: opts.workspace,
+				cwd: process.cwd(),
 				target: opts.target as "codex" | "claude",
 				instruction,
 				artifactPaths: opts.artifact ?? [],
 				now: new Date().toISOString(),
 			};
+			if (opts.collab) {
+				tellInput.collabIdOverride = opts.collab;
+			}
 			if (opts.action) {
 				tellInput.explicitAction = opts.action as NonNullable<
 					typeof tellInput.explicitAction
