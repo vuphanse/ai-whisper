@@ -12,6 +12,7 @@ import {
 	type EvaluatorProviderConfig,
 } from "../runtime/relay-orchestrator-evaluator.js";
 import { buildEvaluatorObserverCallback } from "../runtime/evaluator-observer.js";
+import { writeOwnPidToBrokerDaemon } from "../runtime/process-start-time.js";
 import { execFile } from "node:child_process";
 
 loadDotEnv();
@@ -22,6 +23,14 @@ const port = Number(process.env.AI_WHISPER_BROKER_PORT ?? "4311");
 const collabId = process.env.AI_WHISPER_COLLAB_ID!;
 
 const broker = createBrokerRuntime({ sqlitePath, host, port });
+
+const collabIdFromEnv = process.env.AI_WHISPER_DAEMON_COLLAB_ID;
+if (collabIdFromEnv) {
+	writeOwnPidToBrokerDaemon(broker.db, {
+		collabId: collabIdFromEnv,
+		now: new Date().toISOString(),
+	});
+}
 
 await broker.start();
 
