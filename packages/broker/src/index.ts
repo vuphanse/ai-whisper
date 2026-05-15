@@ -47,3 +47,10 @@ export {
 	type EvaluatorOutcome,
 } from "./storage/repositories/relay-evaluator-diagnostics-repository.js";
 export { getWorkflowDefinition, listWorkflowTypes } from "./runtime/workflow-registry.js";
+export {
+	upsertWorkspace,
+	getWorkspaceById,
+	getWorkspaceByRoot,
+	listWorkspaces,
+	type WorkspaceRecord,
+} from "./storage/repositories/workspace-repository.js";

@@ -246,6 +246,13 @@ CREATE TABLE IF NOT EXISTS relay_chains (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS workspace (
+  id              TEXT PRIMARY KEY,
+  workspace_root  TEXT NOT NULL UNIQUE,
+  first_seen_at   TEXT NOT NULL,
+  last_seen_at    TEXT NOT NULL
+);
+
 INSERT INTO broker_state (id, schema_version, migrated)
 VALUES (1, 2, 1)
 ON CONFLICT(id) DO UPDATE SET
