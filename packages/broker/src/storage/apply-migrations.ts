@@ -368,6 +368,19 @@ export function applyMigrations(db: Database.Database): void {
 	if (!collabColumns.some((column) => column.name === "orchestrator_max_rounds")) {
 		db.exec("ALTER TABLE collab ADD COLUMN orchestrator_max_rounds INTEGER NOT NULL DEFAULT 3");
 	}
+	if (!collabColumns.some((column) => column.name === "workspace_id")) {
+		db.exec("ALTER TABLE collab ADD COLUMN workspace_id TEXT");
+	}
+	if (!collabColumns.some((column) => column.name === "stopped_at")) {
+		db.exec("ALTER TABLE collab ADD COLUMN stopped_at TEXT");
+	}
+	if (!collabColumns.some((column) => column.name === "launch_mode")) {
+		db.exec("ALTER TABLE collab ADD COLUMN launch_mode TEXT");
+	}
+	if (!collabColumns.some((column) => column.name === "tmux_session")) {
+		db.exec("ALTER TABLE collab ADD COLUMN tmux_session TEXT");
+	}
+	db.exec("CREATE INDEX IF NOT EXISTS collab_by_workspace ON collab(workspace_id, status)");
 
 	const relayTurnStateColumns = db.prepare("PRAGMA table_info(relay_turn_state)").all() as Array<{ name: string }>;
 	if (!relayTurnStateColumns.some((column) => column.name === "orchestrator_enabled")) {
