@@ -1,26 +1,86 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	createBrokerRuntime,
+	getRecoveryState,
+	insertBrokerDaemon,
+	updateBrokerDaemonPid,
+	upsertWorkspace,
+} from "../packages/broker/src/index.ts";
 import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
-import { buildInspectSnapshot, formatInspectSnapshot, truncatePreview } from "../packages/cli/src/runtime/operator-inspect.ts";
-import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
-import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
+import {
+	buildInspectSnapshot,
+	formatInspectSnapshot,
+	truncatePreview,
+	type InspectSnapshotState,
+} from "../packages/cli/src/runtime/operator-inspect.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
+import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
+
+function seedCollab(opts: {
+	collabId: string;
+	port: number;
+	displayName: string;
+	now: string;
+	pidAlive?: boolean;
+}) {
+	const root = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-"));
+	process.env.AI_WHISPER_STATE_ROOT = root;
+	const ws = join(root, "ws");
+	mkdirSync(ws);
+
+	const broker = createBrokerRuntime({
+		sqlitePath: getSharedSqlitePath(),
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
+	});
+	const wsId = workspaceIdFromPath(ws);
+	upsertWorkspace(broker.db, { id: wsId, workspaceRoot: ws, now: opts.now });
+	broker.db
+		.prepare(
+			"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, 'none', NULL, ?, ?)",
+		)
+		.run(opts.collabId, ws, opts.displayName, wsId, opts.now, opts.now);
+	insertBrokerDaemon(broker.db, {
+		collabId: opts.collabId,
+		host: "127.0.0.1",
+		port: opts.port,
+		startedAt: opts.now,
+		lastHeartbeatAt: opts.now,
+	});
+	if (opts.pidAlive !== false) {
+		updateBrokerDaemonPid(broker.db, {
+			collabId: opts.collabId,
+			pid: process.pid,
+			pidStartTime: null,
+			now: opts.now,
+		});
+	}
+
+	return { ws, broker };
+}
 
 describe("collab inspect snapshot", () => {
-	it("renders the active thread snapshot", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-"));
-		const sqlitePath = join(workspaceRoot, "broker.sqlite");
-		const now = "2026-04-06T10:00:00.000Z";
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4450 });
+	beforeEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+	afterEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
 
-		broker.control.startCollab({
+	it("renders the active thread snapshot", async () => {
+		const now = "2026-04-06T10:00:00.000Z";
+		const { ws, broker } = seedCollab({
 			collabId: "collab_inspect",
-			workspaceRoot,
+			port: 4450,
 			displayName: "inspect",
 			now,
 		});
+
 		broker.control.registerSession({
 			sessionId: "session_codex",
 			collabId: "collab_inspect",
@@ -51,24 +111,11 @@ describe("collab inspect snapshot", () => {
 		});
 		await broker.stop();
 
-		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 5,
-			collabId: "collab_inspect",
-			workspaceRoot,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4450, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
 		const output = await runCollabInspect({
-			workspaceRoot,
+			cwd: ws,
 			now,
 			watch: false,
-			assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+			assessBroker: () => Promise.resolve({ ok: true as const }),
 		});
 		expect(output).toContain("Active Thread: Review plan");
 		expect(output).toContain("Roles:");
@@ -148,32 +195,22 @@ describe("inspect broker data access", () => {
 });
 
 describe("collab inspect watch mode", () => {
-	it("redraws periodically and stops cleanly on interrupt", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-watch-"));
-		const sqlitePath = join(workspaceRoot, "broker.sqlite");
-		const now = "2026-04-06T10:30:00.000Z";
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4451 });
+	beforeEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+	afterEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
 
-		broker.control.startCollab({
+	it("redraws periodically and stops cleanly on interrupt", async () => {
+		const now = "2026-04-06T10:30:00.000Z";
+		const { ws, broker } = seedCollab({
 			collabId: "collab_inspect_watch",
-			workspaceRoot,
+			port: 4451,
 			displayName: "inspect watch",
 			now,
 		});
 		await broker.stop();
-
-		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 5,
-			collabId: "collab_inspect_watch",
-			workspaceRoot,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4451, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
 
 		const write = vi.fn();
 		const sleep = vi
@@ -184,12 +221,12 @@ describe("collab inspect watch mode", () => {
 
 		await expect(
 			runCollabInspect({
-				workspaceRoot,
+				cwd: ws,
 				now,
 				watch: true,
 				write,
 				sleep,
-				assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+				assessBroker: () => Promise.resolve({ ok: true as const }),
 			}),
 		).rejects.toThrow("stop-watch");
 
@@ -199,37 +236,51 @@ describe("collab inspect watch mode", () => {
 });
 
 describe("inspect broker-down recovery latch", () => {
-	it("latches recovery_required and throws when broker is down during normal state", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-latch-"));
-		const sqlitePath = join(workspaceRoot, "broker.sqlite");
-		const now = "2026-04-06T10:00:00.000Z";
-		const statePath = join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json");
+	beforeEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+	afterEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
 
-		writeCliCollabState(statePath, {
-			version: 5,
+	it("latches recovery_required and throws when broker is down during normal state", async () => {
+		const now = "2026-04-06T10:00:00.000Z";
+		const { ws, broker } = seedCollab({
 			collabId: "collab_inspect_latch",
-			workspaceRoot,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4460, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
+			port: 4460,
+			displayName: "latch",
+			now,
 		});
+		await broker.stop();
 
 		await expect(
 			runCollabInspect({
-				workspaceRoot,
+				cwd: ws,
 				now,
 				watch: false,
-				assessBroker: () => Promise.resolve({ pidAlive: false, httpReachable: false, ok: false }),
+				assessBroker: () => Promise.resolve({ ok: false as const }),
 			}),
 		).rejects.toThrow("Broker is unavailable");
 
-		const updated = readCliCollabState(statePath);
-		expect(updated?.recovery.state).toBe("recovery_required");
+		const db = createBrokerRuntime({
+			sqlitePath: getSharedSqlitePath(),
+			runWorkflowDriver: false,
+			runDiagnosticsSweep: false,
+			runDaemonHeartbeat: false,
+			runBrokerDaemonSweep: false,
+		});
+		try {
+			const recovery = getRecoveryState(db.db, "collab_inspect_latch");
+			expect(recovery?.state).toBe("recovery_required");
+		} finally {
+			await db.stop();
+		}
 	});
+});
+
+const minimalState = (collabId: string): InspectSnapshotState => ({
+	collabId,
+	recovery: { state: "normal" },
 });
 
 describe("inspect flagged items outside display window", () => {
@@ -300,31 +351,9 @@ describe("inspect flagged items outside display window", () => {
 			now: "2026-04-06T09:01:30.000Z",
 		});
 
-		const state: CliCollabState = {
-			version: 5,
-			collabId,
-			workspaceRoot: "/tmp",
-			broker: {
-				sqlitePath: ":memory:",
-				host: "127.0.0.1",
-				port: 4461,
-				pid: 1,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: {
-				state: "normal",
-				idleAfterRecovery: false,
-				recoveredAt: null,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		};
-
 		const snapshot = buildInspectSnapshot({
 			broker: runtime,
-			state,
+			state: minimalState(collabId),
 			now,
 		});
 
@@ -404,18 +433,7 @@ describe("adopted operator visibility", () => {
 
 		const snapshot = buildInspectSnapshot({
 			broker: runtime,
-			state: {
-				version: 5,
-				collabId: "collab_adopt_snap",
-				workspaceRoot: "/tmp",
-				broker: { sqlitePath: ":memory:", host: "127.0.0.1", port: 4470, pid: 1 },
-				launch: { mode: "none" },
-				ownedSessions: {},
-				startedAt: now,
-				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-				adoptedSessions: {},
-				mountedSessions: {},
-			},
+			state: minimalState("collab_adopt_snap"),
 			now,
 		});
 
@@ -481,38 +499,28 @@ describe("operator inspect renderer", () => {
 });
 
 describe("turn-owned relay inspect", () => {
-	it("renders turn owner, waiting agent, and handoff state in inspect output", async () => {
-		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-turn-"));
-		const sqlitePath = join(workspaceRoot, "broker.sqlite");
-		const now = "2026-04-08T00:00:00.000Z";
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4324 });
+	beforeEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+	afterEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
 
-		broker.control.startCollab({
+	it("renders turn owner, waiting agent, and handoff state in inspect output", async () => {
+		const now = "2026-04-08T00:00:00.000Z";
+		const { ws, broker } = seedCollab({
 			collabId: "collab_inspect_turn",
-			workspaceRoot,
+			port: 4324,
 			displayName: "inspect turn",
 			now,
 		});
 		await broker.stop();
 
-		writeCliCollabState(join(workspaceRoot, ".ai-whisper", "runtime", "current-collab.json"), {
-			version: 5,
-			collabId: "collab_inspect_turn",
-			workspaceRoot,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4324, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
 		const output = await runCollabInspect({
-			workspaceRoot,
+			cwd: ws,
 			now,
 			watch: false,
-			assessBroker: () => Promise.resolve({ pidAlive: true, httpReachable: true, ok: true }),
+			assessBroker: () => Promise.resolve({ ok: true as const }),
 		});
 		expect(output).toContain("Turn owner:");
 		expect(output).toContain("Waiting:");
@@ -601,18 +609,7 @@ describe("lastCaptureStatus in inspect snapshot", () => {
 					listReplies: () => [],
 				},
 			} as never,
-			state: {
-				version: 5,
-				collabId: "collab_inspect_cs",
-				workspaceRoot: "/tmp",
-				broker: { sqlitePath: "/tmp/b.sqlite", host: "127.0.0.1", port: 4311, pid: 1 },
-				launch: { mode: "none" },
-				ownedSessions: {},
-				startedAt: "2026-04-10T00:00:00.000Z",
-				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-				adoptedSessions: {},
-				mountedSessions: {},
-			},
+			state: minimalState("collab_inspect_cs"),
 			now: "2026-04-10T00:02:00.000Z",
 		});
 
@@ -642,18 +639,7 @@ describe("lastCaptureStatus in inspect snapshot", () => {
 					listReplies: () => [],
 				},
 			} as never,
-			state: {
-				version: 5,
-				collabId: "collab_inspect_no_cs",
-				workspaceRoot: "/tmp",
-				broker: { sqlitePath: "/tmp/b.sqlite", host: "127.0.0.1", port: 4311, pid: 1 },
-				launch: { mode: "none" },
-				ownedSessions: {},
-				startedAt: "2026-04-10T00:00:00.000Z",
-				recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-				adoptedSessions: {},
-				mountedSessions: {},
-			},
+			state: minimalState("collab_inspect_no_cs"),
 			now: "2026-04-10T00:02:00.000Z",
 		});
 

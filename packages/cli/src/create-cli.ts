@@ -291,7 +291,7 @@ export function createCli(): Command {
 	collab
 		.command("inspect")
 		.description("Inspect the active collab thread")
-		.option("--workspace <path>", "Workspace root", process.cwd())
+		.option("--collab <id>", "Inspect a specific collab id (defaults to the active collab for cwd)")
 		.option("--watch", "Continuously redraw the active-thread operator view")
 		.option(
 			"--captures [chainId]",
@@ -303,7 +303,8 @@ export function createCli(): Command {
 		)
 		.action(
 			async (
-				opts: WorkspaceOpts & {
+				opts: {
+					collab?: string;
 					watch?: boolean;
 					captures?: boolean | string;
 					verdicts?: boolean | string;
@@ -323,7 +324,8 @@ export function createCli(): Command {
 							: opts.verdicts;
 
 				const output = await runCollabInspect({
-					workspaceRoot: opts.workspace,
+					cwd: process.cwd(),
+					...(opts.collab ? { collabIdOverride: opts.collab } : {}),
 					now: new Date().toISOString(),
 					watch: Boolean(opts.watch),
 					...(capturesArg !== undefined ? { captures: capturesArg } : {}),

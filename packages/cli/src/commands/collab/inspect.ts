@@ -1,10 +1,10 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
+import { createBrokerRuntime, upsertRecoveryState } from "@ai-whisper/broker";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
+import { resolveCollab, CollabResolverError } from "../../runtime/collab-resolver.js";
 import { buildInspectSnapshot, formatInspectSnapshot } from "../../runtime/operator-inspect.js";
 import { formatCapturesView } from "../../runtime/operator-inspect-captures.js";
 import { formatVerdictsView } from "../../runtime/operator-inspect-verdicts.js";
-import { getStateFilePath } from "../../runtime/paths.js";
-import { readCliCollabState, writeCliCollabState } from "../../runtime/state-file.js";
+import { getSharedSqlitePath } from "../../runtime/state-root.js";
 
 // `true`     → list last 20 rows for the active collab
 // `"all"`    → list all rows for the active collab (no limit)
@@ -15,13 +15,20 @@ export type VerdictsArg = true | string;
 const DEFAULT_LIMIT = 20;
 const NO_LIMIT = null;
 
+type BrokerAssessor = (input: {
+	host: string;
+	port: number;
+	pid: number;
+}) => Promise<{ ok: boolean }>;
+
 export async function runCollabInspect(input: {
-	workspaceRoot: string;
+	cwd: string;
+	collabIdOverride?: string;
 	now: string;
 	watch: boolean;
 	captures?: CapturesArg;
 	verdicts?: VerdictsArg;
-	assessBroker?: typeof assessBrokerDaemon;
+	assessBroker?: BrokerAssessor;
 	write?: (chunk: string) => void;
 	sleep?: (ms: number) => Promise<void>;
 	watchIntervalMs?: number;
@@ -31,35 +38,8 @@ export async function runCollabInspect(input: {
 	}
 
 	const renderOnce = async (timestamp: string) => {
-		const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
-		if (!state) {
-			throw new Error("No active collab. Run `whisper collab start` first.");
-		}
-
-		const health = await (input.assessBroker ?? assessBrokerDaemon)({
-			host: state.broker.host,
-			port: state.broker.port,
-			pid: state.broker.pid,
-		});
-
-		if (!health.ok) {
-			if (state.recovery.state === "normal") {
-				writeCliCollabState(getStateFilePath(input.workspaceRoot), {
-					...state,
-					recovery: {
-						state: "recovery_required",
-						idleAfterRecovery: state.recovery.idleAfterRecovery,
-						recoveredAt: state.recovery.recoveredAt,
-					},
-				});
-			}
-			throw new Error("Broker is unavailable for the current collab. Run `whisper collab recover`.");
-		}
-
 		const broker = createBrokerRuntime({
-			sqlitePath: state.broker.sqlitePath,
-			host: state.broker.host,
-			port: state.broker.port,
+			sqlitePath: getSharedSqlitePath(),
 			runWorkflowDriver: false,
 			runDiagnosticsSweep: false,
 			runDaemonHeartbeat: false,
@@ -67,6 +47,66 @@ export async function runCollabInspect(input: {
 		});
 
 		try {
+			let resolved;
+			try {
+				resolved = resolveCollab({
+					db: broker.db,
+					cwd: input.cwd,
+					...(input.collabIdOverride ? { collabIdOverride: input.collabIdOverride } : {}),
+				});
+			} catch (err) {
+				if (err instanceof CollabResolverError && err.kind === "NoCollabFoundForCwd") {
+					throw new Error("No active collab. Run `whisper collab start` first.");
+				}
+				throw err;
+			}
+
+			if (resolved.daemon === null) {
+				if (resolved.recovery.state === "normal") {
+					upsertRecoveryState(broker.db, {
+						collabId: resolved.collabId,
+						state: "recovery_required",
+						idleAfterRecovery: resolved.recovery.idleAfterRecovery,
+						recoveredAt: resolved.recovery.recoveredAt,
+					});
+				}
+				throw new Error(
+					"Broker is unavailable for the current collab. Run `whisper collab recover`.",
+				);
+			}
+
+			const health = await (input.assessBroker ?? (assessBrokerDaemon as BrokerAssessor))({
+				host: resolved.daemon.host,
+				port: resolved.daemon.port,
+				pid: resolved.daemon.pid,
+			});
+
+			if (!health.ok) {
+				if (resolved.recovery.state === "normal") {
+					upsertRecoveryState(broker.db, {
+						collabId: resolved.collabId,
+						state: "recovery_required",
+						idleAfterRecovery: resolved.recovery.idleAfterRecovery,
+						recoveredAt: resolved.recovery.recoveredAt,
+					});
+				}
+				throw new Error(
+					"Broker is unavailable for the current collab. Run `whisper collab recover`.",
+				);
+			}
+
+			const state = {
+				collabId: resolved.collabId,
+				workspaceRoot: resolved.workspaceRoot,
+				broker: resolved.daemon ?? {
+					host: "127.0.0.1",
+					port: 0,
+					pid: 0,
+					sqlitePath: getSharedSqlitePath(),
+				},
+				recovery: resolved.recovery,
+			};
+
 			if (input.captures !== undefined) {
 				const captures = input.captures;
 				if (captures === true) {
@@ -115,7 +155,7 @@ export async function runCollabInspect(input: {
 	};
 
 	function clearScreen(): string {
-		return "c";
+		return "c";
 	}
 
 	const write = input.write ?? ((chunk: string) => process.stdout.write(chunk));

@@ -1,5 +1,9 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
-import type { CliCollabState } from "./state-file.js";
+
+export type InspectSnapshotState = {
+	collabId: string;
+	recovery: { state: "normal" | "recovery_required" | "recovered" };
+};
 
 export function truncatePreview(input: string, limit = 120): string {
 	if (input.length <= limit) return input;
@@ -8,7 +12,7 @@ export function truncatePreview(input: string, limit = 120): string {
 
 export function buildInspectSnapshot(input: {
 	broker: BrokerRuntime;
-	state: CliCollabState;
+	state: InspectSnapshotState;
 	now: string;
 }) {
 	const threads = input.broker.control.listThreads(input.state.collabId);

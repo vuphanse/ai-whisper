@@ -1,22 +1,52 @@
-import { describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import {
+	insertBrokerDaemon,
+	updateBrokerDaemonPid,
+	upsertWorkspace,
+} from "../packages/broker/src/index.ts";
 import { runCollabInspect } from "../packages/cli/src/commands/collab/inspect.ts";
-import { writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
+import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
 
 function setupCollabWithVerdicts() {
-	const dir = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-vrd-"));
-	const sqlitePath = join(dir, "broker.sqlite");
+	const root = mkdtempSync(join(tmpdir(), "ai-whisper-inspect-vrd-"));
+	process.env.AI_WHISPER_STATE_ROOT = root;
+	const ws = join(root, "ws");
+	mkdirSync(ws);
 	const collabId = "collab_inspect_vrd";
 	const now = "2026-05-14T12:00:00.000Z";
 
 	const broker = createBrokerRuntime({
-		sqlitePath, host: "127.0.0.1", port: 4605,
-		runWorkflowDriver: false, runDiagnosticsSweep: false,
+		sqlitePath: getSharedSqlitePath(),
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
 	});
-	broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "vrd test", now });
+	const wsId = workspaceIdFromPath(ws);
+	upsertWorkspace(broker.db, { id: wsId, workspaceRoot: ws, now });
+	broker.db
+		.prepare(
+			"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES (?, ?, 'vrd test', 'active', ?, 'none', NULL, ?, ?)",
+		)
+		.run(collabId, ws, wsId, now, now);
+	insertBrokerDaemon(broker.db, {
+		collabId,
+		host: "127.0.0.1",
+		port: 4605,
+		startedAt: now,
+		lastHeartbeatAt: now,
+	});
+	updateBrokerDaemonPid(broker.db, {
+		collabId,
+		pid: process.pid,
+		pidStartTime: null,
+		now,
+	});
 
 	for (let i = 0; i < 15; i += 1) {
 		broker.control.recordEvaluatorDiagnostic({
@@ -61,32 +91,24 @@ function setupCollabWithVerdicts() {
 		});
 	}
 
-	const statePath = join(dir, ".ai-whisper", "runtime", "current-collab.json");
-	writeCliCollabState(statePath, {
-		version: 5,
-		collabId,
-		workspaceRoot: dir,
-		broker: { sqlitePath, host: "127.0.0.1", port: 4605, pid: 99002 },
-		launch: { mode: "none" },
-		ownedSessions: {},
-		startedAt: now,
-		recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-		adoptedSessions: {},
-		mountedSessions: {},
-	});
-
-	return { dir, broker, collabId, now };
+	return { ws, broker, collabId, now };
 }
 
-const healthyAssessBroker = () =>
-	Promise.resolve({ pidAlive: true as const, httpReachable: true as const, ok: true as const });
+const healthyAssessBroker = () => Promise.resolve({ ok: true as const });
 
 describe("whisper collab inspect --verdicts", () => {
+	beforeEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+	afterEach(() => {
+		delete process.env.AI_WHISPER_STATE_ROOT;
+	});
+
 	it("verdicts=true shows the most recent 20 rows for the active collab", async () => {
-		const { dir, broker, now } = setupCollabWithVerdicts();
+		const { ws, broker, now } = setupCollabWithVerdicts();
 		await broker.stop();
 		const output = await runCollabInspect({
-			workspaceRoot: dir, now, watch: false,
+			cwd: ws, now, watch: false,
 			verdicts: true,
 			assessBroker: healthyAssessBroker,
 		});
@@ -96,10 +118,10 @@ describe("whisper collab inspect --verdicts", () => {
 	});
 
 	it("verdicts=<chainId> filters to one chain", async () => {
-		const { dir, broker, now } = setupCollabWithVerdicts();
+		const { ws, broker, now } = setupCollabWithVerdicts();
 		await broker.stop();
 		const output = await runCollabInspect({
-			workspaceRoot: dir, now, watch: false,
+			cwd: ws, now, watch: false,
 			verdicts: "chain_A",
 			assessBroker: healthyAssessBroker,
 		});
@@ -108,10 +130,10 @@ describe("whisper collab inspect --verdicts", () => {
 	});
 
 	it("verdicts='all' shows every row for the active collab", async () => {
-		const { dir, broker, now } = setupCollabWithVerdicts();
+		const { ws, broker, now } = setupCollabWithVerdicts();
 		await broker.stop();
 		const output = await runCollabInspect({
-			workspaceRoot: dir, now, watch: false,
+			cwd: ws, now, watch: false,
 			verdicts: "all",
 			assessBroker: healthyAssessBroker,
 		});
@@ -120,11 +142,11 @@ describe("whisper collab inspect --verdicts", () => {
 	});
 
 	it("throws when both --verdicts and --captures are passed", async () => {
-		const { dir, broker, now } = setupCollabWithVerdicts();
+		const { ws, broker, now } = setupCollabWithVerdicts();
 		await broker.stop();
 		await expect(
 			runCollabInspect({
-				workspaceRoot: dir, now, watch: false,
+				cwd: ws, now, watch: false,
 				verdicts: true,
 				captures: true,
 				assessBroker: healthyAssessBroker,
