@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createMockProvider } from "../packages/companion-core/src/index.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
+import { CollabResolverError } from "../packages/cli/src/runtime/collab-resolver.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
 import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
@@ -57,14 +58,25 @@ describe("cli edge cases", () => {
 	});
 
 	// Edge case 3: stop when no collab is active
-	it("stop returns stopped:false when no collab is active", async () => {
-		const workspaceRoot = mkdtempSync(
-			join(tmpdir(), "ai-whisper-edge-stop-empty-"),
-		);
-
-		const result = await runCollabStop({ workspaceRoot });
-
-		expect(result).toEqual({ stopped: false, message: "No active collab." });
+	it("stop throws NoCollabFoundForCwd when shared DB has no collab for cwd", async () => {
+		const tmp = mkdtempSync(join(tmpdir(), "ai-whisper-edge-stop-empty-"));
+		const prior = process.env.AI_WHISPER_STATE_ROOT;
+		process.env.AI_WHISPER_STATE_ROOT = tmp;
+		try {
+			await expect(
+				runCollabStop({
+					cwd: tmp,
+					now: () => "2026-04-03T00:00:00.000Z",
+					signalProcess: () => {},
+				}),
+			).rejects.toBeInstanceOf(CollabResolverError);
+		} finally {
+			if (prior !== undefined) {
+				process.env.AI_WHISPER_STATE_ROOT = prior;
+			} else {
+				delete process.env.AI_WHISPER_STATE_ROOT;
+			}
+		}
 	});
 
 	// Edge case 4: status when no collab exists for cwd

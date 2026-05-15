@@ -20,17 +20,13 @@ describe("cli collab lifecycle", () => {
 		expect(status).toContain("status: active");
 		expect(status).toContain(`workspace: ${realpathSync(workspaceRoot)}`);
 
-		expect(
-			await runCollabStop({
-				workspaceRoot,
-				killProcess: () => {},
-				pidAlive: () => false,
-				isPortFree: async () => true,
-				findPortOwnerPid: () => null,
-				sleep: async () => {},
-			}),
-		).toMatchObject({
-			stopped: true,
+		await runCollabStop({
+			cwd: workspaceRoot,
+			now: () => "2026-04-03T00:01:00.000Z",
+			signalProcess: () => {},
 		});
+
+		const stoppedStatus = await runCollabStatus({ cwd: workspaceRoot });
+		expect(stoppedStatus).toContain("status: stopped");
 	});
 });

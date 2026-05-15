@@ -33,15 +33,12 @@ describe("broker lifecycle", () => {
 			launchMode: "terminals",
 		});
 
-		const result = await runCollabStop({
-			workspaceRoot,
-			killProcess: () => {},
-			pidAlive: () => false,
-			isPortFree: async () => true,
-			findPortOwnerPid: () => null,
-			sleep: async () => {},
+		await runCollabStop({
+			cwd: workspaceRoot,
+			now: () => "2026-04-03T00:01:00.000Z",
+			signalProcess: () => {},
 		});
-		expect(result.stopped).toBe(true);
+		// Legacy bridge: state.json is cleared as well (removed in Task 24).
 		expect(readCliCollabState(getStateFilePath(workspaceRoot))).toBeNull();
 	});
 });

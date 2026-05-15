@@ -35,7 +35,10 @@ type StartArgs = {
 };
 
 type StopArgs = {
-	workspaceRoot: string;
+	cwd: string;
+	collabIdOverride?: string;
+	now: () => string;
+	signalProcess: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
 };
 
 function writeStartedState(input: StartArgs) {
@@ -162,8 +165,7 @@ describe("cli binary commands", () => {
 			return Promise.resolve(createStartResult());
 		});
 		runCollabStopMock.mockImplementation((input: StopArgs) => {
-			rmSync(getStateFilePath(input.workspaceRoot), { force: true });
-			return { stopped: true };
+			rmSync(getStateFilePath(input.cwd), { force: true });
 		});
 
 		const startCli = createCli();
@@ -178,15 +180,14 @@ describe("cli binary commands", () => {
 		]);
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(true);
 
-		const stopCli = createCli();
-		await stopCli.parseAsync([
-			"node",
-			"whisper",
-			"collab",
-			"stop",
-			"--workspace",
-			workspaceRoot,
-		]);
+		const originalCwd = process.cwd();
+		process.chdir(workspaceRoot);
+		try {
+			const stopCli = createCli();
+			await stopCli.parseAsync(["node", "whisper", "collab", "stop"]);
+		} finally {
+			process.chdir(originalCwd);
+		}
 
 		expect(existsSync(getStateFilePath(workspaceRoot))).toBe(false);
 		expect(runCollabStopMock).toHaveBeenCalledTimes(1);
