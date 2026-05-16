@@ -6,7 +6,10 @@ import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabReconnect } from "./commands/collab/reconnect.js";
 import { runCollabRelayMonitor } from "./commands/collab/relay-monitor.js";
-import { runCollabStart } from "./commands/collab/start.js";
+import {
+	recordLaunchedSessions,
+	runCollabStart,
+} from "./commands/collab/start.js";
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
 import { runCollabTell } from "./commands/collab/tell.js";
@@ -78,13 +81,10 @@ export function createCli(): Command {
 				launchMode === "tmux" &&
 				Boolean(process.stdin.isTTY) &&
 				Boolean(process.stdout.isTTY);
-			const tmuxSessionName =
-				launchMode === "tmux" ? undefined : undefined; // resolved below from collabId
 			const r = await runCollabStart({
 				cwd: opts.workspace,
 				displayName: "phase5",
 				launchMode,
-				...(tmuxSessionName ? { tmuxSession: tmuxSessionName } : {}),
 				...(opts.port !== undefined ? { explicitPort: opts.port } : {}),
 				now: () => new Date().toISOString(),
 				isPortFreeOs: (port: number) => isPortFree(port),
@@ -127,7 +127,7 @@ export function createCli(): Command {
 
 			const sharedSqlitePath = getSharedSqlitePath();
 			if (launchMode !== "none") {
-				launchSessions({
+				const launch = launchSessions({
 					launchMode,
 					...(attachTmux !== undefined ? { attachTmux } : {}),
 					collabId: r.collabId,
@@ -135,6 +135,11 @@ export function createCli(): Command {
 					brokerSqlitePath: sharedSqlitePath,
 					brokerHost: r.host,
 					brokerPort: r.port,
+				});
+				recordLaunchedSessions({
+					collabId: r.collabId,
+					launchMode,
+					launch,
 				});
 			}
 

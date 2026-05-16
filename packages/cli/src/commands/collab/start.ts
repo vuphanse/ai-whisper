@@ -1,15 +1,17 @@
 import { mkdirSync } from "node:fs";
 import {
+	type AgentType,
 	applyMigrations,
 	deleteBrokerDaemonByCollab,
 	getBrokerDaemonByCollab,
 	insertBrokerDaemon,
 	openDatabase,
 	upsertRecoveryState,
+	upsertSessionAttachment,
 	upsertWorkspace,
 } from "@ai-whisper/broker";
 import { createCliCollabId } from "../../runtime/id-factory.js";
-import type { LaunchMode } from "../../runtime/launcher.js";
+import type { LaunchMode, LaunchResult } from "../../runtime/launcher.js";
 import { DEFAULT_PORT_RANGE } from "../../runtime/port-allocator.js";
 import {
 	getSharedSqlitePath,
@@ -227,4 +229,79 @@ export async function runCollabStart(
 		// biome-ignore lint/style/noNonNullAssertion: guarded by cleanupOnFailure
 		pid: finalRow!.pid!,
 	};
+}
+
+/**
+ * Persists the runtime metadata produced by `launchSessions` so that
+ * `whisper collab stop` can tear down what `start` launched. Symmetric
+ * with `recordMountedSession` in mount.ts.
+ *
+ * - tmux mode: records the deterministic tmux session name on the collab
+ *   row so stop issues `tmux kill-session`.
+ * - terminals mode: records each launched codex/claude window (kind
+ *   "owned") so stop closes the window and signals the pid.
+ *
+ * Known gap: relay-monitor's terminal window/pid cannot be persisted
+ * here because the `session_attachment` PK is
+ * `(collab_id, agent_type, attachment_kind)` and `agent_type` is
+ * constrained to `codex|claude`. The relay-monitor terminal window is
+ * therefore not torn down by stop in terminals mode.
+ */
+export function recordLaunchedSessions(input: {
+	collabId: string;
+	launchMode: "tmux" | "terminals";
+	launch: LaunchResult;
+}): void {
+	const db = openDatabase(getSharedSqlitePath());
+	try {
+		if (input.launch.tmuxSession) {
+			const now = new Date().toISOString();
+			db.prepare(
+				"UPDATE collab SET tmux_session = ?, updated_at = ? WHERE collab_id = ?",
+			).run(input.launch.tmuxSession, now, input.collabId);
+		}
+
+		if (input.launchMode === "terminals") {
+			const runtime = input.launch.runtime;
+			const agents: Array<{
+				agentType: AgentType;
+				windowLabel: string | undefined;
+				pid: number | undefined;
+			}> = [
+				{
+					agentType: "codex",
+					windowLabel: runtime.codexWindowLabel,
+					pid: runtime.codexPid,
+				},
+				{
+					agentType: "claude",
+					windowLabel: runtime.claudeWindowLabel,
+					pid: runtime.claudePid,
+				},
+			];
+			const now = new Date().toISOString();
+			for (const agent of agents) {
+				if (
+					agent.windowLabel === undefined &&
+					agent.pid === undefined
+				) {
+					continue;
+				}
+				upsertSessionAttachment(db, {
+					collabId: input.collabId,
+					agentType: agent.agentType,
+					attachmentKind: "owned",
+					sessionId: null,
+					providerId: agent.agentType,
+					launchMode: input.launchMode,
+					ttyPath: null,
+					pid: agent.pid ?? null,
+					windowLabel: agent.windowLabel ?? null,
+					attachedAt: now,
+				});
+			}
+		}
+	} finally {
+		db.close();
+	}
 }

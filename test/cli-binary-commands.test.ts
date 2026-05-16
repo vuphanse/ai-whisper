@@ -3,16 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { runCollabStartMock, runCollabStatusMock, runCollabStopMock } = vi.hoisted(
-	() => ({
-		runCollabStartMock: vi.fn(),
-		runCollabStatusMock: vi.fn(),
-		runCollabStopMock: vi.fn(),
-	}),
-);
+const {
+	runCollabStartMock,
+	recordLaunchedSessionsMock,
+	runCollabStatusMock,
+	runCollabStopMock,
+} = vi.hoisted(() => ({
+	runCollabStartMock: vi.fn(),
+	recordLaunchedSessionsMock: vi.fn(),
+	runCollabStatusMock: vi.fn(),
+	runCollabStopMock: vi.fn(),
+}));
 
 vi.mock("../packages/cli/src/commands/collab/start.ts", () => ({
 	runCollabStart: runCollabStartMock,
+	recordLaunchedSessions: recordLaunchedSessionsMock,
 }));
 
 vi.mock("../packages/cli/src/commands/collab/status.ts", () => ({
@@ -36,6 +41,7 @@ function createStartResult() {
 
 afterEach(() => {
 	runCollabStartMock.mockReset();
+	recordLaunchedSessionsMock.mockReset();
 	runCollabStatusMock.mockReset();
 	runCollabStopMock.mockReset();
 });
