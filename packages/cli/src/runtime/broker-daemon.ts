@@ -67,6 +67,28 @@ export function resolveBrokerDaemonLaunch(metaUrl: string = import.meta.url): {
 	throw new Error("Unable to resolve broker daemon entrypoint.");
 }
 
+/**
+ * Build the env the broker daemon child is spawned with. `AI_WHISPER_COLLAB_ID`
+ * is the single source of truth for the daemon's collab identity — it is read
+ * by `bin/broker-daemon.ts` (for the PID self-write) and by
+ * `create-broker-runtime.ts` (to start the heartbeat thread). Keep that key
+ * name in sync across all three sites.
+ */
+export function buildBrokerDaemonEnv(
+	sqlitePath: string,
+	host: string,
+	port: number,
+	collabId: string,
+): NodeJS.ProcessEnv {
+	return {
+		...process.env,
+		AI_WHISPER_BROKER_SQLITE: sqlitePath,
+		AI_WHISPER_BROKER_HOST: host,
+		AI_WHISPER_BROKER_PORT: String(port),
+		AI_WHISPER_COLLAB_ID: collabId,
+	};
+}
+
 export function spawnBrokerDaemon(
 	sqlitePath: string,
 	host: string,
@@ -77,13 +99,7 @@ export function spawnBrokerDaemon(
 	const child = spawn(launch.command, launch.args, {
 		detached: true,
 		stdio: "ignore",
-		env: {
-			...process.env,
-			AI_WHISPER_BROKER_SQLITE: sqlitePath,
-			AI_WHISPER_BROKER_HOST: host,
-			AI_WHISPER_BROKER_PORT: String(port),
-			AI_WHISPER_COLLAB_ID: collabId,
-		},
+		env: buildBrokerDaemonEnv(sqlitePath, host, port, collabId),
 	});
 	child.unref();
 	return child.pid!;

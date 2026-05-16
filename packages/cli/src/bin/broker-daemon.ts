@@ -24,10 +24,9 @@ const collabId = process.env.AI_WHISPER_COLLAB_ID!;
 
 const broker = createBrokerRuntime({ sqlitePath, host, port });
 
-const collabIdFromEnv = process.env.AI_WHISPER_DAEMON_COLLAB_ID;
-if (collabIdFromEnv) {
+if (collabId) {
 	writeOwnPidToBrokerDaemon(broker.db, {
-		collabId: collabIdFromEnv,
+		collabId,
 		now: new Date().toISOString(),
 	});
 }

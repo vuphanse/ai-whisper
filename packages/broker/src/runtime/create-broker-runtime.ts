@@ -60,7 +60,7 @@ export function createBrokerRuntime(input: BrokerConfig): BrokerRuntime {
 		? createDiagnosticsSweep({ broker: { control } })
 		: null;
 	diagnosticsSweep?.start();
-	const heartbeatCollabId = process.env.AI_WHISPER_DAEMON_COLLAB_ID;
+	const heartbeatCollabId = process.env.AI_WHISPER_COLLAB_ID;
 	const heartbeat = config.runDaemonHeartbeat && heartbeatCollabId
 		? createDaemonHeartbeat({
 				db,
