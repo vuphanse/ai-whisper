@@ -9,10 +9,34 @@ import {
 	insertBrokerDaemon,
 	getBrokerDaemonByCollab,
 	updateBrokerDaemonPid,
+	getRecoveryState,
 } from "../packages/broker/src/index.ts";
+import { resolveCollab } from "../packages/cli/src/runtime/collab-resolver.ts";
 import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
 import { runCollabRecover } from "../packages/cli/src/commands/collab/recover.ts";
 import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
+
+function insertSessionBinding(
+	db: ReturnType<typeof openDatabase>,
+	input: {
+		collabId: string;
+		agentType: "codex" | "claude";
+		activeSessionId: string | null;
+	},
+): void {
+	db.prepare(
+		`INSERT INTO session_binding (
+			collab_id, agent_type, binding_state, active_session_id, binding_source, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)`,
+	).run(
+		input.collabId,
+		input.agentType,
+		input.activeSessionId ? "bound" : "unbound",
+		input.activeSessionId,
+		input.activeSessionId ? "launched" : null,
+		"2026-05-15T00:00:00Z",
+	);
+}
 
 function seed() {
 	const tmp = mkdtempSync(path.join(os.tmpdir(), "recover-"));
@@ -24,7 +48,7 @@ function seed() {
 	const wsId = workspaceIdFromPath(ws);
 	upsertWorkspace(db, { id: wsId, workspaceRoot: ws, now: "2026-05-15T00:00:00Z" });
 	db.prepare(
-		"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, created_at, updated_at) VALUES ('c1', ?, 't', 'active', ?, 'none', '2026-05-15T00:00:00Z', '2026-05-15T00:00:00Z')",
+		"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, created_at, updated_at) VALUES ('collab_c1', ?, 't', 'active', ?, 'none', '2026-05-15T00:00:00Z', '2026-05-15T00:00:00Z')",
 	).run(ws, wsId);
 	db.close();
 	return { tmp, ws };
@@ -39,7 +63,7 @@ describe("runCollabRecover", () => {
 		const { ws } = seed();
 		const db = openDatabase(getSharedSqlitePath());
 		insertBrokerDaemon(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			host: "127.0.0.1",
 			port: 4500,
 			startedAt: "2026-05-15T00:00:00Z",
@@ -64,7 +88,7 @@ describe("runCollabRecover", () => {
 			isAlive: async () => ({ alive: false, startTime: null }),
 		});
 		const d = openDatabase(getSharedSqlitePath());
-		expect(getBrokerDaemonByCollab(d, "c1")?.pid).toBe(98765);
+		expect(getBrokerDaemonByCollab(d, "collab_c1")?.pid).toBe(98765);
 		d.close();
 	});
 
@@ -72,14 +96,14 @@ describe("runCollabRecover", () => {
 		const { ws } = seed();
 		const db = openDatabase(getSharedSqlitePath());
 		insertBrokerDaemon(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			host: "127.0.0.1",
 			port: 4500,
 			startedAt: "2026-05-15T00:00:00Z",
 			lastHeartbeatAt: "2026-05-15T00:00:00Z",
 		});
 		updateBrokerDaemonPid(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			pid: 99999,
 			pidStartTime: "OLDSTART",
 			now: "2026-05-15T00:00:00Z",
@@ -102,7 +126,7 @@ describe("runCollabRecover", () => {
 			signalProcess: () => {},
 		});
 		const d = openDatabase(getSharedSqlitePath());
-		expect(getBrokerDaemonByCollab(d, "c1")?.pid).toBe(77777);
+		expect(getBrokerDaemonByCollab(d, "collab_c1")?.pid).toBe(77777);
 		d.close();
 	});
 
@@ -110,7 +134,7 @@ describe("runCollabRecover", () => {
 		const { ws } = seed();
 		const db = openDatabase(getSharedSqlitePath());
 		insertBrokerDaemon(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			host: "127.0.0.1",
 			port: 4500,
 			startedAt: new Date(Date.now() - 1000).toISOString(),
@@ -137,14 +161,14 @@ describe("runCollabRecover", () => {
 		const { ws } = seed();
 		const db = openDatabase(getSharedSqlitePath());
 		insertBrokerDaemon(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			host: "127.0.0.1",
 			port: 4500,
 			startedAt: "2026-05-15T00:00:00Z",
 			lastHeartbeatAt: new Date().toISOString(),
 		});
 		updateBrokerDaemonPid(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			pid: process.pid,
 			pidStartTime: null,
 			now: new Date().toISOString(),
@@ -167,7 +191,7 @@ describe("runCollabRecover", () => {
 		const { ws } = seed();
 		const db = openDatabase(getSharedSqlitePath());
 		insertBrokerDaemon(db, {
-			collabId: "c1",
+			collabId: "collab_c1",
 			host: "127.0.0.1",
 			port: 4500,
 			startedAt: "2026-05-15T00:00:00Z",
@@ -192,7 +216,92 @@ describe("runCollabRecover", () => {
 			isAlive: async () => ({ alive: false, startTime: null }),
 		});
 		const d = openDatabase(getSharedSqlitePath());
-		expect(getBrokerDaemonByCollab(d, "c1")?.pid).toBe(55555);
+		expect(getBrokerDaemonByCollab(d, "collab_c1")?.pid).toBe(55555);
+		d.close();
+	});
+
+	it("re-arms bindings and writes recovery_state='recovered' when the collab has remembered bindings", async () => {
+		const { ws } = seed();
+		const db = openDatabase(getSharedSqlitePath());
+		insertBrokerDaemon(db, {
+			collabId: "collab_c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		insertSessionBinding(db, {
+			collabId: "collab_c1",
+			agentType: "codex",
+			activeSessionId: "session_codex_1",
+		});
+		db.close();
+		await runCollabRecover({
+			cwd: ws,
+			now: () => "2026-05-15T00:01:00Z",
+			staleThresholdMs: 1_000,
+			isPortFreeOs: async () => true,
+			spawnBroker: ({ collabId }) => {
+				const d = openDatabase(getSharedSqlitePath());
+				d.prepare(
+					"UPDATE broker_daemon SET pid = ?, last_heartbeat_at = ? WHERE collab_id = ?",
+				).run(98765, "2026-05-15T00:01:01Z", collabId);
+				d.close();
+				return 98765;
+			},
+			waitForReady: async () => true,
+			signalProcess: () => {},
+			isAlive: async () => ({ alive: false, startTime: null }),
+		});
+		const d = openDatabase(getSharedSqlitePath());
+		const recovery = getRecoveryState(d, "collab_c1");
+		expect(recovery).toEqual({
+			collabId: "collab_c1",
+			state: "recovered",
+			idleAfterRecovery: true,
+			recoveredAt: "2026-05-15T00:01:00Z",
+		});
+		const resolved = resolveCollab({ db: d, cwd: ws, requireActive: true });
+		expect(resolved.recovery.state).toBe("recovered");
+		d.close();
+	});
+
+	it("writes recovery_state='normal' when the collab has no remembered bindings", async () => {
+		const { ws } = seed();
+		const db = openDatabase(getSharedSqlitePath());
+		insertBrokerDaemon(db, {
+			collabId: "collab_c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		db.close();
+		await runCollabRecover({
+			cwd: ws,
+			now: () => "2026-05-15T00:01:00Z",
+			staleThresholdMs: 1_000,
+			isPortFreeOs: async () => true,
+			spawnBroker: ({ collabId }) => {
+				const d = openDatabase(getSharedSqlitePath());
+				d.prepare(
+					"UPDATE broker_daemon SET pid = ?, last_heartbeat_at = ? WHERE collab_id = ?",
+				).run(98765, "2026-05-15T00:01:01Z", collabId);
+				d.close();
+				return 98765;
+			},
+			waitForReady: async () => true,
+			signalProcess: () => {},
+			isAlive: async () => ({ alive: false, startTime: null }),
+		});
+		const d = openDatabase(getSharedSqlitePath());
+		const recovery = getRecoveryState(d, "collab_c1");
+		expect(recovery).toEqual({
+			collabId: "collab_c1",
+			state: "normal",
+			idleAfterRecovery: false,
+			recoveredAt: null,
+		});
 		d.close();
 	});
 });

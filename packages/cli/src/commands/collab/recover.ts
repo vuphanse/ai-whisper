@@ -1,9 +1,11 @@
 import {
 	applyMigrations,
+	createBrokerRuntime,
 	deleteBrokerDaemonByCollab,
 	getBrokerDaemonByCollab,
 	insertBrokerDaemon,
 	openDatabase,
+	upsertRecoveryState,
 	type IsAliveResult,
 } from "@ai-whisper/broker";
 import { resolveCollab } from "../../runtime/collab-resolver.js";
@@ -244,6 +246,38 @@ export async function runCollabRecover(
 	}
 
 	db.close();
+
+	// Success path: the daemon is up and has written its pid. Re-arm session
+	// bindings / mark work items recovery-blocked, then record recovery_state so
+	// `whisper collab reconnect` (which gates on recovery.state === "recovered")
+	// is unblocked. Use a transient broker control surface against the shared DB;
+	// it never calls start() so no port is bound, and stop() closes its own
+	// (WAL) handle independently of the raw handle closed above.
+	const recoveryBroker = createBrokerRuntime({
+		sqlitePath,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
+	});
+	try {
+		const prepared = recoveryBroker.control.prepareCollabRecovery({
+			collabId,
+			now,
+		});
+		const hasRememberedBindings = prepared.bindings.some(
+			(b) => b.activeSessionId !== null,
+		);
+		upsertRecoveryState(recoveryBroker.db, {
+			collabId,
+			state: hasRememberedBindings ? "recovered" : "normal",
+			idleAfterRecovery: hasRememberedBindings,
+			recoveredAt: hasRememberedBindings ? now : null,
+		});
+	} finally {
+		await recoveryBroker.stop();
+	}
+
 	return {
 		collabId,
 		host,
