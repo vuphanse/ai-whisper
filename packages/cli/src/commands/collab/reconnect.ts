@@ -43,6 +43,7 @@ export function listReattachableSessions(input: {
 
 export async function runCollabReconnect(input: {
 	workspaceRoot: string;
+	collabIdOverride?: string;
 	target: "codex" | "claude";
 	now: string;
 	resolveCurrentTty?: () => string;
@@ -61,6 +62,9 @@ export async function runCollabReconnect(input: {
 		resolved = resolveCollab({
 			db,
 			cwd: input.workspaceRoot,
+			...(input.collabIdOverride
+				? { collabIdOverride: input.collabIdOverride }
+				: {}),
 			requireActive: true,
 			requireDaemon: true,
 		});

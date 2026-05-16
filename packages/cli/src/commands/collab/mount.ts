@@ -47,6 +47,7 @@ const MONITOR_POLL_INTERVAL_MS = 250;
 
 export async function runCollabMount(input: {
 	workspaceRoot: string;
+	collabIdOverride?: string;
 	target: "codex" | "claude";
 	now: string;
 	resolveCurrentTty?: () => string;
@@ -70,6 +71,9 @@ export async function runCollabMount(input: {
 		resolved = resolveCollab({
 			db,
 			cwd: input.workspaceRoot,
+			...(input.collabIdOverride
+				? { collabIdOverride: input.collabIdOverride }
+				: {}),
 			requireActive: true,
 			requireDaemon: true,
 		});

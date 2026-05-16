@@ -37,6 +37,7 @@ interface WorkspaceOpts {
 interface StartOpts extends WorkspaceOpts {
 	tmux: boolean;
 	launch: boolean;
+	port?: number;
 }
 
 interface TellOpts {
@@ -64,6 +65,9 @@ export function createCli(): Command {
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--no-tmux", "Disable tmux even if available")
 		.option("--no-launch", "Start broker only, do not launch agent terminals")
+		.option("--port <port>", "Explicit port to bind for the broker daemon", (v) =>
+			Number.parseInt(v, 10),
+		)
 		.action(async (opts: StartOpts) => {
 			const launchMode = chooseLaunchMode({
 				tmuxAvailable: detectTmux(),
@@ -81,6 +85,7 @@ export function createCli(): Command {
 				displayName: "phase5",
 				launchMode,
 				...(tmuxSessionName ? { tmuxSession: tmuxSessionName } : {}),
+				...(opts.port !== undefined ? { explicitPort: opts.port } : {}),
 				now: () => new Date().toISOString(),
 				isPortFreeOs: (port: number) => isPortFree(port),
 				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
@@ -262,9 +267,11 @@ export function createCli(): Command {
 		.description("Reconnect a remembered role after broker recovery (mount mode)")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (target: string, opts: WorkspaceOpts) => {
+		.option("--collab <id>", "Target a specific collab id (defaults to the active collab for cwd)")
+		.action(async (target: string, opts: WorkspaceOpts & { collab?: string }) => {
 			await runCollabReconnect({
 				workspaceRoot: opts.workspace,
+				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
 				target: target as "codex" | "claude",
 				now: new Date().toISOString(),
 			});
@@ -275,9 +282,11 @@ export function createCli(): Command {
 		.description("Mount the current terminal as the managed session surface for a role")
 		.argument("<agent>", "Target agent: codex or claude")
 		.option("--workspace <path>", "Workspace root", process.cwd())
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts) => {
+		.option("--collab <id>", "Target a specific collab id (defaults to the active collab for cwd)")
+		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { collab?: string }) => {
 			await runCollabMount({
 				workspaceRoot: opts.workspace,
+				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
 				target,
 				now: new Date().toISOString(),
 			});
