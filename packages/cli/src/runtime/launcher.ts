@@ -150,9 +150,9 @@ export function launchSessions(input: {
 	const claudeCmd = `cd ${shellQuote(input.workspaceRoot)} && ${buildMountCommand("claude", envPrefix, input.workspaceRoot)}`;
 	const relayMonitorCmd = buildRelayMonitorCommand(envPrefix, input.workspaceRoot);
 
-	const codexWindowLabel = "whisper-codex";
-	const claudeWindowLabel = "whisper-claude";
-	const relayMonitorWindowLabel = "whisper-relay-monitor";
+	const codexWindowLabel = `whisper-${input.collabId}-codex`;
+	const claudeWindowLabel = `whisper-${input.collabId}-claude`;
+	const relayMonitorWindowLabel = `whisper-${input.collabId}-relay-monitor`;
 
 	const base: LaunchResult = {
 		launched: true,

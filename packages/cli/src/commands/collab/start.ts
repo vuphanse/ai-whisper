@@ -239,13 +239,12 @@ export async function runCollabStart(
  * - tmux mode: records the deterministic tmux session name on the collab
  *   row so stop issues `tmux kill-session`.
  * - terminals mode: records each launched codex/claude window (kind
- *   "owned") so stop closes the window and signals the pid.
- *
- * Known gap: relay-monitor's terminal window/pid cannot be persisted
- * here because the `session_attachment` PK is
- * `(collab_id, agent_type, attachment_kind)` and `agent_type` is
- * constrained to `codex|claude`. The relay-monitor terminal window is
- * therefore not torn down by stop in terminals mode.
+ *   "owned") so stop closes the window and signals the pid. The
+ *   relay-monitor's terminal window/pid cannot live in
+ *   `session_attachment` (its PK is `(collab_id, agent_type,
+ *   attachment_kind)` and `agent_type` is constrained to
+ *   `codex|claude`), so they are persisted on the `collab` row
+ *   instead (parallel to `tmux_session`) for stop to tear down.
  */
 export function recordLaunchedSessions(input: {
 	collabId: string;
@@ -299,6 +298,23 @@ export function recordLaunchedSessions(input: {
 					windowLabel: agent.windowLabel ?? null,
 					attachedAt: now,
 				});
+			}
+
+			const relayMonitorWindowLabel =
+				runtime.relayMonitorWindowLabel;
+			const relayMonitorPid = runtime.relayMonitorPid;
+			if (
+				relayMonitorWindowLabel !== undefined ||
+				relayMonitorPid !== undefined
+			) {
+				db.prepare(
+					"UPDATE collab SET relay_monitor_window_label = ?, relay_monitor_pid = ?, updated_at = ? WHERE collab_id = ?",
+				).run(
+					relayMonitorWindowLabel ?? null,
+					relayMonitorPid ?? null,
+					now,
+					input.collabId,
+				);
 			}
 		}
 	} finally {

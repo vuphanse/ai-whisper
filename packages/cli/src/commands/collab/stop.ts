@@ -48,6 +48,8 @@ export function runCollabStop(input: CollabStopOpts): void {
 	let signalTarget: number | null = null;
 	let tmuxSession: string | undefined;
 	let attachments: { pid: number | null; windowLabel: string | null }[] = [];
+	let relayMonitorWindowLabel: string | null = null;
+	let relayMonitorPid: number | null = null;
 	try {
 		const resolved = resolveCollab({
 			db,
@@ -62,6 +64,21 @@ export function runCollabStop(input: CollabStopOpts): void {
 			pid: a.pid,
 			windowLabel: a.windowLabel,
 		}));
+		const relayMonitorRow = db
+			.prepare(
+				"SELECT relay_monitor_window_label, relay_monitor_pid FROM collab WHERE collab_id = ?",
+			)
+			.get(resolved.collabId) as
+			| {
+					relay_monitor_window_label: string | null;
+					relay_monitor_pid: number | null;
+			  }
+			| undefined;
+		if (relayMonitorRow) {
+			relayMonitorWindowLabel =
+				relayMonitorRow.relay_monitor_window_label;
+			relayMonitorPid = relayMonitorRow.relay_monitor_pid;
+		}
 		const tx = db.transaction(() => {
 			const daemonRow = getBrokerDaemonByCollab(db, resolved.collabId);
 			if (daemonRow && daemonRow.pid !== null) {
@@ -105,6 +122,23 @@ export function runCollabStop(input: CollabStopOpts): void {
 			} catch {
 				// process may already be dead
 			}
+		}
+	}
+
+	// Terminal-mode relay-monitor lives on the collab row (not
+	// session_attachment), so tear it down here too.
+	if (relayMonitorWindowLabel) {
+		try {
+			closeTerminalWindow(relayMonitorWindowLabel, exec);
+		} catch {
+			// Window may already be closed.
+		}
+	}
+	if (relayMonitorPid !== null) {
+		try {
+			input.signalProcess(relayMonitorPid, "SIGTERM");
+		} catch {
+			// process may already be dead
 		}
 	}
 }

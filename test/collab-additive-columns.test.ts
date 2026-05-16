@@ -24,6 +24,15 @@ describe("collab additive columns", () => {
 		expect(cols).toContain("tmux_session");
 	});
 
+	it("has relay_monitor_window_label, relay_monitor_pid columns", () => {
+		const db = freshDb();
+		const cols = (db.prepare("PRAGMA table_info(collab)").all() as Array<{ name: string }>).map(
+			(c) => c.name,
+		);
+		expect(cols).toContain("relay_monitor_window_label");
+		expect(cols).toContain("relay_monitor_pid");
+	});
+
 	it("preserves existing status column with NOT NULL", () => {
 		const db = freshDb();
 		const cols = db.prepare("PRAGMA table_info(collab)").all() as Array<{

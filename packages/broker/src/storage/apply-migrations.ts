@@ -438,6 +438,12 @@ function runMigrationBody(db: Database.Database): void {
 	if (!collabColumns.some((column) => column.name === "tmux_session")) {
 		db.exec("ALTER TABLE collab ADD COLUMN tmux_session TEXT");
 	}
+	if (!collabColumns.some((column) => column.name === "relay_monitor_window_label")) {
+		db.exec("ALTER TABLE collab ADD COLUMN relay_monitor_window_label TEXT");
+	}
+	if (!collabColumns.some((column) => column.name === "relay_monitor_pid")) {
+		db.exec("ALTER TABLE collab ADD COLUMN relay_monitor_pid INTEGER");
+	}
 	db.exec("CREATE INDEX IF NOT EXISTS collab_by_workspace ON collab(workspace_id, status)");
 
 	const relayTurnStateColumns = db.prepare("PRAGMA table_info(relay_turn_state)").all() as Array<{ name: string }>;

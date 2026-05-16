@@ -90,11 +90,11 @@ describe("recordLaunchedSessions", () => {
 			launchMode: "terminals",
 			commands: { codex: "c", claude: "cl", relayMonitor: "rm" },
 			runtime: {
-				codexWindowLabel: "whisper-codex",
+				codexWindowLabel: "whisper-c1-codex",
 				codexPid: 5001,
-				claudeWindowLabel: "whisper-claude",
+				claudeWindowLabel: "whisper-c1-claude",
 				claudePid: 5002,
-				relayMonitorWindowLabel: "whisper-relay-monitor",
+				relayMonitorWindowLabel: "whisper-c1-relay-monitor",
 				relayMonitorPid: 5003,
 			},
 		};
@@ -108,22 +108,34 @@ describe("recordLaunchedSessions", () => {
 		const rows = listSessionAttachmentsByCollab(db, "c1").filter(
 			(a) => a.attachmentKind === "owned",
 		);
+		const collabRow = db
+			.prepare(
+				"SELECT relay_monitor_window_label, relay_monitor_pid FROM collab WHERE collab_id = 'c1'",
+			)
+			.get() as {
+			relay_monitor_window_label: string | null;
+			relay_monitor_pid: number | null;
+		};
 		db.close();
 		expect(rows).toHaveLength(2);
 		const codex = rows.find((r) => r.agentType === "codex");
 		const claude = rows.find((r) => r.agentType === "claude");
 		expect(codex).toMatchObject({
-			windowLabel: "whisper-codex",
+			windowLabel: "whisper-c1-codex",
 			pid: 5001,
 			launchMode: "terminals",
 			providerId: "codex",
 		});
 		expect(claude).toMatchObject({
-			windowLabel: "whisper-claude",
+			windowLabel: "whisper-c1-claude",
 			pid: 5002,
 			launchMode: "terminals",
 			providerId: "claude",
 		});
+		expect(collabRow.relay_monitor_window_label).toBe(
+			"whisper-c1-relay-monitor",
+		);
+		expect(collabRow.relay_monitor_pid).toBe(5003);
 
 		const signals: Array<{ pid: number; sig: string }> = [];
 		const commands: string[] = [];
@@ -135,7 +147,11 @@ describe("recordLaunchedSessions", () => {
 		});
 		expect(signals).toContainEqual({ pid: 5001, sig: "SIGTERM" });
 		expect(signals).toContainEqual({ pid: 5002, sig: "SIGTERM" });
-		expect(commands.some((c) => c.includes("whisper-codex"))).toBe(true);
-		expect(commands.some((c) => c.includes("whisper-claude"))).toBe(true);
+		expect(signals).toContainEqual({ pid: 5003, sig: "SIGTERM" });
+		expect(commands.some((c) => c.includes("whisper-c1-codex"))).toBe(true);
+		expect(commands.some((c) => c.includes("whisper-c1-claude"))).toBe(true);
+		expect(
+			commands.some((c) => c.includes("whisper-c1-relay-monitor")),
+		).toBe(true);
 	});
 });

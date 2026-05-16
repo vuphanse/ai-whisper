@@ -94,9 +94,15 @@ describe("launcher real behavior", () => {
 			expect(result.launched).toBe(true);
 			expect(result.launchMode).toBe("terminals");
 			expect(spawned).toHaveLength(3);
-			expect(result.runtime.codexWindowLabel).toBe("whisper-codex");
-			expect(result.runtime.claudeWindowLabel).toBe("whisper-claude");
-			expect(result.runtime.relayMonitorWindowLabel).toBe("whisper-relay-monitor");
+			expect(result.runtime.codexWindowLabel).toBe(
+				`whisper-${baseLaunchInput.collabId}-codex`,
+			);
+			expect(result.runtime.claudeWindowLabel).toBe(
+				`whisper-${baseLaunchInput.collabId}-claude`,
+			);
+			expect(result.runtime.relayMonitorWindowLabel).toBe(
+				`whisper-${baseLaunchInput.collabId}-relay-monitor`,
+			);
 			// relay-monitor must start first so mount panes find the monitor on their first poll
 			expect(spawned[0]).toMatch(/relay-monitor/);
 			expect(spawned[1]).toMatch(/collab mount codex/);
