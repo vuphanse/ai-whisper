@@ -18,11 +18,8 @@ import {
 	detectTmux,
 	launchSessions,
 } from "./runtime/launcher.js";
-import { getStateFilePath } from "./runtime/paths.js";
 import { isPortFree } from "./runtime/port-utils.js";
 import { getSharedSqlitePath } from "./runtime/state-root.js";
-import { writeCliCollabState } from "./runtime/state-file.js";
-import { canonicalWorkspaceRoot } from "./runtime/workspace-id.js";
 import { runWorkflowStart } from "./commands/workflow/start.js";
 import { runWorkflowList } from "./commands/workflow/list.js";
 import { runWorkflowInspect } from "./commands/workflow/inspect.js";
@@ -76,8 +73,6 @@ export function createCli(): Command {
 				launchMode === "tmux" &&
 				Boolean(process.stdin.isTTY) &&
 				Boolean(process.stdout.isTTY);
-			const workspaceRoot = canonicalWorkspaceRoot(opts.workspace);
-			const startedAt = new Date().toISOString();
 			const tmuxSessionName =
 				launchMode === "tmux" ? undefined : undefined; // resolved below from collabId
 			const r = await runCollabStart({
@@ -124,42 +119,13 @@ export function createCli(): Command {
 				},
 			});
 
-			// LEGACY BRIDGE (kept until Task 24): writeCliCollabState
 			const sharedSqlitePath = getSharedSqlitePath();
-			const tmuxSession =
-				launchMode === "tmux" ? `whisper-${r.collabId}` : undefined;
-			writeCliCollabState(getStateFilePath(workspaceRoot), {
-				version: 5,
-				collabId: r.collabId,
-				workspaceRoot,
-				broker: {
-					sqlitePath: sharedSqlitePath,
-					host: r.host as "127.0.0.1",
-					port: r.port,
-					pid: r.pid,
-				},
-				launch: {
-					mode: launchMode,
-					...(tmuxSession ? { tmuxSession } : {}),
-				},
-				ownedSessions: {},
-				startedAt,
-				recovery: {
-					state: "normal",
-					idleAfterRecovery: false,
-					recoveredAt: null,
-				},
-				adoptedSessions: {},
-				mountedSessions: {},
-			});
-
-			// THEN launchSessions (unmigrated mount panes still read state.json).
 			if (launchMode !== "none") {
 				launchSessions({
 					launchMode,
 					...(attachTmux !== undefined ? { attachTmux } : {}),
 					collabId: r.collabId,
-					workspaceRoot,
+					workspaceRoot: opts.workspace,
 					brokerSqlitePath: sharedSqlitePath,
 					brokerHost: r.host,
 					brokerPort: r.port,
@@ -434,7 +400,7 @@ export function createCli(): Command {
 				reviewer: "claude" | "codex";
 				name?: string;
 			}) => {
-				const { broker, collabId } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
+				const { broker, collabId } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 				try {
 					const result = await runWorkflowStart({
 						broker,
@@ -458,7 +424,7 @@ export function createCli(): Command {
 		.description("List workflows for the active collab")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (opts: WorkspaceOpts) => {
-			const { broker, collabId } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
+			const { broker, collabId } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 			try {
 				const list = runWorkflowList({ broker, collabId });
 				if (list.length === 0) {
@@ -479,7 +445,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
+			const { broker } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 			try {
 				const result = await runWorkflowInspect({ broker, workflowId });
 				console.log(JSON.stringify(result, null, 2));
@@ -494,7 +460,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
+			const { broker } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 			try {
 				await runWorkflowResume({ broker, workflowId, now: new Date().toISOString() });
 				console.log(`Workflow resumed: ${workflowId}`);
@@ -509,7 +475,7 @@ export function createCli(): Command {
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
-			const { broker } = await connectToWorkspaceBroker({ workspaceRoot: opts.workspace });
+			const { broker } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 			try {
 				await runWorkflowCancel({ broker, workflowId, now: new Date().toISOString() });
 				console.log(`Workflow canceled: ${workflowId}`);

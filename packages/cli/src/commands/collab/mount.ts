@@ -3,9 +3,6 @@ import {
 	openDatabase,
 	upsertSessionAttachment,
 } from "@ai-whisper/broker";
-import { readCliCollabState } from "../../runtime/state-file.js";
-import { getStateFilePath } from "../../runtime/paths.js";
-import { probeAndLatchBrokerState } from "../../runtime/recovery-guard.js";
 import { assessBrokerDaemon } from "../../runtime/broker-daemon.js";
 import { resolveCurrentTty } from "../../runtime/current-tty.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
@@ -67,17 +64,52 @@ export async function runCollabMount(input: {
 	const monitorPollIntervalMs =
 		input.monitorPollIntervalMs ?? MONITOR_POLL_INTERVAL_MS;
 
-	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
-	if (!state) {
-		throw new Error("No active collab. Run `whisper collab start` first.");
+	const db = openDatabase(getSharedSqlitePath());
+	let resolved;
+	try {
+		resolved = resolveCollab({
+			db,
+			cwd: input.workspaceRoot,
+			requireActive: true,
+			requireDaemon: true,
+		});
+	} finally {
+		db.close();
 	}
 
-	await probeAndLatchBrokerState(state, input.workspaceRoot, input.assessBroker);
+	if (resolved.recovery.state === "recovery_required") {
+		throw new Error(
+			"Broker is unavailable for the current collab. Run `whisper collab recover`.",
+		);
+	}
+	if (resolved.recovery.state === "recovered") {
+		throw new Error(
+			"Collab has been recovered and still needs reconnect. Run `whisper collab reconnect <codex|claude>`.",
+		);
+	}
+
+	// daemon is non-null because requireDaemon: true.
+	const daemon = resolved.daemon as { host: string; port: number; pid: number };
+
+	// Optional broker probe (callers in tests inject a mock).
+	if (input.assessBroker) {
+		const health = await input.assessBroker({
+			host: daemon.host,
+			port: daemon.port,
+			pid: daemon.pid,
+		});
+		if (!health.ok) {
+			throw new Error(
+				"Broker is unavailable for the current collab. Run `whisper collab recover`.",
+			);
+		}
+	}
+
 	const ttyPath = (input.resolveCurrentTty ?? resolveCurrentTty)();
 	const broker = createBrokerRuntime({
-		sqlitePath: state.broker.sqlitePath,
-		host: state.broker.host,
-		port: state.broker.port,
+		sqlitePath: getSharedSqlitePath(),
+		host: daemon.host,
+		port: daemon.port,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
@@ -86,7 +118,7 @@ export async function runCollabMount(input: {
 	let brokerHandedOff = false;
 	try {
 		let elapsed = 0;
-		while (!broker.control.isRelayMonitorConnected(state.collabId)) {
+		while (!broker.control.isRelayMonitorConnected(resolved.collabId)) {
 			if (elapsed >= monitorWaitTimeoutMs) {
 				throw new Error(
 					"Relay monitor not connected. Run `whisper collab relay-monitor` in a separate terminal first.",
@@ -97,7 +129,7 @@ export async function runCollabMount(input: {
 		}
 
 		const current = broker.control
-			.listSessionBindings(state.collabId)
+			.listSessionBindings(resolved.collabId)
 			.find((binding) => binding.agentType === input.target);
 		if (current?.bindingState === "bound") {
 			throw new Error(
@@ -106,7 +138,7 @@ export async function runCollabMount(input: {
 		}
 
 		const claim = broker.control.issueAttachClaim({
-			collabId: state.collabId,
+			collabId: resolved.collabId,
 			agentType: input.target,
 			mode: "attach",
 			targetMode: "mount_current_tty",

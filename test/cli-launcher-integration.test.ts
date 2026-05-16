@@ -2,8 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
-import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
+import { openDatabase } from "@ai-whisper/broker";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("cli launcher integration", () => {
@@ -30,22 +30,31 @@ describe("cli launcher integration", () => {
 		expect(result).not.toHaveProperty("claudeSessionId");
 	});
 
-	it("state file records the launch mode and broker info with empty ownedSessions", async () => {
+	it("shared DB records the launch mode for the collab", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-launcher-state-"),
 		);
 
-		await startCollabForTest({
+		const result = await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "tmux",
+			tmuxSession: `whisper-${"collab_launcher"}`,
 		});
 
-		const state = readCliCollabState(getStateFilePath(workspaceRoot));
-		expect(state?.launch?.mode).toBe("tmux");
-		expect(state?.launch?.tmuxSession).toMatch(/^whisper-collab_/);
-		// ownedSessions stays empty — mountedSessions is populated when mount
-		// panes complete their attach claim.
-		expect(state?.ownedSessions).toEqual({});
+		const db = openDatabase(getSharedSqlitePath());
+		try {
+			const row = db
+				.prepare(
+					"SELECT launch_mode, tmux_session FROM collab WHERE collab_id = ?",
+				)
+				.get(result.collabId) as
+				| { launch_mode: string; tmux_session: string | null }
+				| undefined;
+			expect(row?.launch_mode).toBe("tmux");
+			expect(row?.tmux_session).toMatch(/^whisper-/);
+		} finally {
+			db.close();
+		}
 	});
 });

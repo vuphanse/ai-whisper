@@ -80,7 +80,6 @@ describe("mount session runtime — modal line reader", () => {
 						transitionIntent: null,
 					}),
 			}),
-			updateState: vi.fn(),
 			runLoop: () => Promise.resolve(async () => {}),
 		});
 

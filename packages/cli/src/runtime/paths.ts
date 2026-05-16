@@ -10,10 +10,6 @@ export function getLiveSessionBrokerTempRoot(): string {
 	return join(os.tmpdir(), "ai-whisper", username, "live-session-broker");
 }
 
-export function getStateFilePath(workspaceRoot: string): string {
-	return join(getRuntimeRoot(workspaceRoot), "current-collab.json");
-}
-
 export function getBrokerSqlitePath(workspaceRoot: string): string {
 	return join(getRuntimeRoot(workspaceRoot), "broker.sqlite");
 }

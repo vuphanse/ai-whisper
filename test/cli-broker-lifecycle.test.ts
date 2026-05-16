@@ -2,32 +2,40 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+	getBrokerDaemonByCollab,
+	openDatabase,
+} from "@ai-whisper/broker";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
-import { readCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
-import { getStateFilePath } from "../packages/cli/src/runtime/paths.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 import { startCollabForTest } from "./helpers/start-collab-for-test.ts";
 
 describe("broker lifecycle", () => {
-	it("start records broker PID in state file", async () => {
+	it("start records broker PID in the shared DB", async () => {
 		const workspaceRoot = mkdtempSync(join(tmpdir(), "ai-whisper-broker-pid-"));
 
-		await startCollabForTest({
+		const result = await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
 		});
 
-		const state = readCliCollabState(getStateFilePath(workspaceRoot));
-		expect(state?.broker.pid).toBeTypeOf("number");
-		expect(state!.broker.pid).toBeGreaterThan(0);
+		const db = openDatabase(getSharedSqlitePath());
+		try {
+			const row = getBrokerDaemonByCollab(db, result.collabId);
+			expect(row?.pid).toBeTypeOf("number");
+			expect(row!.pid!).toBeGreaterThan(0);
+		} finally {
+			db.close();
+		}
 	});
 
-	it("stop kills the broker process and cleans up state", async () => {
+	it("stop kills the broker process and clears the daemon row", async () => {
 		const workspaceRoot = mkdtempSync(
 			join(tmpdir(), "ai-whisper-broker-stop-"),
 		);
 
-		await startCollabForTest({
+		const result = await startCollabForTest({
 			workspaceRoot,
 			now: "2026-04-03T00:00:00.000Z",
 			launchMode: "terminals",
@@ -38,7 +46,13 @@ describe("broker lifecycle", () => {
 			now: () => "2026-04-03T00:01:00.000Z",
 			signalProcess: () => {},
 		});
-		// Legacy bridge: state.json is cleared as well (removed in Task 24).
-		expect(readCliCollabState(getStateFilePath(workspaceRoot))).toBeNull();
+
+		const db = openDatabase(getSharedSqlitePath());
+		try {
+			const row = getBrokerDaemonByCollab(db, result.collabId);
+			expect(row).toBeNull();
+		} finally {
+			db.close();
+		}
 	});
 });

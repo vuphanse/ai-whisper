@@ -1,6 +1,4 @@
 import { createBrokerRuntime, openDatabase, type BrokerRuntime } from "@ai-whisper/broker";
-import { readCliCollabState } from "../../runtime/state-file.js";
-import { getStateFilePath } from "../../runtime/paths.js";
 import { resolveCurrentTty as defaultResolveCurrentTty } from "../../runtime/current-tty.js";
 import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
 import { resolveCollab } from "../../runtime/collab-resolver.js";
@@ -57,18 +55,29 @@ export async function runCollabReconnect(input: {
 		broker: BrokerRuntime;
 	}) => Promise<void>;
 }) {
-	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
-	if (!state) {
-		throw new Error("No active collab. Run `whisper collab start` first.");
+	const db = openDatabase(getSharedSqlitePath());
+	let resolved;
+	try {
+		resolved = resolveCollab({
+			db,
+			cwd: input.workspaceRoot,
+			requireActive: true,
+			requireDaemon: true,
+		});
+	} finally {
+		db.close();
 	}
-	if (state.recovery.state !== "recovered") {
+
+	if (resolved.recovery.state !== "recovered") {
 		throw new Error("Collab has not been recovered. Run `whisper collab recover` first.");
 	}
 
+	const daemon = resolved.daemon as { host: string; port: number; pid: number };
+
 	const broker = createBrokerRuntime({
-		sqlitePath: state.broker.sqlitePath,
-		host: state.broker.host,
-		port: state.broker.port,
+		sqlitePath: getSharedSqlitePath(),
+		host: daemon.host,
+		port: daemon.port,
 		runWorkflowDriver: false,
 		runDiagnosticsSweep: false,
 		runDaemonHeartbeat: false,
@@ -76,7 +85,7 @@ export async function runCollabReconnect(input: {
 	});
 
 	const current = broker.control
-		.listSessionBindings(state.collabId)
+		.listSessionBindings(resolved.collabId)
 		.find((binding) => binding.agentType === input.target);
 	if (!current?.activeSessionId) {
 		void broker.stop();
@@ -86,7 +95,7 @@ export async function runCollabReconnect(input: {
 	}
 
 	const boundSession = broker.control
-		.listSessions(state.collabId)
+		.listSessions(resolved.collabId)
 		.find((session) => session.sessionId === current.activeSessionId);
 	if (boundSession?.healthState === "healthy") {
 		void broker.stop();
@@ -98,7 +107,7 @@ export async function runCollabReconnect(input: {
 	const ttyPath = (input.resolveCurrentTty ?? defaultResolveCurrentTty)();
 
 	const claim = broker.control.issueAttachClaim({
-		collabId: state.collabId,
+		collabId: resolved.collabId,
 		agentType: input.target,
 		mode: "reconnect",
 		targetMode: "mount_current_tty",

@@ -1,5 +1,12 @@
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import type { RelayDirective } from "@ai-whisper/shared";
+import {
+	openDatabase,
+	deleteSessionAttachment,
+	getRecoveryState,
+	upsertRecoveryState,
+} from "@ai-whisper/broker";
+import { getSharedSqlitePath } from "./state-root.js";
 import { createLiveSessionRuntime } from "./live-session.js";
 import { runCompanionAgentLoop } from "./companion-agent-loop.js";
 import {
@@ -8,8 +15,6 @@ import {
 } from "./providers.js";
 import { createContextInjector } from "./context-injector.js";
 import { createCliSessionId } from "./id-factory.js";
-import { updateCliCollabState } from "./state-file.js";
-import { getStateFilePath } from "./paths.js";
 import { recordMountedSession } from "../commands/collab/mount.js";
 import { createRelayPaneWriter } from "./relay-pane-writer.js";
 import { createMountedTurnOwnedRelay } from "./mounted-turn-owned-relay.js";
@@ -30,7 +35,6 @@ export function createMountSessionRuntime(input: {
 	claimId: string;
 	secret: string;
 	broker: BrokerRuntime;
-	updateState?: typeof updateCliCollabState;
 	createProvider?: typeof createProviderForTarget;
 	createInteractiveSession?: typeof createInteractiveSessionForTarget;
 	createLiveSession?: typeof createLiveSessionRuntime;
@@ -52,7 +56,6 @@ export function createMountSessionRuntime(input: {
 			let liveSessionStarted = false;
 			let stopping = false;
 			let closeLineReader = () => {};
-			const stateFilePath = getStateFilePath(input.workspaceRoot);
 
 			// liveSession is set after the collab claim resolves so collabId is available
 			// for turnRelay, allowing externalInputGate to be passed directly instead of
@@ -90,17 +93,21 @@ export function createMountSessionRuntime(input: {
 						// Best-effort; broker may already be unreachable.
 					}
 				}
-				try {
-					(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
-						const nextMountedSessions = { ...current.mountedSessions };
-						delete nextMountedSessions[input.target];
-						return {
-							...current,
-							mountedSessions: nextMountedSessions,
-						};
-					});
-				} catch {
-					// State cleanup is best-effort.
+				if (resolvedClaim) {
+					try {
+						const db = openDatabase(getSharedSqlitePath());
+						try {
+							deleteSessionAttachment(db, {
+								collabId: resolvedClaim.collabId,
+								agentType: input.target,
+								attachmentKind: "mounted",
+							});
+						} finally {
+							db.close();
+						}
+					} catch {
+						// Best-effort cleanup; the row may already be gone.
+					}
 				}
 				await input.broker.stop();
 			};
@@ -332,57 +339,51 @@ export function createMountSessionRuntime(input: {
 					}, 1000);
 					mountedTurnRelay.refreshOwnerView();
 
-				// Dual-write to shared DB: record session_attachment(kind='mounted').
-				// Legacy state.json write below is kept for reconnect/mount-session-main
-				// until Task 19 migrates those callers.
+				// Record session_attachment(kind='mounted') in the shared DB.
 				try {
 					await recordMountedSession({
 						cwd: input.workspaceRoot,
 						agentType: input.target,
 						ttyPath: input.ttyPath,
 						pid: process.pid,
-						collabIdOverride: resolvedClaim!.collabId,
+						collabIdOverride: resolvedClaim.collabId,
 					});
 				} catch {
-					// Best-effort; shared-DB write failures must not break legacy mount flow.
+					// Best-effort; shared-DB write failures must not break mount flow.
 				}
 
-				// Update state file: record mounted session metadata + clear recovery state.
-				(input.updateState ?? updateCliCollabState)(stateFilePath, (current) => {
-					let next = {
-						...current,
-						mountedSessions: {
-							...current.mountedSessions,
-							[input.target]: {
-								agentType: input.target,
-								ttyPath: input.ttyPath,
-								sessionPid: process.pid,
-							},
-						},
-					};
-
-					// Clear recovery state if this was a reconnect (mirrors attach-session.ts pattern).
-					if (next.recovery.state === "recovered") {
-						const remainingDegraded = input.broker.control
-							.listSessionBindings(resolvedClaim!.collabId)
-							.some((b) => {
-								if (!b.activeSessionId) return false;
-								const s = input.broker.control
-									.listSessions(resolvedClaim!.collabId)
-									.find((sess) => sess.sessionId === b.activeSessionId);
-								return s?.healthState !== "healthy";
-							});
-
-						next = {
-							...next,
-							recovery: remainingDegraded
-								? { ...next.recovery, idleAfterRecovery: false }
-								: { state: "normal" as const, idleAfterRecovery: false, recoveredAt: null },
-						};
+				// Clear recovery state if this was a reconnect after recovery and
+				// no other sessions remain degraded.
+				try {
+					const collabId = resolvedClaim.collabId;
+					const remainingDegraded = input.broker.control
+						.listSessionBindings(collabId)
+						.some((b) => {
+							if (!b.activeSessionId) return false;
+							const s = input.broker.control
+								.listSessions(collabId)
+								.find((sess) => sess.sessionId === b.activeSessionId);
+							return s?.healthState !== "healthy";
+						});
+					if (!remainingDegraded) {
+						const db = openDatabase(getSharedSqlitePath());
+						try {
+							const current = getRecoveryState(db, collabId);
+							if (current && current.state === "recovered") {
+								upsertRecoveryState(db, {
+									collabId,
+									state: "normal",
+									idleAfterRecovery: false,
+									recoveredAt: null,
+								});
+							}
+						} finally {
+							db.close();
+						}
 					}
-
-					return next;
-				});
+				} catch {
+					// Best-effort recovery latch clear.
+				}
 
 				stopLoop = await (input.runLoop ?? runCompanionAgentLoop)({
 					broker: input.broker,

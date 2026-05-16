@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createMountSessionRuntime } from "../packages/cli/src/runtime/mount-session-main.ts";
 import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 import { createCli } from "../packages/cli/src/create-cli.ts";
-import type { CliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 
 describe("mount session runtime", () => {
 	it("starts the live session before completing the claim and records mounted session metadata", async () => {
@@ -22,22 +21,6 @@ describe("mount session runtime", () => {
 			},
 			stop: () => Promise.resolve(),
 		};
-		const fakeState: CliCollabState = {
-			version: 5,
-			collabId: "collab_mount",
-			workspaceRoot: "/tmp/workspace",
-			broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: "2026-04-06T08:00:00.000Z",
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		};
-		const updateState = vi.fn((_: string, update: (s: CliCollabState) => CliCollabState) =>
-			update(fakeState),
-		);
-
 		const runtime = createMountSessionRuntime({
 			target: "codex",
 			ttyPath: "/dev/ttys031",
@@ -76,7 +59,6 @@ describe("mount session runtime", () => {
 				getHealthState: () => "healthy" as const,
 				handleWork: () => Promise.resolve({ kind: "answer" as const, content: "ok", transitionIntent: null }),
 			}),
-			updateState,
 			runLoop: () => Promise.resolve(async () => {}),
 		});
 
@@ -84,7 +66,6 @@ describe("mount session runtime", () => {
 
 		expect(callOrder).toEqual(["live-start", "complete-claim"]);
 		expect(completeAttachClaim).toHaveBeenCalledWith(expect.objectContaining({ bindingSource: "mounted" }));
-		expect(updateState).toHaveBeenCalled();
 	});
 
 	it("does not consume the claim when provider startup fails", async () => {
@@ -125,7 +106,6 @@ describe("mount session runtime", () => {
 				getHealthState: () => "healthy" as const,
 				handleWork: () => Promise.resolve({ kind: "answer" as const, content: "ok", transitionIntent: null }),
 			}),
-			updateState: vi.fn(),
 			runLoop: () => Promise.resolve(async () => {}),
 		});
 
@@ -144,18 +124,6 @@ describe("mount session runtime — degradation on exit", () => {
 		const markSessionDegraded = vi.fn();
 
 		let capturedOnExit: (() => void) | null = null;
-		const fakeState: CliCollabState = {
-			version: 5,
-			collabId: "collab_mount",
-			workspaceRoot: "/tmp/workspace",
-			broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: "2026-04-06T08:00:00.000Z",
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		};
 
 		const processExitCalls: number[] = [];
 		const exitSpy = vi.spyOn(process, "exit").mockImplementation((code) => {
@@ -203,7 +171,6 @@ describe("mount session runtime — degradation on exit", () => {
 					getHealthState: () => "healthy" as const,
 					handleWork: () => Promise.resolve({ kind: "answer" as const, content: "ok", transitionIntent: null }),
 				}),
-				updateState: vi.fn((_: string, update: (s: CliCollabState) => CliCollabState) => update(fakeState)),
 				runLoop: () => Promise.resolve(async () => {}),
 			});
 
@@ -234,19 +201,6 @@ describe("mount session runtime — idle timer", () => {
 			sessionId: "session_idle",
 			agentType: "codex",
 		}));
-		const fakeState: CliCollabState = {
-			version: 5,
-			collabId: "collab_idle_wire",
-			workspaceRoot: "/tmp/workspace",
-			broker: { sqlitePath: "/tmp/broker.sqlite", host: "127.0.0.1", port: 4311, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: "2026-04-10T00:00:00.000Z",
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
-		};
-
 		// Relay factory injection: return a fake relay that exposes our spy
 		const createTurnRelay: typeof createMountedTurnOwnedRelay = (_relayInput) => ({
 			getWaitingGate: () => ({
@@ -317,9 +271,6 @@ describe("mount session runtime — idle timer", () => {
 					isPaused: () => false,
 				}) as never,
 			runLoop: () => Promise.resolve(() => Promise.resolve()),
-			updateState: vi.fn((_: string, update: (s: CliCollabState) => CliCollabState) =>
-				update(fakeState),
-			),
 			createTurnRelay,
 		});
 

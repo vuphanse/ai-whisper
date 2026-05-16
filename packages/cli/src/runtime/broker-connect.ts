@@ -1,25 +1,46 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
+import { createBrokerRuntime, openDatabase } from "@ai-whisper/broker";
 import type { BrokerRuntime } from "@ai-whisper/broker";
-import { getBrokerSqlitePath, getStateFilePath } from "./paths.js";
-import { readCliCollabState } from "./state-file.js";
-import { probeAndLatchBrokerState } from "./recovery-guard.js";
-import { assessBrokerDaemon } from "./broker-daemon.js";
+import { resolveCollab } from "./collab-resolver.js";
+import { getSharedSqlitePath } from "./state-root.js";
 
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function connectToWorkspaceBroker(
-	{ workspaceRoot }: { workspaceRoot: string },
-	assessBroker?: typeof assessBrokerDaemon,
+	input: { cwd: string; collabIdOverride?: string },
 ): Promise<{ broker: BrokerRuntime; collabId: string }> {
-	const state = readCliCollabState(getStateFilePath(workspaceRoot));
-	if (!state) {
-		throw new Error("No active collab. Run `whisper collab start` first.");
+	const db = openDatabase(getSharedSqlitePath());
+	let resolved;
+	try {
+		resolved = resolveCollab({
+			db,
+			cwd: input.cwd,
+			...(input.collabIdOverride !== undefined
+				? { collabIdOverride: input.collabIdOverride }
+				: {}),
+			requireActive: true,
+			requireDaemon: true,
+		});
+	} finally {
+		db.close();
 	}
 
-	await probeAndLatchBrokerState(state, workspaceRoot, assessBroker);
+	if (resolved.recovery.state === "recovery_required") {
+		throw new Error(
+			"Broker is unavailable for the current collab. Run `whisper collab recover`.",
+		);
+	}
+	if (resolved.recovery.state === "recovered") {
+		throw new Error(
+			"Collab has been recovered and still needs reconnect. Run `whisper collab reconnect <codex|claude>`.",
+		);
+	}
+
+	// daemon is non-null because requireDaemon: true
+	const daemon = resolved.daemon as { host: string; port: number; pid: number };
 
 	const broker = createBrokerRuntime({
-		sqlitePath: getBrokerSqlitePath(workspaceRoot),
-		host: state.broker.host,
-		port: state.broker.port,
+		sqlitePath: getSharedSqlitePath(),
+		host: daemon.host,
+		port: daemon.port,
 		// Transient CLI broker: the daemon owns workflow driving and diagnostics
 		// retention. Skipping the local timers avoids racing setImmediate-scheduled
 		// kickoffs against broker.stop() on command exit.
@@ -29,5 +50,6 @@ export async function connectToWorkspaceBroker(
 		runBrokerDaemonSweep: false,
 	});
 
-	return { broker, collabId: state.collabId };
+	return { broker, collabId: resolved.collabId };
 }
+

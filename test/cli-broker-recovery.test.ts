@@ -1,44 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readCliCollabState, writeCliCollabState } from "../packages/cli/src/runtime/state-file.ts";
 import { assessBrokerDaemon } from "../packages/cli/src/runtime/broker-daemon.ts";
 import { runCollabReconnect } from "../packages/cli/src/commands/collab/reconnect.ts";
 import { runCollabStatus } from "../packages/cli/src/commands/collab/status.ts";
 import { runCollabTell } from "../packages/cli/src/commands/collab/tell.ts";
-import { createBrokerRuntime, upsertRecoveryState, upsertWorkspace } from "../packages/broker/src/index.ts";
+import {
+	createBrokerRuntime,
+	insertBrokerDaemon,
+	upsertRecoveryState,
+	upsertWorkspace,
+} from "../packages/broker/src/index.ts";
 import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
 import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
 import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
 
 describe("cli recovery state", () => {
-	it("normalizes v2 state into v3 recovery defaults", () => {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-recovery-state-"));
-		const statePath = join(dir, "current-collab.json");
-		writeFileSync(statePath, JSON.stringify({
-			version: 2,
-			collabId: "collab_v2",
-			workspaceRoot: "/tmp/workspace",
-			broker: {
-				sqlitePath: "/tmp/workspace/.ai-whisper/runtime/broker.sqlite",
-				host: "127.0.0.1",
-				port: 4311,
-				pid: 99123,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: "2026-04-05T15:55:00.000Z",
-		}));
-
-		expect(readCliCollabState(statePath)?.recovery).toEqual({
-			state: "normal",
-			idleAfterRecovery: false,
-			recoveredAt: null,
-		});
-	});
-
 	it("marks the broker unavailable when pid and health probe both fail", async () => {
 		const result = await assessBrokerDaemon({
 			host: "127.0.0.1",
@@ -58,24 +37,62 @@ describe("cli recovery state", () => {
 	});
 });
 
+interface ReconnectFixture {
+	tmpRoot: string;
+	dir: string;
+	collabId: string;
+	port: number;
+	now: string;
+}
 
-describe("reconnect command", () => {
-	async function buildReconnectFixture() {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-"));
-		const sqlitePath = join(dir, "broker.sqlite");
-		const collabId = "collab_reconnect_test";
-		const now = "2026-04-05T17:00:00.000Z";
+async function buildReconnectFixture(opts: {
+	port: number;
+	recoveryState: "normal" | "recovery_required" | "recovered";
+	registerBinding?: boolean;
+}): Promise<ReconnectFixture> {
+	const tmpRoot = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-"));
+	process.env.AI_WHISPER_STATE_ROOT = tmpRoot;
+	const dir = join(tmpRoot, "ws");
+	mkdirSync(dir);
+	const collabId = `collab_reconnect_${opts.port}`;
+	const now = "2026-04-05T17:00:00.000Z";
 
-		// Set up broker state: codex session registered but marked degraded (post-recovery)
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4410 });
-		broker.control.startCollab({
-			collabId,
-			workspaceRoot: dir,
-			displayName: "reconnect test",
-			now,
+	const db = openDatabase(getSharedSqlitePath());
+	applyMigrations(db);
+	const wsId = workspaceIdFromPath(dir);
+	upsertWorkspace(db, { id: wsId, workspaceRoot: dir, now });
+	db.prepare(
+		"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES (?, ?, 'reconnect test', 'active', ?, 'none', null, ?, ?)",
+	).run(collabId, dir, wsId, now, now);
+	insertBrokerDaemon(db, {
+		collabId,
+		host: "127.0.0.1",
+		port: opts.port,
+		startedAt: now,
+		lastHeartbeatAt: now,
+	});
+	// Fill in pid so requireDaemon: true is satisfied.
+	db.prepare(
+		"UPDATE broker_daemon SET pid = ?, last_heartbeat_at = ? WHERE collab_id = ?",
+	).run(99123, now, collabId);
+	upsertRecoveryState(db, {
+		collabId,
+		state: opts.recoveryState,
+		idleAfterRecovery: opts.recoveryState === "recovered",
+		recoveredAt: opts.recoveryState === "recovered" ? now : null,
+	});
+	db.close();
+
+	if (opts.registerBinding) {
+		// Use a per-workspace broker runtime to register a session binding
+		// in the shared DB.
+		const broker = createBrokerRuntime({
+			sqlitePath: getSharedSqlitePath(),
+			host: "127.0.0.1",
+			port: opts.port,
 		});
 		broker.control.registerSession({
-			sessionId: "session_codex_degraded",
+			sessionId: `session_codex_${opts.port}`,
 			collabId,
 			agentType: "codex",
 			capabilities: {
@@ -91,81 +108,49 @@ describe("reconnect command", () => {
 		broker.control.setSessionBinding({
 			collabId,
 			agentType: "codex",
-			sessionId: "session_codex_degraded",
-			bindingSource: "attached",
+			sessionId: `session_codex_${opts.port}`,
+			bindingSource: "mounted",
 			now,
 		});
-		// Mark session degraded (simulating post-recovery state)
 		broker.control.prepareCollabRecovery({ collabId, now });
 		await broker.stop();
-
-		// Write state file with recovery.state === "recovered"
-		const runtimeDir = join(dir, ".ai-whisper", "runtime");
-		const statePath = join(runtimeDir, "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: {
-				sqlitePath,
-				host: "127.0.0.1",
-				port: 4410,
-				pid: 99123,
-			},
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: {
-				state: "recovered",
-				idleAfterRecovery: true,
-				recoveredAt: now,
-			},
-			adoptedSessions: {},
-			mountedSessions: {},
-		});
-
-		return { dir, statePath, collabId, sqlitePath, now };
 	}
 
-	it("throws when recovery.state is not 'recovered'", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-notrecov-"));
-		const sqlitePath = join(dir, "broker.sqlite");
-		const collabId = "collab_reconnect_notrecov";
-		const now = "2026-04-05T17:00:00.000Z";
+	return { tmpRoot, dir, collabId, port: opts.port, now };
+}
 
-		const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4411 });
-		broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "test", now });
-		await broker.stop();
-
-		const runtimeDir = join(dir, ".ai-whisper", "runtime");
-		const statePath = join(runtimeDir, "current-collab.json");
-		writeCliCollabState(statePath, {
-			version: 5,
-			collabId,
-			workspaceRoot: dir,
-			broker: { sqlitePath, host: "127.0.0.1", port: 4411, pid: 99123 },
-			launch: { mode: "none" },
-			ownedSessions: {},
-			startedAt: now,
-			recovery: { state: "normal", idleAfterRecovery: false, recoveredAt: null },
-			adoptedSessions: {},
-			mountedSessions: {},
+describe("reconnect command", () => {
+	it("throws when recovery state is not 'recovered'", async () => {
+		const { dir, now } = await buildReconnectFixture({
+			port: 4411,
+			recoveryState: "normal",
 		});
 
-		await expect(
-			runCollabReconnect({ workspaceRoot: dir, target: "codex", now }),
-		).rejects.toThrow(/recovered/i);
+		try {
+			await expect(
+				runCollabReconnect({ workspaceRoot: dir, target: "codex", now }),
+			).rejects.toThrow(/recovered/i);
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
 	});
 
 	it("throws when the target has no remembered binding", async () => {
-		const { dir, now } = await buildReconnectFixture();
+		const { dir, now } = await buildReconnectFixture({
+			port: 4412,
+			recoveryState: "recovered",
+			registerBinding: true,
+		});
 
-		// claude has no binding, so reconnect for claude should throw
-		await expect(
-			runCollabReconnect({ workspaceRoot: dir, target: "claude", now }),
-		).rejects.toThrow(/no remembered binding/i);
+		try {
+			// claude has no binding, so reconnect for claude should throw
+			await expect(
+				runCollabReconnect({ workspaceRoot: dir, target: "claude", now }),
+			).rejects.toThrow(/no remembered binding/i);
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
 	});
-
 });
 
 describe("recovery guards", () => {
@@ -231,7 +216,6 @@ describe("recovery guards", () => {
 			delete process.env.AI_WHISPER_STATE_ROOT;
 		}
 	});
-
 });
 
 describe("broker latch", () => {
@@ -269,7 +253,6 @@ describe("broker latch", () => {
 			delete process.env.AI_WHISPER_STATE_ROOT;
 		}
 	});
-
 });
 
 describe("status command recovery awareness", () => {
@@ -309,68 +292,28 @@ describe("status command recovery awareness", () => {
 	});
 });
 
-async function buildMountedReconnectFixture() {
-	const dir = mkdtempSync(join(tmpdir(), "ai-whisper-reconnect-mounted-"));
-	const sqlitePath = join(dir, "broker.sqlite");
-	const collabId = "collab_reconnect_mounted";
-	const now = "2026-04-06T09:00:00.000Z";
-
-	const broker = createBrokerRuntime({ sqlitePath, host: "127.0.0.1", port: 4413 });
-	broker.control.startCollab({ collabId, workspaceRoot: dir, displayName: "reconnect mounted", now });
-	broker.control.registerSession({
-		sessionId: "session_codex_mounted",
-		collabId,
-		agentType: "codex",
-		capabilities: {
-			supportsDirectPackets: true,
-			supportsNormalization: false,
-			supportsRelayInterception: true,
-			supportsLocalBuffering: true,
-			supportsLaunchHooks: false,
-			extensions: {},
-		},
-		now,
-	});
-	broker.control.setSessionBinding({
-		collabId,
-		agentType: "codex",
-		sessionId: "session_codex_mounted",
-		bindingSource: "mounted",
-		now,
-	});
-	broker.control.prepareCollabRecovery({ collabId, now });
-	await broker.stop();
-
-	writeCliCollabState(join(dir, ".ai-whisper", "runtime", "current-collab.json"), {
-		version: 5,
-		collabId,
-		workspaceRoot: dir,
-		broker: { sqlitePath, host: "127.0.0.1", port: 4413, pid: 99123 },
-		launch: { mode: "none" },
-		ownedSessions: {},
-		startedAt: now,
-		recovery: { state: "recovered", idleAfterRecovery: true, recoveredAt: now },
-		adoptedSessions: {},
-		mountedSessions: {},
-	});
-
-	return { dir, now };
-}
-
 describe("mounted reconnect", () => {
 	it("defaults to mounted mode when the remembered binding source is mounted", async () => {
-		const { dir, now } = await buildMountedReconnectFixture();
-		const startMountedSession = vi.fn(() => Promise.resolve());
-		const result = await runCollabReconnect({
-			workspaceRoot: dir,
-			target: "codex",
-			now,
-			resolveCurrentTty: () => "/dev/ttys031",
-			startMountedSession,
+		const { dir, now } = await buildReconnectFixture({
+			port: 4413,
+			recoveryState: "recovered",
+			registerBinding: true,
 		});
 
-		expect(result.mode).toBe("mounted");
-		expect(startMountedSession).toHaveBeenCalledWith(expect.objectContaining({ ttyPath: "/dev/ttys031" }));
-	});
+		try {
+			const startMountedSession = vi.fn(() => Promise.resolve());
+			const result = await runCollabReconnect({
+				workspaceRoot: dir,
+				target: "codex",
+				now,
+				resolveCurrentTty: () => "/dev/ttys031",
+				startMountedSession,
+			});
 
+			expect(result.mode).toBe("mounted");
+			expect(startMountedSession).toHaveBeenCalledWith(expect.objectContaining({ ttyPath: "/dev/ttys031" }));
+		} finally {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		}
+	});
 });

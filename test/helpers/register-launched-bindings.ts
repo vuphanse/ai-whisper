@@ -1,8 +1,8 @@
-import { createBrokerRuntime } from "@ai-whisper/broker";
+import { createBrokerRuntime, openDatabase } from "@ai-whisper/broker";
 import { createSessionId } from "@ai-whisper/shared";
 import { createCliSessionId } from "../../packages/cli/src/runtime/id-factory.ts";
-import { getStateFilePath } from "../../packages/cli/src/runtime/paths.ts";
-import { readCliCollabState } from "../../packages/cli/src/runtime/state-file.ts";
+import { resolveCollab } from "../../packages/cli/src/runtime/collab-resolver.ts";
+import { getSharedSqlitePath } from "../../packages/cli/src/runtime/state-root.ts";
 
 /**
  * Test helper: simulates the binding state that exists after mount panes
@@ -14,15 +14,24 @@ export async function registerLaunchedBindings(input: {
 	workspaceRoot: string;
 	now: string;
 }) {
-	const state = readCliCollabState(getStateFilePath(input.workspaceRoot));
-	if (!state) {
-		throw new Error("registerLaunchedBindings: no collab state found");
+	const db = openDatabase(getSharedSqlitePath());
+	let resolved;
+	try {
+		resolved = resolveCollab({
+			db,
+			cwd: input.workspaceRoot,
+			requireActive: true,
+			requireDaemon: true,
+		});
+	} finally {
+		db.close();
 	}
+	const daemon = resolved.daemon as { host: string; port: number; pid: number };
 
 	const broker = createBrokerRuntime({
-		sqlitePath: state.broker.sqlitePath,
-		host: state.broker.host,
-		port: state.broker.port,
+		sqlitePath: getSharedSqlitePath(),
+		host: daemon.host,
+		port: daemon.port,
 	});
 
 	try {
@@ -30,13 +39,13 @@ export async function registerLaunchedBindings(input: {
 			const sessionId = createSessionId(createCliSessionId(agentType, input.now));
 			broker.control.registerSession({
 				sessionId,
-				collabId: state.collabId,
+				collabId: resolved.collabId,
 				agentType,
 				capabilities: { supportsDirectPackets: true },
 				now: input.now,
 			});
 			broker.control.setSessionBinding({
-				collabId: state.collabId,
+				collabId: resolved.collabId,
 				agentType,
 				sessionId,
 				bindingSource: "mounted",
