@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { Command } from "commander";
 import { openDatabase } from "@ai-whisper/broker";
 import { runCollabMount } from "./commands/collab/mount.js";
@@ -360,6 +361,13 @@ export function createCli(): Command {
 							process.kill(pid, signal);
 						} catch {
 							// process may already be dead
+						}
+					},
+					execCommand: (cmd) => {
+						try {
+							execSync(cmd, { stdio: "ignore" });
+						} catch {
+							// session/window may already be gone
 						}
 					},
 				});

@@ -9,12 +9,16 @@ import {
 	insertBrokerDaemon,
 	updateBrokerDaemonPid,
 	getBrokerDaemonByCollab,
+	upsertSessionAttachment,
 } from "../packages/broker/src/index.ts";
 import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
 import { runCollabStop } from "../packages/cli/src/commands/collab/stop.ts";
 import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
 
-function setupActiveCollab(pid: number | null) {
+function setupActiveCollab(
+	pid: number | null,
+	opts: { tmuxSession?: string } = {},
+) {
 	const tmp = mkdtempSync(path.join(os.tmpdir(), "stop-"));
 	process.env.AI_WHISPER_STATE_ROOT = tmp;
 	const ws = path.join(tmp, "ws");
@@ -24,8 +28,8 @@ function setupActiveCollab(pid: number | null) {
 	const wsId = workspaceIdFromPath(ws);
 	upsertWorkspace(db, { id: wsId, workspaceRoot: ws, now: "2026-05-15T00:00:00Z" });
 	db.prepare(
-		"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, created_at, updated_at) VALUES ('c1', ?, 't', 'active', ?, 'none', '2026-05-15T00:00:00Z', '2026-05-15T00:00:00Z')",
-	).run(ws, wsId);
+		"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, launch_mode, tmux_session, created_at, updated_at) VALUES ('c1', ?, 't', 'active', ?, 'none', ?, '2026-05-15T00:00:00Z', '2026-05-15T00:00:00Z')",
+	).run(ws, wsId, opts.tmuxSession ?? null);
 	insertBrokerDaemon(db, {
 		collabId: "c1",
 		host: "127.0.0.1",
@@ -81,5 +85,65 @@ describe("runCollabStop", () => {
 		expect(getBrokerDaemonByCollab(db, "c1")).toBeNull();
 		db.close();
 		expect(signals).toEqual([]);
+	});
+
+	it("kills the tmux session recorded on the collab row", async () => {
+		const { ws } = setupActiveCollab(12345, { tmuxSession: "aiw-c1" });
+		const commands: string[] = [];
+		await runCollabStop({
+			cwd: ws,
+			now: () => "2026-05-15T00:01:00Z",
+			signalProcess: () => {},
+			execCommand: (cmd) => commands.push(cmd),
+		});
+		expect(
+			commands.some((c) => c.includes("tmux kill-session -t 'aiw-c1'")),
+		).toBe(true);
+	});
+
+	it("signals attachment pids and closes their terminal windows", async () => {
+		const { ws } = setupActiveCollab(12345);
+		const db = openDatabase(getSharedSqlitePath());
+		upsertSessionAttachment(db, {
+			collabId: "c1",
+			agentType: "codex",
+			attachmentKind: "mounted",
+			sessionId: null,
+			providerId: null,
+			launchMode: "terminals",
+			ttyPath: "/dev/ttys001",
+			pid: 4001,
+			windowLabel: "aiw-codex-c1",
+			attachedAt: "2026-05-15T00:00:00Z",
+		});
+		upsertSessionAttachment(db, {
+			collabId: "c1",
+			agentType: "claude",
+			attachmentKind: "owned",
+			sessionId: null,
+			providerId: null,
+			launchMode: "tmux",
+			ttyPath: null,
+			pid: 4002,
+			windowLabel: null,
+			attachedAt: "2026-05-15T00:00:01Z",
+		});
+		db.close();
+
+		const signals: Array<{ pid: number; sig: string }> = [];
+		const commands: string[] = [];
+		await runCollabStop({
+			cwd: ws,
+			now: () => "2026-05-15T00:01:00Z",
+			signalProcess: (pid, sig) => signals.push({ pid, sig }),
+			execCommand: (cmd) => commands.push(cmd),
+		});
+
+		// Broker daemon (12345) plus both attachment pids signaled SIGTERM.
+		expect(signals).toContainEqual({ pid: 4001, sig: "SIGTERM" });
+		expect(signals).toContainEqual({ pid: 4002, sig: "SIGTERM" });
+		expect(signals).toContainEqual({ pid: 12345, sig: "SIGTERM" });
+		// Window with a label gets closed; the label-less one does not.
+		expect(commands.some((c) => c.includes("aiw-codex-c1"))).toBe(true);
 	});
 });

@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import {
 	applyMigrations,
 	deleteBrokerDaemonByCollab,
@@ -12,12 +13,41 @@ export interface CollabStopOpts {
 	collabIdOverride?: string;
 	now: () => string;
 	signalProcess: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
+	/**
+	 * Runs a shell command for tmux/terminal teardown. Injectable for tests;
+	 * defaults to a best-effort `execSync` wrapper that swallows failures.
+	 */
+	execCommand?: (cmd: string) => void;
+}
+
+function defaultExecCommand(cmd: string): void {
+	try {
+		execSync(cmd, { stdio: "ignore" });
+	} catch {
+		// Session/window may already be gone — teardown is best-effort.
+	}
+}
+
+function closeTerminalWindow(label: string, exec: (cmd: string) => void): void {
+	if (process.platform === "darwin") {
+		const escapedLabel = label.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+		exec(
+			`osascript -e "tell application \\"Terminal\\" to close (every window whose custom title is \\"${escapedLabel}\\")"`,
+		);
+		return;
+	}
+
+	const escapedLabel = `'${label.replace(/'/g, "'\\''")}'`;
+	exec(`pkill -f ${escapedLabel}`);
 }
 
 export function runCollabStop(input: CollabStopOpts): void {
+	const exec = input.execCommand ?? defaultExecCommand;
 	const db = openDatabase(getSharedSqlitePath());
 	applyMigrations(db);
 	let signalTarget: number | null = null;
+	let tmuxSession: string | undefined;
+	let attachments: { pid: number | null; windowLabel: string | null }[] = [];
 	try {
 		const resolved = resolveCollab({
 			db,
@@ -27,6 +57,11 @@ export function runCollabStop(input: CollabStopOpts): void {
 				: {}),
 			requireActive: true,
 		});
+		tmuxSession = resolved.launch.tmuxSession;
+		attachments = resolved.attachments.map((a) => ({
+			pid: a.pid,
+			windowLabel: a.windowLabel,
+		}));
 		const tx = db.transaction(() => {
 			const daemonRow = getBrokerDaemonByCollab(db, resolved.collabId);
 			if (daemonRow && daemonRow.pid !== null) {
@@ -48,6 +83,28 @@ export function runCollabStop(input: CollabStopOpts): void {
 			input.signalProcess(signalTarget, "SIGTERM");
 		} catch {
 			// process may already be dead
+		}
+	}
+
+	if (tmuxSession) {
+		const escaped = tmuxSession.replace(/'/g, "'\\''");
+		exec(`tmux kill-session -t '${escaped}'`);
+	}
+
+	for (const attachment of attachments) {
+		if (attachment.windowLabel) {
+			try {
+				closeTerminalWindow(attachment.windowLabel, exec);
+			} catch {
+				// Window may already be closed.
+			}
+		}
+		if (attachment.pid !== null) {
+			try {
+				input.signalProcess(attachment.pid, "SIGTERM");
+			} catch {
+				// process may already be dead
+			}
 		}
 	}
 }
