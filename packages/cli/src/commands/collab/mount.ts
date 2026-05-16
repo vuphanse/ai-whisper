@@ -9,13 +9,13 @@ import { createMountSessionRuntime } from "../../runtime/mount-session-main.js";
 import { resolveCollab } from "../../runtime/collab-resolver.js";
 import { getSharedSqlitePath } from "../../runtime/state-root.js";
 
-export async function recordMountedSession(input: {
+export function recordMountedSession(input: {
 	cwd: string;
 	agentType: "codex" | "claude";
 	ttyPath: string;
 	pid: number;
 	collabIdOverride?: string;
-}): Promise<void> {
+}): void {
 	const db = openDatabase(getSharedSqlitePath());
 	try {
 		const r = resolveCollab({

@@ -14,7 +14,7 @@ export interface CollabStopOpts {
 	signalProcess: (pid: number, signal: "SIGTERM" | "SIGKILL") => void;
 }
 
-export async function runCollabStop(input: CollabStopOpts): Promise<void> {
+export function runCollabStop(input: CollabStopOpts): void {
 	const db = openDatabase(getSharedSqlitePath());
 	applyMigrations(db);
 	let signalTarget: number | null = null;

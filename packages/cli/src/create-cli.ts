@@ -349,9 +349,9 @@ export function createCli(): Command {
 			"--collab <id>",
 			"Stop a specific collab id (defaults to the active collab for cwd)",
 		)
-		.action(async (opts: { collab?: string }) => {
+		.action((opts: { collab?: string }) => {
 			try {
-				await runCollabStop({
+				runCollabStop({
 					cwd: process.cwd(),
 					...(opts.collab ? { collabIdOverride: opts.collab } : {}),
 					now: () => new Date().toISOString(),

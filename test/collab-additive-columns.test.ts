@@ -15,10 +15,9 @@ function freshDb() {
 describe("collab additive columns", () => {
 	it("has workspace_id, stopped_at, launch_mode, tmux_session columns", () => {
 		const db = freshDb();
-		const cols = db
-			.prepare("PRAGMA table_info(collab)")
-			.all()
-			.map((c: any) => c.name as string);
+		const cols = (db.prepare("PRAGMA table_info(collab)").all() as Array<{ name: string }>).map(
+			(c) => c.name,
+		);
 		expect(cols).toContain("workspace_id");
 		expect(cols).toContain("stopped_at");
 		expect(cols).toContain("launch_mode");
@@ -37,10 +36,11 @@ describe("collab additive columns", () => {
 
 	it("has index on workspace_id + status", () => {
 		const db = freshDb();
-		const indexes = db
-			.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='collab'")
-			.all()
-			.map((r: any) => r.name as string);
+		const indexes = (
+			db
+				.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='collab'")
+				.all() as Array<{ name: string }>
+		).map((r) => r.name);
 		expect(indexes).toContain("collab_by_workspace");
 	});
 });

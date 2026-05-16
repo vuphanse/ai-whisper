@@ -45,14 +45,14 @@ export interface CollabRecoverOpts {
 const READY_TIMEOUT_DEFAULT = 30_000;
 const STALE_THRESHOLD_DEFAULT = 90_000;
 
-async function defaultIsAliveImpl(pid: number): Promise<IsAliveResult> {
+function defaultIsAliveImpl(pid: number): Promise<IsAliveResult> {
 	try {
 		process.kill(pid, 0);
-		return { alive: true, startTime: null };
+		return Promise.resolve({ alive: true, startTime: null });
 	} catch (err: unknown) {
 		const code = (err as NodeJS.ErrnoException).code;
-		if (code === "EPERM") return { alive: true, startTime: null };
-		return { alive: false, startTime: null };
+		if (code === "EPERM") return Promise.resolve({ alive: true, startTime: null });
+		return Promise.resolve({ alive: false, startTime: null });
 	}
 }
 

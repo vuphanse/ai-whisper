@@ -341,7 +341,7 @@ export function createMountSessionRuntime(input: {
 
 				// Record session_attachment(kind='mounted') in the shared DB.
 				try {
-					await recordMountedSession({
+					recordMountedSession({
 						cwd: input.workspaceRoot,
 						agentType: input.target,
 						ttyPath: input.ttyPath,

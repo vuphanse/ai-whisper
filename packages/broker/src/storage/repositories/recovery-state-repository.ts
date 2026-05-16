@@ -50,5 +50,5 @@ export function getRecoveryState(
 }
 
 export function deleteRecoveryState(db: Database.Database, collabId: string): number {
-	return db.prepare("DELETE FROM recovery_state WHERE collab_id = ?").run(collabId).changes as number;
+	return db.prepare("DELETE FROM recovery_state WHERE collab_id = ?").run(collabId).changes;
 }
