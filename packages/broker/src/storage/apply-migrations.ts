@@ -1,6 +1,11 @@
 import type Database from "better-sqlite3";
 
-export const CURRENT_SCHEMA_VERSION = 2;
+// Bump this whenever runMigrationBody gains new schema (tables/columns/indexes).
+// The body is fully idempotent (CREATE ... IF NOT EXISTS + PRAGMA-guarded
+// ALTERs), so a persisted DB at an older user_version safely re-runs it and
+// picks up the additions. Forgetting to bump means a persisted DB never gets
+// the new schema (it only worked for freshly-created DBs).
+export const CURRENT_SCHEMA_VERSION = 3;
 
 const initMigrationSql = `
 CREATE TABLE IF NOT EXISTS broker_state (

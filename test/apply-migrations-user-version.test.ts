@@ -38,4 +38,25 @@ describe("apply-migrations: PRAGMA user_version", () => {
 		expect(row?.schema_version).toBe(CURRENT_SCHEMA_VERSION);
 		expect(row?.migrated).toBe(1);
 	});
+
+	it("a persisted older-version DB re-runs the body and gains new schema", () => {
+		const db = freshDb();
+		applyMigrations(db);
+		// Simulate a DB created before the relay_monitor columns existed: drop
+		// them and pin user_version back to an earlier schema.
+		db.exec("ALTER TABLE collab DROP COLUMN relay_monitor_window_label");
+		db.exec("ALTER TABLE collab DROP COLUMN relay_monitor_pid");
+		db.pragma("user_version = 2");
+
+		applyMigrations(db);
+
+		const cols = (
+			db.prepare("PRAGMA table_info(collab)").all() as Array<{ name: string }>
+		).map((c) => c.name);
+		expect(cols).toContain("relay_monitor_window_label");
+		expect(cols).toContain("relay_monitor_pid");
+		expect(db.pragma("user_version", { simple: true })).toBe(
+			CURRENT_SCHEMA_VERSION,
+		);
+	});
 });

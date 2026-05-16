@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
-import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
+import {
+	applyMigrations,
+	CURRENT_SCHEMA_VERSION,
+} from "../packages/broker/src/storage/apply-migrations.ts";
 import { getBrokerState } from "../packages/broker/src/storage/repositories/broker-state-repository.ts";
 import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
 
@@ -15,7 +18,7 @@ describe("broker storage bootstrap", () => {
 		applyMigrations(db);
 
 		expect(getBrokerState(db)).toEqual({
-			schemaVersion: 2,
+			schemaVersion: CURRENT_SCHEMA_VERSION,
 			migrated: true,
 		});
 
