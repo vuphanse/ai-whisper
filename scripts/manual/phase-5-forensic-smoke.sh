@@ -3,9 +3,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKSPACE="${AI_WHISPER_MANUAL_WORKSPACE:-$(mktemp -d /tmp/ai-whisper-forensic-XXXXXX)}"
-RUNTIME_ROOT="$WORKSPACE/.ai-whisper/runtime"
-STATE_FILE="$RUNTIME_ROOT/current-collab.json"
-BROKER_DB="$RUNTIME_ROOT/broker.sqlite"
+# shellcheck source=scripts/manual/_probe-shared-db.sh
+source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"
+BROKER_DB="$(probe_state_db)"
+COLLAB_ID=""
 
 step() {
   printf '\n== %s ==\n' "$1"
@@ -17,15 +18,8 @@ run_cmd() {
 }
 
 ensure_clean_workspace() {
-  if [[ -f "$STATE_FILE" ]]; then
-    printf '\n-- existing collab state detected; stopping it before test --\n'
-    run_cmd node packages/cli/dist/bin/whisper.js collab stop --workspace "$WORKSPACE" || true
-  fi
-
-  if [[ -d "$RUNTIME_ROOT" ]]; then
-    printf '\n-- removing stale runtime directory --\n'
-    run_cmd rm -rf "$RUNTIME_ROOT"
-  fi
+  printf '\n-- stopping any prior collab (best-effort) --\n'
+  probe_stop_if_active
 }
 
 dump_sql() {
@@ -41,19 +35,16 @@ dump_sql() {
 
 dump_all_tables() {
   dump_sql "collab" 'SELECT * FROM collab;'
+  dump_sql "broker_daemon" 'SELECT * FROM broker_daemon;'
   dump_sql "session" 'SELECT * FROM session;'
   dump_sql "thread" 'SELECT * FROM thread;'
   dump_sql "work_item" 'SELECT * FROM work_item;'
   dump_sql "reply" 'SELECT * FROM reply;'
   dump_sql "companion_session" 'SELECT * FROM companion_session;'
-  dump_sql "event_log" 'SELECT event_id, event_type, collab_id, timestamp, schema_version FROM event_log ORDER BY rowid;'
+  dump_sql "event_log" 'SELECT event_id, event_type, collab_id, created_at, schema_version FROM event_log ORDER BY rowid;'
 }
 
 show_snapshot() {
-  if [[ -f "$STATE_FILE" ]]; then
-    printf '\n-- state file --\n'
-    cat "$STATE_FILE"
-  fi
   dump_all_tables
 }
 
@@ -80,12 +71,14 @@ cat >"$WORKSPACE/plan.md" <<'EOF'
 EOF
 
 step "Start collab"
-run_cmd node packages/cli/dist/bin/whisper.js collab start --workspace "$WORKSPACE"
+printf '+ node packages/cli/dist/bin/whisper.js collab start --workspace %s\n' "$WORKSPACE"
+node packages/cli/dist/bin/whisper.js collab start --workspace "$WORKSPACE" | tee "$WORKSPACE/start.log"
+COLLAB_ID="$(probe_active_collab_id "$WORKSPACE/start.log")"
+printf 'COLLAB_ID=%s\n' "${COLLAB_ID:-<unknown>}"
 show_snapshot
 
 step "Tell Codex"
-run_cmd node packages/cli/dist/bin/whisper.js collab tell \
-  --workspace "$WORKSPACE" \
+run_cmd node packages/cli/dist/bin/whisper.js collab tell ${COLLAB_ID:+--collab "$COLLAB_ID"} \
   --target codex \
   --action review_plan \
   --artifact "$WORKSPACE/plan.md" \
@@ -93,13 +86,12 @@ run_cmd node packages/cli/dist/bin/whisper.js collab tell \
 show_snapshot
 
 step "Tell Claude"
-run_cmd node packages/cli/dist/bin/whisper.js collab tell \
-  --workspace "$WORKSPACE" \
+run_cmd node packages/cli/dist/bin/whisper.js collab tell ${COLLAB_ID:+--collab "$COLLAB_ID"} \
   --target claude \
   --action answer_question \
   "Summarize the current thread state in one sentence."
 show_snapshot
 
 step "Stop collab"
-run_cmd node packages/cli/dist/bin/whisper.js collab stop --workspace "$WORKSPACE"
+run_cmd node packages/cli/dist/bin/whisper.js collab stop ${COLLAB_ID:+--collab "$COLLAB_ID"}
 show_snapshot

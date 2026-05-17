@@ -3,9 +3,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKSPACE="${AI_WHISPER_MANUAL_WORKSPACE:-$(mktemp -d /tmp/ai-whisper-real-XXXXXX)}"
-RUNTIME_ROOT="$WORKSPACE/.ai-whisper/runtime"
-STATE_FILE="$RUNTIME_ROOT/current-collab.json"
-BROKER_DB="$RUNTIME_ROOT/broker.sqlite"
+# shellcheck source=scripts/manual/_probe-shared-db.sh
+source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"
+STATE_DB="$(probe_state_db)"
+COLLAB_ID=""
 
 step() {
   printf '\n== %s ==\n' "$1"
@@ -21,15 +22,8 @@ run_cmd() {
 }
 
 ensure_clean_workspace() {
-  if [[ -f "$STATE_FILE" ]]; then
-    substep "Existing collab state detected. Stopping it before starting a new run."
-    run_cmd node packages/cli/dist/bin/whisper.js collab stop --workspace "$WORKSPACE" || true
-  fi
-
-  if [[ -d "$RUNTIME_ROOT" ]]; then
-    substep "Removing stale runtime directory"
-    run_cmd rm -rf "$RUNTIME_ROOT"
-  fi
+  substep "Stopping any prior collab (best-effort)"
+  probe_stop_if_active
 }
 
 dump_file() {
@@ -42,19 +36,22 @@ dump_file() {
   fi
 }
 
-dump_runtime_tree() {
-  if [[ -d "$RUNTIME_ROOT" ]]; then
-    substep "Runtime directory tree"
-    find "$RUNTIME_ROOT" -maxdepth 3 -print | sort
+dump_state_db() {
+  if [[ -f "$STATE_DB" ]]; then
+    substep "Shared state DB rows ($STATE_DB)"
+    sqlite3 -header -column "$STATE_DB" \
+      "SELECT collab_id,status,workspace_id,launch_mode,created_at,stopped_at FROM collab;" || true
+    sqlite3 -header -column "$STATE_DB" \
+      "SELECT collab_id,host,port,pid,pid_start_time FROM broker_daemon;" || true
   else
-    substep "Runtime directory not created yet"
+    substep "Shared state DB not created yet ($STATE_DB)"
   fi
 }
 
 dump_process_state() {
-  if [[ -f "$STATE_FILE" ]]; then
+  if [[ -n "$COLLAB_ID" && -f "$STATE_DB" ]]; then
     local broker_pid=""
-    broker_pid="$(node -e 'const fs=require("fs");const p=process.argv[1];const state=JSON.parse(fs.readFileSync(p,"utf8"));process.stdout.write(String(state.broker?.pid ?? ""));' "$STATE_FILE" 2>/dev/null || true)"
+    broker_pid="$(sqlite3 "$STATE_DB" "SELECT pid FROM broker_daemon WHERE collab_id='$COLLAB_ID';" 2>/dev/null || true)"
     if [[ -n "$broker_pid" ]]; then
       substep "Broker PID $broker_pid"
       ps -p "$broker_pid" -o pid=,ppid=,stat=,etime=,command= || true
@@ -75,19 +72,18 @@ dump_tmux_state() {
 }
 
 status_cmd() {
-  run_cmd node packages/cli/dist/bin/whisper.js collab status --workspace "$WORKSPACE"
+  run_cmd node packages/cli/dist/bin/whisper.js collab status ${COLLAB_ID:+--collab "$COLLAB_ID"}
 }
 
 tell_cmd() {
-  run_cmd node packages/cli/dist/bin/whisper.js collab tell "$@"
+  run_cmd node packages/cli/dist/bin/whisper.js collab tell ${COLLAB_ID:+--collab "$COLLAB_ID"} "$@"
 }
 
 show_debug_snapshot() {
-  dump_runtime_tree
-  dump_file "$STATE_FILE"
-  if [[ -f "$BROKER_DB" ]]; then
-    substep "Broker sqlite file"
-    ls -lh "$BROKER_DB"
+  dump_state_db
+  if [[ -f "$STATE_DB" ]]; then
+    substep "Shared state DB file"
+    ls -lh "$STATE_DB"
   fi
   dump_process_state
   dump_tmux_state
@@ -108,9 +104,8 @@ run_cmd pnpm --version
 substep "Resolved paths"
 printf 'REPO_ROOT=%s\n' "$REPO_ROOT"
 printf 'WORKSPACE=%s\n' "$WORKSPACE"
-printf 'RUNTIME_ROOT=%s\n' "$RUNTIME_ROOT"
-printf 'STATE_FILE=%s\n' "$STATE_FILE"
-printf 'BROKER_DB=%s\n' "$BROKER_DB"
+printf 'STATE_ROOT=%s\n' "$AI_WHISPER_STATE_ROOT"
+printf 'STATE_DB=%s\n' "$STATE_DB"
 substep "Detected executables"
 command -v codex || true
 command -v claude || true
@@ -134,7 +129,10 @@ find "$WORKSPACE" -maxdepth 2 -print | sort
 dump_file "$WORKSPACE/plan.md"
 
 step "Start collab"
-run_cmd node packages/cli/dist/bin/whisper.js collab start --workspace "$WORKSPACE"
+printf '+ node packages/cli/dist/bin/whisper.js collab start --workspace %s\n' "$WORKSPACE"
+node packages/cli/dist/bin/whisper.js collab start --workspace "$WORKSPACE" | tee "$WORKSPACE/start.log"
+COLLAB_ID="$(probe_active_collab_id "$WORKSPACE/start.log")"
+printf 'COLLAB_ID=%s\n' "${COLLAB_ID:-<unknown>}"
 show_debug_snapshot
 
 step "Status after start"
@@ -143,7 +141,6 @@ show_debug_snapshot
 
 step "Ask Codex to review the plan"
 tell_cmd \
-  --workspace "$WORKSPACE" \
   --target codex \
   --action review_plan \
   --artifact "$WORKSPACE/plan.md" \
@@ -156,7 +153,6 @@ show_debug_snapshot
 
 step "Ask Claude to summarize the active thread"
 tell_cmd \
-  --workspace "$WORKSPACE" \
   --target claude \
   --action answer_question \
   "Summarize the current thread state in one sentence."
@@ -167,5 +163,5 @@ status_cmd
 show_debug_snapshot
 
 step "Stop collab"
-run_cmd node packages/cli/dist/bin/whisper.js collab stop --workspace "$WORKSPACE"
+run_cmd node packages/cli/dist/bin/whisper.js collab stop ${COLLAB_ID:+--collab "$COLLAB_ID"}
 show_debug_snapshot

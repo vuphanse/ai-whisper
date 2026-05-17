@@ -37,7 +37,7 @@ Options:
   --wait-after-handback-ms <ms>   Wait after pressing handback
   --wait-after-source-amend-ms <ms>     Wait after source-side amend composer submits
   --wait-after-source-response-ms <ms>  Wait after source submits the amended prompt
-  --reset-runtime                 Remove current-collab.json and broker.sqlite before start
+  --reset-runtime                 Stop any active collab and reset the isolated shared state DB before start
   --no-build                      Skip pnpm build
   --no-keep-session               Kill the tmux session on exit
   --help                          Show this message
@@ -149,9 +149,8 @@ fi
 
 cd "$WORKSPACE"
 
-RUNTIME_DIR="$WORKSPACE/.ai-whisper/runtime"
-STATE_FILE="$RUNTIME_DIR/current-collab.json"
-SQLITE_FILE="$RUNTIME_DIR/broker.sqlite"
+# shellcheck source=scripts/manual/_probe-shared-db.sh
+source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="$WORKSPACE/.ai-whisper/manual/phase-7e-mounted-turn-handoff-probe/$TIMESTAMP"
 SESSION_NAME="mounted-turn-probe-$TIMESTAMP"
@@ -170,30 +169,26 @@ if [[ "$NO_BUILD" -ne 1 ]]; then
   pnpm build
 fi
 
-if [[ -f "$STATE_FILE" ]]; then
-  echo "+ node packages/cli/dist/bin/whisper.js collab stop"
-  node packages/cli/dist/bin/whisper.js collab stop || true
-fi
+echo "+ collab stop (best-effort cleanup of any prior run)"
+probe_stop_if_active
 
 if [[ "$RESET_RUNTIME" -eq 1 ]]; then
-  echo "+ rm -f $STATE_FILE $SQLITE_FILE"
-  rm -f "$STATE_FILE" "$SQLITE_FILE"
+  echo "+ reset runtime (isolated state db: $(probe_state_db))"
+  probe_reset_runtime
 fi
 
-if command -v lsof >/dev/null 2>&1; then
-  if lsof -n -P -iTCP:4311 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port 4311 is still in use after collab cleanup. Kill the leftover broker first." >&2
-    lsof -n -P -iTCP:4311 -sTCP:LISTEN >&2 || true
-    exit 1
-  fi
-fi
+# Ports are now dynamically allocated per collab (4500-4999) from the shared
+# SQLite registry, so the old fixed-port (4311) lsof preflight no longer applies.
 
 echo "+ node packages/cli/dist/bin/whisper.js collab start --no-launch"
 node packages/cli/dist/bin/whisper.js collab start --no-launch | tee "$LOG_DIR/start.log"
+COLLAB_ID="$(probe_active_collab_id "$LOG_DIR/start.log")"
+echo "+ active collab: ${COLLAB_ID:-<unknown>} (state db: $(probe_state_db))"
 
-MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor"
-SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE"
-TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET"
+PROBE_ENV="$(probe_env_prefix)"
+MONITOR_CMD="cd '$WORKSPACE' && $PROBE_ENV node packages/cli/dist/bin/whisper.js collab relay-monitor"
+SOURCE_CMD="cd '$WORKSPACE' && $PROBE_ENV AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE"
+TARGET_CMD="cd '$WORKSPACE' && $PROBE_ENV AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' node packages/cli/dist/bin/whisper.js collab mount $TARGET"
 
 echo "+ tmux new-session -d -s $SESSION_NAME"
 tmux new-session -d -s "$SESSION_NAME" -n monitor "$MONITOR_CMD"
@@ -282,9 +277,7 @@ if [[ -f "$LOG_DIR/$SOURCE.after-handback-confirm.txt" ]]; then
   capture_window "$SOURCE" "$SOURCE.after-amend-response"
 fi
 
-if [[ -f "$STATE_FILE" ]]; then
-  cp "$STATE_FILE" "$LOG_DIR/current-collab.json"
-fi
+probe_capture_state "$LOG_DIR"
 
 : >"$SUMMARY_FILE"
 echo "Mounted turn handoff probe summary" | tee -a "$SUMMARY_FILE"

@@ -52,7 +52,7 @@ Options:
                                   to fire (default: 120000)
   --wait-for-orchestrator-ms <ms> Wait after handback for orchestrator poll +
                                   LLM evaluation to complete (default: 15000)
-  --reset-runtime                 Remove current-collab.json and broker.sqlite before start
+  --reset-runtime                 Stop any active collab and reset the isolated shared state DB before start
   --no-build                      Skip pnpm build
   --no-keep-session               Kill the tmux session on exit
   --help                          Show this message
@@ -170,9 +170,8 @@ fi
 
 cd "$WORKSPACE"
 
-RUNTIME_DIR="$WORKSPACE/.ai-whisper/runtime"
-STATE_FILE="$RUNTIME_DIR/current-collab.json"
-SQLITE_FILE="$RUNTIME_DIR/broker.sqlite"
+# shellcheck source=scripts/manual/_probe-shared-db.sh
+source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_DIR="$WORKSPACE/.ai-whisper/manual/phase-7f-orchestrator-verdict-probe/$TIMESTAMP"
 SESSION_NAME="orchestrator-verdict-probe-$TIMESTAMP"
@@ -191,14 +190,12 @@ if [[ "$NO_BUILD" -ne 1 ]]; then
   pnpm build
 fi
 
-if [[ -f "$STATE_FILE" ]]; then
-  echo "+ node packages/cli/dist/bin/whisper.js collab stop"
-  node packages/cli/dist/bin/whisper.js collab stop || true
-fi
+echo "+ collab stop (best-effort cleanup of any prior run)"
+probe_stop_if_active
 
 if [[ "$RESET_RUNTIME" -eq 1 ]]; then
-  echo "+ rm -f $STATE_FILE $SQLITE_FILE"
-  rm -f "$STATE_FILE" "$SQLITE_FILE"
+  echo "+ reset runtime (isolated state db: $(probe_state_db))"
+  probe_reset_runtime
 fi
 
 for old_session in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^orchestrator-verdict-probe-'); do
@@ -206,26 +203,24 @@ for old_session in $(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep 
   tmux kill-session -t "$old_session" 2>/dev/null || true
 done
 
-if command -v lsof >/dev/null 2>&1; then
-  if lsof -n -P -iTCP:4311 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port 4311 is still in use after collab cleanup. Kill the leftover broker first." >&2
-    lsof -n -P -iTCP:4311 -sTCP:LISTEN >&2 || true
-    exit 1
-  fi
-fi
+# Ports are now dynamically allocated per collab (4500-4999) from the shared
+# SQLite registry, so the old fixed-port (4311) lsof preflight no longer applies.
 
 export AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1
 echo "+ orchestrator enabled; expecting LLM verdict=done from Anthropic evaluator"
 
 echo "+ node packages/cli/dist/bin/whisper.js collab start --no-launch"
 node packages/cli/dist/bin/whisper.js collab start --no-launch | tee "$LOG_DIR/start.log"
+COLLAB_ID="$(probe_active_collab_id "$LOG_DIR/start.log")"
+echo "+ active collab: ${COLLAB_ID:-<unknown>} (state db: $(probe_state_db))"
 
 echo "+ waiting for broker daemon to settle"
 sleep 2
 
-MONITOR_CMD="cd '$WORKSPACE' && node packages/cli/dist/bin/whisper.js collab relay-monitor; exec sleep 86400"
-SOURCE_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=999999 AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
-TARGET_CMD="cd '$WORKSPACE' && AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' AI_WHISPER_DEBUG_CAPTURE='$LOG_DIR/capture-debug.json' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
+PROBE_ENV="$(probe_env_prefix)"
+MONITOR_CMD="cd '$WORKSPACE' && $PROBE_ENV node packages/cli/dist/bin/whisper.js collab relay-monitor; exec sleep 86400"
+SOURCE_CMD="cd '$WORKSPACE' && $PROBE_ENV AI_WHISPER_IDLE_THRESHOLD_MS=999999 AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$SOURCE-input.log' node packages/cli/dist/bin/whisper.js collab mount $SOURCE; exec sleep 86400"
+TARGET_CMD="cd '$WORKSPACE' && $PROBE_ENV AI_WHISPER_IDLE_THRESHOLD_MS=$IDLE_THRESHOLD_MS AI_WHISPER_DEBUG_INPUT_LOG='$LOG_DIR/$TARGET-input.log' AI_WHISPER_DEBUG_CAPTURE='$LOG_DIR/capture-debug.json' node packages/cli/dist/bin/whisper.js collab mount $TARGET; exec sleep 86400"
 
 echo "+ tmux new-session -d -s $SESSION_NAME"
 tmux new-session -d -s "$SESSION_NAME" -n monitor "$MONITOR_CMD"
@@ -293,11 +288,9 @@ capture_window "monitor" "monitor.after-orchestrator"
 capture_window "$SOURCE" "$SOURCE.after-orchestrator"
 
 echo "+ capturing collab inspect output"
-node packages/cli/dist/bin/whisper.js collab inspect >"$LOG_DIR/inspect.after-orchestrator.txt" 2>&1 || true
+node packages/cli/dist/bin/whisper.js collab inspect ${COLLAB_ID:+--collab "$COLLAB_ID"} >"$LOG_DIR/inspect.after-orchestrator.txt" 2>&1 || true
 
-if [[ -f "$STATE_FILE" ]]; then
-  cp "$STATE_FILE" "$LOG_DIR/current-collab.json"
-fi
+probe_capture_state "$LOG_DIR"
 
 : >"$SUMMARY_FILE"
 echo "Orchestrator verdict probe summary" | tee -a "$SUMMARY_FILE"
