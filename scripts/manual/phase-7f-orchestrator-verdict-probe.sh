@@ -2,12 +2,19 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Use the git common root as workspace so providers run in the full repo context
-# (README.md access, .env loading). In a worktree REPO_ROOT is the worktree dir;
-# git-common-dir resolves to the main repo root regardless.
+# Use the main repo root as workspace so providers run in the full repo
+# context (README.md access, .env loading). In a worktree REPO_ROOT is the
+# worktree dir; the parent of --git-common-dir is the main worktree root.
+# Note: --git-common-dir is relative (".git") when run from the main repo, so
+# resolve it to an absolute path before taking its parent.
+WORKSPACE="$REPO_ROOT"
 _GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
-WORKSPACE="${_GIT_COMMON_DIR%/.git}"
-WORKSPACE="${WORKSPACE:-$REPO_ROOT}"
+if [[ -n "$_GIT_COMMON_DIR" ]]; then
+  _GIT_COMMON_DIR="$(cd "$REPO_ROOT" && cd "$_GIT_COMMON_DIR" 2>/dev/null && pwd -P || true)"
+  if [[ -n "$_GIT_COMMON_DIR" ]]; then
+    WORKSPACE="$(dirname "$_GIT_COMMON_DIR")"
+  fi
+fi
 unset _GIT_COMMON_DIR
 SOURCE="codex"
 TARGET="claude"
