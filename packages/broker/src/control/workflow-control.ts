@@ -682,7 +682,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					// clarification question (which the orchestrator would
 					// correctly, but uselessly, escalate as non-delivery).
 					requestText:
-						"Apply the following reviewer findings now. This is an autonomous workflow — no human will respond. Make the changes yourself and hand back the corrected deliverable; never ask for confirmation, permission, or clarification.\n\nFindings:\n" +
+						"Apply the following reviewer findings now. This is an autonomous workflow — no human will respond. Make the changes yourself and hand back the corrected deliverable; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.\n\nFindings:\n" +
 						(input.followUpMessage ?? "Address the reviewer's findings."),
 					incrementRound: false,
 					now: input.now,

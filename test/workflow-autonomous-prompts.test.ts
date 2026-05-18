@@ -56,6 +56,30 @@ describe("spec-driven-development autonomous prompt framing", () => {
 		}
 	});
 
+	it("every step demands a substantive (>100 char) handback so terse verdicts don't fail capture", () => {
+		for (const phase of phases) {
+			for (const step of [
+				"review",
+				"fix",
+				"implement",
+				"execute",
+			] as const) {
+				const tmpl = phase.stepTemplates[step];
+				if (!tmpl) continue;
+				expect(tmpl, `${phase.name}.${step} length-floor`).toMatch(
+					/over 100 characters/i,
+				);
+				expect(tmpl, `${phase.name}.${step} no-one-word`).toMatch(
+					/single word/i,
+				);
+			}
+			expect(
+				phase.kickoffTemplate,
+				`${phase.name} kickoff length-floor`,
+			).toMatch(/over 100 characters/i);
+		}
+	});
+
 	it("plan-execution does not hardcode pnpm and references the plan's own verification", () => {
 		const exec = phases.find((p) => p.name === "plan-execution");
 		const tmpl = exec?.stepTemplates.execute ?? "";
