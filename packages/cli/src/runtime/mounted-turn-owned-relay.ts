@@ -69,12 +69,36 @@ function submitInjectedInput(writeUserInput: (text: string) => void, text: strin
 	writeUserInput("\r");
 }
 
-function styleOwnerCard(message: string) {
-	const lines = message.split("\n");
-	const width = lines.reduce((max, line) => Math.max(max, line.length), 0);
-	return lines
-		.map((line) => `${OWNER_CARD_BG}${OWNER_CARD_FG} ${line.padEnd(width, " ")} ${ANSI_RESET}`)
+// Hard-wrap the card to the terminal width and report the exact number of
+// physical rows it occupies. clearOwnerCard walks back that many rows, so
+// logical-line count MUST equal rendered physical rows — otherwise the clear
+// under-counts, the cursor desyncs, and the card's BG/FG bleeds across
+// un-reset wrapped rows (the RC2 dim/garble).
+export function styleOwnerCard(
+	message: string,
+	cols: number,
+): { text: string; lineCount: number } {
+	// 1-col safety margin: a full row is " " + content + " " = contentWidth+2
+	// visible chars; keeping that <= cols-1 avoids the terminal auto-margin
+	// wrapping it to an extra physical row.
+	const contentWidth = Math.max(1, cols - 3);
+	const wrapped: string[] = [];
+	for (const logical of message.split("\n")) {
+		if (logical.length === 0) {
+			wrapped.push("");
+			continue;
+		}
+		for (let i = 0; i < logical.length; i += contentWidth) {
+			wrapped.push(logical.slice(i, i + contentWidth));
+		}
+	}
+	const text = wrapped
+		.map(
+			(line) =>
+				`${OWNER_CARD_BG}${OWNER_CARD_FG} ${line.padEnd(contentWidth, " ")} ${ANSI_RESET}`,
+		)
 		.join("\n");
+	return { text, lineCount: wrapped.length };
 }
 
 function computeLcs(a: string[], b: string[]): number {
@@ -206,8 +230,13 @@ export function createMountedTurnOwnedRelay(input: {
 		extractLatestAssistantTurn(): { confidence: "high" | "low"; text: string | null };
 	};
 	isPausedInput?: () => boolean;
+	getTerminalCols?: () => number;
 	onHandoffAccepted?: () => void;
 }) {
+	function resolveCols(): number {
+		const c = input.getTerminalCols?.() ?? process.stdout.columns;
+		return typeof c === "number" && c > 0 ? c : 120;
+	}
 	const STALE_HANDOFF_AFTER_MS = 5 * 60_000;
 	const HAND_BACK_READY_AFTER_MS = 30_000;
 	let disconnectHandled = false;
@@ -238,8 +267,9 @@ export function createMountedTurnOwnedRelay(input: {
 		}
 		clearOwnerCard();
 		lastOwnerCardKey = cardKey;
-		renderedOwnerCardLines = message.split("\n").length;
-		input.writeLocalMessage(styleOwnerCard(message));
+		const { text, lineCount } = styleOwnerCard(message, resolveCols());
+		renderedOwnerCardLines = lineCount;
+		input.writeLocalMessage(text);
 	}
 
 	function refreshTurnState(now = new Date().toISOString()): RelayTurnState {
