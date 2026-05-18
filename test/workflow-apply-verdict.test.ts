@@ -178,6 +178,27 @@ describe("applyOrchestratorVerdict — review step", () => {
 		expect(turnState?.chainStatus).toBe("active");
 	});
 
+	it("findings → fix handoff wraps the findings in an autonomous-implementer directive", () => {
+		const { broker, handoffId } = setup();
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId,
+			verdict: "findings",
+			confidence: 0.8,
+			reason: "typos in section 3",
+			followUpMessage: "Remove the stray TODO on line 12.",
+			now: "2026-04-21T00:10:00Z",
+		});
+		const row = broker.db
+			.prepare("SELECT request_text FROM relay_handoff WHERE handoff_id = ?")
+			.get(result.nextHandoffId) as { request_text: string };
+		// Imperative, no-human, no-ask framing so the implementer acts instead
+		// of deferring with a clarification question.
+		expect(row.request_text).toMatch(/no human|autonomous/i);
+		expect(row.request_text).toMatch(/never ask|do not ask|without asking/i);
+		// The actual findings are still carried through verbatim.
+		expect(row.request_text).toContain("Remove the stray TODO on line 12.");
+	});
+
 	it("review + findings at maxRounds → normalized escalate", () => {
 		const { broker, handoffId, chainId } = setup();
 		// Force chain to round 5 (maxRounds)
