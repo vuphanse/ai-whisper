@@ -197,6 +197,9 @@ describe("applyOrchestratorVerdict — review step", () => {
 		expect(row.request_text).toMatch(/never ask|do not ask|without asking/i);
 		// The actual findings are still carried through verbatim.
 		expect(row.request_text).toContain("Remove the stray TODO on line 12.");
+		// Demand a substantive handback so the implementer's reply clears the
+		// >=100-char capture fast-path instead of being a terse, discarded line.
+		expect(row.request_text).toMatch(/over 100 characters/i);
 	});
 
 	it("review + findings at maxRounds → normalized escalate", () => {
