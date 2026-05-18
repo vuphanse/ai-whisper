@@ -275,7 +275,10 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				});
 			});
 
-			txn();
+			// IMMEDIATE: take the write lock at BEGIN so concurrent writers on
+			// the shared state.db wait (busy_timeout) instead of failing with
+			// SQLITE_BUSY_SNAPSHOT on the read->write upgrade.
+			txn.immediate();
 			return thread;
 		},
 		enqueueWorkItem(input: {
@@ -841,7 +844,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				);
 			});
 
-			txn();
+			txn.immediate();
 
 			return claim;
 		},
@@ -921,7 +924,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				markAttachClaimConsumed(db, input.claimId, input.now);
 			});
 
-			txn();
+			txn.immediate();
 
 			return {
 				sessionId: input.sessionId,
@@ -979,7 +982,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				}
 				deleteCompanionSessionsForCollab(db, input.collabId);
 				markWorkItemsRecoveryBlockedForCollab(db, input.collabId, input.now);
-			})();
+			}).immediate();
 
 			return {
 				bindings: listSessionBindingsForCollab(db, input.collabId),
