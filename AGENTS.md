@@ -3,7 +3,7 @@
 ## Project Summary
 
 - `ai-whisper` is a local collaboration bridge for paired AI agent sessions.
-- The architecture is centered on shared contracts, a broker runtime, a companion/provider model, and a future `whisper` CLI.
+- The architecture is centered on shared contracts, a broker runtime, a companion/provider model, and the `whisper` CLI.
 - Implementation is phase-based. Do not treat this repo as an open-ended feature sandbox.
 
 ## Source Of Truth
@@ -16,8 +16,8 @@
 
 - `packages/shared`: schemas, IDs, literals, and shared contract primitives.
 - `packages/broker`: broker runtime and storage bootstrap.
-- `packages/cli`: future `whisper` command surface.
-- `packages/companion-core`: future companion runtime.
+- `packages/cli`: `whisper` command surface.
+- `packages/companion-core`: companion runtime.
 - `packages/adapter-codex`: Codex provider integration.
 - `packages/adapter-claude`: Claude provider integration.
 

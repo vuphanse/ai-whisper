@@ -235,7 +235,7 @@ The agents themselves run inside their respective panes. The kickoff text the br
 | Pending handoff sits in agent pane forever         | auto-accept guard tripped (paused, double-fire guard, etc.)            | check `AI_WHISPER_IDLE_THRESHOLD_MS`; check that the agent isn't actively typing                                    |
 | Accepted handoff never hands back                  | `/copy` never ran, capture confidence too low to fire auto-handback    | `/copy` manually then idle 30s; or press `Ctrl+H` to force                                                          |
 | Workflow halts with `illegal-step-verdict: <verdict>` | LLM returned a verdict not allowed for the current step                | check evaluator prompt for that step; verify the workflow evaluator is wired (was a real bug fixed in commit 72bc394) |
-| Workflow halts on real test failure                | the executor itself reported a fail                                    | look at `workflows.halt_reason` in `.ai-whisper/runtime/broker.sqlite` — that's the orchestrator's stated reason     |
+| Workflow halts on real test failure                | the executor itself reported a fail                                    | look at `workflows.halt_reason` in `~/.ai-whisper/state.db` — that's the orchestrator's stated reason                |
 | Manual chain runs forever                          | persistent bad capture; no orchestrator escalation                     | should not happen post commit 47c0f11; if it does, inspect `relay_handoff.capture_status` and `round_number`        |
 
 ### Inspecting state
@@ -243,7 +243,7 @@ The agents themselves run inside their respective panes. The kickoff text the br
 Where to look when you need ground truth:
 
 - **Relay monitor pane**: `whisper collab relay-monitor` — live status of turn owner, chain state, current round, max rounds, workflow phase/step.
-- **SQLite**: `.ai-whisper/runtime/broker.sqlite` — `workflows`, `relay_chains`, `relay_handoff`. `evaluator_verdict` column carries the workflow verdict; `orchestrator_verdict` is a legacy bookkeeping mapping. `halt_reason` on `workflows` is what the orchestrator used to stop.
+- **SQLite**: `~/.ai-whisper/state.db` (single shared store across all collabs; root overridable via `AI_WHISPER_STATE_ROOT`) — `workflows`, `relay_chains`, `relay_handoff`. `evaluator_verdict` column carries the workflow verdict; `orchestrator_verdict` is a legacy bookkeeping mapping. `halt_reason` on `workflows` is what the orchestrator used to stop.
 - **CLI**: `whisper workflow inspect <workflowId>` lists phase runs and their outcomes.
 
 ---
