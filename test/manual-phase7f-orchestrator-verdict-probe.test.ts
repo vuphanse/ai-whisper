@@ -50,8 +50,10 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		// Running from a worktree: REPO_ROOT is the worktree dir. git-common-dir
 		// resolves the main repo so WORKSPACE=main repo (README.md + .env available).
 		expect(script).toContain("rev-parse --git-common-dir");
-		// WORKSPACE is set before argument parsing so --workspace can override it
-		expect(script).toContain('WORKSPACE="${_GIT_COMMON_DIR%/.git}"');
+		// --git-common-dir is relative (".git") from the main repo; it is
+		// resolved to an absolute path and WORKSPACE is its parent dir.
+		expect(script).toContain('WORKSPACE="$(dirname "$_GIT_COMMON_DIR")"');
+		expect(script).not.toContain('WORKSPACE="${_GIT_COMMON_DIR%/.git}"');
 		// .env sourced from WORKSPACE (main repo)
 		expect(script).toContain('source "$WORKSPACE/.env"');
 		expect(script).toContain("set -a");
@@ -144,15 +146,14 @@ describe("phase 7f orchestrator verdict probe script", () => {
 		expect(script).toContain("Probe verdict: FAIL");
 	});
 
-	it("cleans collab state before checking for stale broker", () => {
+	it("uses the shared-DB probe helper for cleanup and drops the fixed-port guard", () => {
 		const script = readScript();
-		const stopIndex = script.indexOf(
-			"node packages/cli/dist/bin/whisper.js collab stop",
+		expect(script).toContain(
+			'source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"',
 		);
-		const portCheckIndex = script.indexOf("lsof -n -P -iTCP:4311 -sTCP:LISTEN");
-		expect(stopIndex).toBeGreaterThan(-1);
-		expect(portCheckIndex).toBeGreaterThan(-1);
-		expect(stopIndex).toBeLessThan(portCheckIndex);
+		expect(script).toContain("probe_stop_if_active");
+		expect(script).toContain("probe_reset_runtime");
+		expect(script).not.toContain("lsof -n -P -iTCP:4311 -sTCP:LISTEN");
 	});
 
 	it("enables mounted provider input logging and starts relay-monitor", () => {

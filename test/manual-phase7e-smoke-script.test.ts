@@ -74,20 +74,19 @@ describe("phase 7e mounted handoff probe script", () => {
 		expect(script).toContain("after-amend-response.txt");
 	});
 
-	it("cleans current collab state before checking for a stale broker listener", () => {
+	it("uses the shared-DB probe helper for cleanup and drops the fixed-port guard", () => {
 		const script = readFileSync(
 			resolve(root, "scripts/manual/phase-7e-mounted-turn-handoff-probe.sh"),
 			"utf8",
 		);
-		const stopIndex = script.indexOf("node packages/cli/dist/bin/whisper.js collab stop");
-		const resetIndex = script.indexOf("rm -f \"$STATE_FILE\" \"$SQLITE_FILE\"");
-		const portCheckIndex = script.indexOf("lsof -n -P -iTCP:4311 -sTCP:LISTEN");
-
-		expect(stopIndex).toBeGreaterThan(-1);
-		expect(resetIndex).toBeGreaterThan(-1);
-		expect(portCheckIndex).toBeGreaterThan(-1);
-		expect(stopIndex).toBeLessThan(portCheckIndex);
-		expect(resetIndex).toBeLessThan(portCheckIndex);
+		expect(script).toContain(
+			'source "$REPO_ROOT/scripts/manual/_probe-shared-db.sh"',
+		);
+		expect(script).toContain("probe_stop_if_active");
+		expect(script).toContain("probe_reset_runtime");
+		// migrated off per-workspace runtime files and the fixed-port preflight
+		expect(script).not.toContain('rm -f "$STATE_FILE" "$SQLITE_FILE"');
+		expect(script).not.toContain("lsof -n -P -iTCP:4311 -sTCP:LISTEN");
 	});
 });
 
