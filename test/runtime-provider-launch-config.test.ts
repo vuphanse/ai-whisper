@@ -6,43 +6,39 @@ import {
 } from "../packages/cli/src/runtime/providers.ts";
 
 describe("interactive session launch config", () => {
-	it("grants codex a writable sandbox and access to the broker temp root", () => {
+	it("runs codex with full autonomy (no approvals, no sandbox)", () => {
 		expect(getInteractiveSessionExecArgsForTarget("codex")).toEqual([
-			"--sandbox",
-			"workspace-write",
+			"--dangerously-bypass-approvals-and-sandbox",
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
 		]);
 	});
 
-	it("grants claude access to the broker temp root and disables permission prompts", () => {
+	it("runs claude with full autonomy (all permission checks bypassed)", () => {
 		expect(getInteractiveSessionExecArgsForTarget("claude")).toEqual([
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
-			"--permission-mode",
-			"dontAsk",
+			"--dangerously-skip-permissions",
 		]);
 	});
 });
 
 describe("one-shot provider launch config", () => {
-	it("grants codex one-shot execution a writable sandbox and access to the broker temp root", () => {
+	it("runs codex one-shot execution with full autonomy", () => {
 		expect(getProviderExecArgsForTarget("codex")).toEqual([
 			"exec",
-			"--sandbox",
-			"workspace-write",
+			"--dangerously-bypass-approvals-and-sandbox",
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
 		]);
 	});
 
-	it("grants claude one-shot execution access to the broker temp root and disables permission prompts", () => {
+	it("runs claude one-shot execution with full autonomy", () => {
 		expect(getProviderExecArgsForTarget("claude")).toEqual([
 			"-p",
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
-			"--permission-mode",
-			"dontAsk",
+			"--dangerously-skip-permissions",
 		]);
 	});
 });

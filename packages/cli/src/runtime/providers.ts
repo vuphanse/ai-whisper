@@ -15,23 +15,29 @@ export function getInteractiveSessionExecArgsForTarget(
 	const tempRoot = getLiveSessionBrokerTempRoot();
 
 	if (target === "codex") {
-		// codex defaults to the read-only sandbox, which silently ignores
-		// --add-dir; workspace-write is the least-privilege mode that lets it
-		// write the relay broker temp root.
-		return ["--sandbox", "workspace-write", "--add-dir", tempRoot];
+		// Full autonomy: the relay drives codex unattended, so it must run
+		// with no approval prompts and no sandbox gating.
+		return ["--dangerously-bypass-approvals-and-sandbox", "--add-dir", tempRoot];
 	}
 
-	return ["--add-dir", tempRoot, "--permission-mode", "dontAsk"];
+	// Full autonomy: bypass all permission checks so the relay can drive
+	// claude unattended (file writes + bash).
+	return ["--add-dir", tempRoot, "--dangerously-skip-permissions"];
 }
 
 export function getProviderExecArgsForTarget(target: "codex" | "claude"): string[] {
 	const tempRoot = getLiveSessionBrokerTempRoot();
 
 	if (target === "codex") {
-		return ["exec", "--sandbox", "workspace-write", "--add-dir", tempRoot];
+		return [
+			"exec",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--add-dir",
+			tempRoot,
+		];
 	}
 
-	return ["-p", "--add-dir", tempRoot, "--permission-mode", "dontAsk"];
+	return ["-p", "--add-dir", tempRoot, "--dangerously-skip-permissions"];
 }
 
 export function createProviderForTarget(target: "codex" | "claude") {
