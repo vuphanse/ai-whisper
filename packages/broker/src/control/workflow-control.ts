@@ -677,8 +677,13 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					nextStep: "fix",
 					sender: getAgentForRole(workflow, "reviewer"),
 					target: getAgentForRole(workflow, "implementer"),
+					// Wrap the raw reviewer findings in an imperative directive so
+					// the implementer applies them instead of replying with a
+					// clarification question (which the orchestrator would
+					// correctly, but uselessly, escalate as non-delivery).
 					requestText:
-						input.followUpMessage ?? "Address reviewer findings.",
+						"Apply the following reviewer findings now. This is an autonomous workflow — no human will respond. Make the changes yourself and hand back the corrected deliverable; never ask for confirmation, permission, or clarification.\n\nFindings:\n" +
+						(input.followUpMessage ?? "Address the reviewer's findings."),
 					incrementRound: false,
 					now: input.now,
 				});
