@@ -5,9 +5,11 @@ export function createFakePty() {
 	const handlers: DataHandler[] = [];
 	const exitHandlers: ExitHandler[] = [];
 	const writes: string[] = [];
+	const resizes: Array<[number, number]> = [];
 
 	return {
 		writes,
+		resizes,
 		write(data: string) {
 			writes.push(data);
 		},
@@ -30,6 +32,8 @@ export function createFakePty() {
 			}
 		},
 		kill() {},
-		resize() {},
+		resize(columns: number, rows: number) {
+			resizes.push([columns, rows]);
+		},
 	};
 }
