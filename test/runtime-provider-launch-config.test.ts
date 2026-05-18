@@ -6,8 +6,10 @@ import {
 } from "../packages/cli/src/runtime/providers.ts";
 
 describe("interactive session launch config", () => {
-	it("grants codex access to the broker temp root", () => {
+	it("grants codex a writable sandbox and access to the broker temp root", () => {
 		expect(getInteractiveSessionExecArgsForTarget("codex")).toEqual([
+			"--sandbox",
+			"workspace-write",
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
 		]);
@@ -24,9 +26,11 @@ describe("interactive session launch config", () => {
 });
 
 describe("one-shot provider launch config", () => {
-	it("grants codex one-shot execution access to the broker temp root", () => {
+	it("grants codex one-shot execution a writable sandbox and access to the broker temp root", () => {
 		expect(getProviderExecArgsForTarget("codex")).toEqual([
 			"exec",
+			"--sandbox",
+			"workspace-write",
 			"--add-dir",
 			getLiveSessionBrokerTempRoot(),
 		]);

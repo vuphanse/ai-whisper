@@ -15,7 +15,10 @@ export function getInteractiveSessionExecArgsForTarget(
 	const tempRoot = getLiveSessionBrokerTempRoot();
 
 	if (target === "codex") {
-		return ["--add-dir", tempRoot];
+		// codex defaults to the read-only sandbox, which silently ignores
+		// --add-dir; workspace-write is the least-privilege mode that lets it
+		// write the relay broker temp root.
+		return ["--sandbox", "workspace-write", "--add-dir", tempRoot];
 	}
 
 	return ["--add-dir", tempRoot, "--permission-mode", "dontAsk"];
@@ -25,7 +28,7 @@ export function getProviderExecArgsForTarget(target: "codex" | "claude"): string
 	const tempRoot = getLiveSessionBrokerTempRoot();
 
 	if (target === "codex") {
-		return ["exec", "--add-dir", tempRoot];
+		return ["exec", "--sandbox", "workspace-write", "--add-dir", tempRoot];
 	}
 
 	return ["-p", "--add-dir", tempRoot, "--permission-mode", "dontAsk"];
