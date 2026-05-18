@@ -14,6 +14,12 @@ When running from this repo checkout, build first with `pnpm build` and invoke t
 
 Interactive sessions (mounted and live-session surfaces) require `node-pty`, which is a native dependency. Local installs need a working native build toolchain available to `pnpm install` so the PTY binding can compile or load correctly.
 
+## Runtime State
+
+All collab runtime state lives in a single shared SQLite database at `~/.ai-whisper/state.db`. Nothing is written into the workspace, so a collab never pollutes the project's git state. Override the root directory with `AI_WHISPER_STATE_ROOT` (the database is then `$AI_WHISPER_STATE_ROOT/state.db`).
+
+Because the store is shared rather than per-workspace, multiple collabs run concurrently — one per workspace or git worktree, each keyed by a hash of the canonical workspace path. Lifecycle and inspection commands resolve the collab for the current directory automatically; pass `--collab <id>` to target a specific one explicitly. `whisper collab start` allocates a broker port automatically; use `--port <port>` to pin one.
+
 ## Workspace Commands
 
 ```bash
