@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawn } from "node-pty";
 import {
@@ -70,6 +71,20 @@ export function createCodexLiveSession(input: {
 			pty?.write(data);
 		},
 		sendLocalMessage(message: string) {
+			// Instrumentation only (env-gated, no behaviour change): capture the
+			// exact chrome bytes ai-whisper splices into the shared codex stdout
+			// so the TUI-corruption (dim / misplaced input) can be root-caused.
+			const localLog = process.env.AI_WHISPER_DEBUG_LOCAL_LOG;
+			if (localLog) {
+				try {
+					appendFileSync(
+						localLog,
+						`${new Date().toISOString()} codex ${JSON.stringify(message)}\n`,
+					);
+				} catch {
+					// best-effort; never disturb the session
+				}
+			}
 			input.stdout.write(message);
 		},
 		onExit(handler: () => void) {
