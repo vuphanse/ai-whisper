@@ -97,4 +97,20 @@ describe("deriveLogLines", () => {
 		const lines = deriveLogLines([row({ phaseRunId: "pr2", roundNumber: 1 })], phaseRuns, 4);
 		expect(lines.some((l) => l.kind === "phase-summary")).toBe(false);
 	});
+
+	it("returns [] for empty handoffs", () => {
+		expect(deriveLogLines([], phaseRuns, 4)).toEqual([]);
+	});
+
+	it("unknown phaseRunId degrades to route-only line, no rule, no summary", () => {
+		const lines = deriveLogLines(
+			[row({ phaseRunId: "pr-missing", workflowId: "wf1" })],
+			phaseRuns, 4,
+		);
+		expect(lines.some((l) => l.kind === "phase-rule")).toBe(false);
+		expect(lines.some((l) => l.kind === "phase-summary")).toBe(false);
+		const ev = lines.find((l) => l.kind === "event")!;
+		expect(ev.text).toContain("codex→claude");
+		expect(ev.text).not.toMatch(/P\d·R\d/);
+	});
 });

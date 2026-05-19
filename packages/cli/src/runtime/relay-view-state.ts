@@ -1,5 +1,9 @@
 import type { RelayHandoffLogRow } from "@ai-whisper/broker";
 
+// Fixed column widths for the workflow event line (kept here so Task 5/6
+// renderers stay aligned with this producer).
+const COL = { pr: 6, route: 13, step: 9, verdict: 9 } as const;
+
 export type PhaseRunRef = {
 	phaseRunId: string;
 	phaseIndex: number;
@@ -14,6 +18,7 @@ export type LogLine =
 	| { kind: "phase-rule"; text: string }
 	| { kind: "phase-summary"; text: string; ok: boolean };
 
+// Formats timestamp in UTC intentionally (relay logs recorded in UTC).
 function hhmmss(iso: string): string {
 	const d = new Date(iso);
 	const p = (n: number) => String(n).padStart(2, "0");
@@ -78,6 +83,9 @@ export function deriveLogLines(
 
 	handoffs.forEach((h, i) => {
 		const isLatest = i === handoffs.length - 1;
+		// If a handoff carries a phaseRunId not present in phaseRuns, phase is
+		// undefined and the event intentionally degrades to the route-only line;
+		// it is also excluded from phase stats. Defensive against upstream data gaps.
 		const phase = h.phaseRunId ? byPhaseRun.get(h.phaseRunId) : undefined;
 
 		if (h.phaseRunId && h.phaseRunId !== lastPhaseRunId && phase) {
@@ -104,18 +112,18 @@ export function deriveLogLines(
 
 		if (h.workflowId && phase && h.roundNumber != null) {
 			const pr = `P${phase.phaseIndex + 1}·R${h.roundNumber}`;
-			const step = pad(h.handoffStep ?? "-", 9);
-			const verdict = pad(h.evaluatorVerdict ?? "-", 9);
+			const step = pad(h.handoffStep ?? "-", COL.step);
+			const verdict = pad(h.evaluatorVerdict ?? "-", COL.verdict);
 			out.push({
 				kind: "event",
 				isLatest,
-				text: `${time}  ${pad(pr, 6)}  ${pad(route, 13)}  ${step}  ${verdict}  ${preview}`,
+				text: `${time}  ${pad(pr, COL.pr)}  ${pad(route, COL.route)}  ${step}  ${verdict}  ${preview}`,
 			});
 		} else {
 			out.push({
 				kind: "event",
 				isLatest,
-				text: `${time}  ${pad(route, 13)}  ${preview}`,
+				text: `${time}  ${pad(route, COL.route)}  ${preview}`,
 			});
 		}
 	});
