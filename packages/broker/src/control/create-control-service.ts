@@ -127,6 +127,10 @@ import {
 	listRelayHandoffs as listRelayHandoffsRepo,
 	type RelayHandoffLogRow,
 } from "../storage/repositories/relay-handoff-repository.js";
+import {
+	listActiveCollabSummaries as listActiveCollabSummariesRepo,
+	type CollabSummary,
+} from "../storage/repositories/dashboard-repository.js";
 import { createWorkflowControl } from "./workflow-control.js";
 import type { BrokerEventBus } from "../runtime/broker-event-bus.js";
 
@@ -1053,6 +1057,12 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return listRelayHandoffsRepo(db, {
 				collabId,
 				...(typeof limit === "number" ? { limit } : {}),
+			});
+		},
+		listActiveCollabSummaries(sinceMs: number, now?: string): CollabSummary[] {
+			return listActiveCollabSummariesRepo(db, {
+				sinceMs,
+				...(now !== undefined ? { now } : {}),
 			});
 		},
 		getRelayTurnState(collabId: string, now?: string) {
