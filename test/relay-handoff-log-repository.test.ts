@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
 import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
 import { listRelayHandoffs } from "../packages/broker/src/storage/repositories/relay-handoff-repository.ts";
@@ -90,5 +91,24 @@ describe("listRelayHandoffs", () => {
 	it("returns [] for an unknown collab", () => {
 		const db = freshDb();
 		expect(listRelayHandoffs(db, { collabId: "nope" })).toEqual([]);
+	});
+});
+
+describe("control.listRelayHandoffs", () => {
+	it("is exposed on broker.control and is collab-scoped", () => {
+		const dir = mkdtempSync(join(tmpdir(), "rh-ctl-"));
+		const broker = createBrokerRuntime({
+			sqlitePath: join(dir, "state.db"),
+			host: "127.0.0.1",
+			port: 4733,
+		});
+		insertHandoff(broker.db, {
+			id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
+			workflowId: "wf1", round: 1, step: "review", verdict: "approve",
+		});
+		const rows = broker.control.listRelayHandoffs("c1");
+		expect(rows.map((r) => r.handoffId)).toEqual(["h1"]);
+		expect(rows[0]?.evaluatorVerdict).toBe("approve");
+		void broker.stop();
 	});
 });

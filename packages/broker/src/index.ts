@@ -85,3 +85,7 @@ export {
 	type RecoveryStateRecord,
 	type RecoveryStateValue,
 } from "./storage/repositories/recovery-state-repository.js";
+export type {
+	RelayHandoffCursor,
+	RelayHandoffLogRow,
+} from "./storage/repositories/relay-handoff-repository.js";
