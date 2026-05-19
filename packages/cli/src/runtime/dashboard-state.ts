@@ -227,13 +227,60 @@ export function buildInspectorState(input: {
 		})),
 	};
 
-	// Evidence is filled in by Task 6; empty shell for now.
+	const excerpt = (s: string | null): string => {
+		const t = (s ?? "").replace(/\s+/g, " ").trim();
+		return t.length > 80 ? `${t.slice(0, 80)}…` : t;
+	};
+	const items: EvidenceItem[] = input.evidenceHandoffs.map((h) => ({
+		round: h.roundNumber,
+		step: h.handoffStep,
+		sender: h.senderAgent,
+		target: h.targetAgent,
+		verdict: h.evaluatorVerdict,
+		confidence: h.evaluatorConfidence,
+		reasonExcerpt: excerpt(h.evaluatorReason),
+		captureStatus: h.captureStatus,
+	}));
+	const diagnostics: DiagItem[] = [
+		...input.evaluatorDiags.map((d) => ({
+			kind: "evaluator" as const,
+			text: `verdict ${d.verdict ?? "-"} conf ${d.confidence ?? "-"} · ${d.outcome} · ${excerpt(d.reason).slice(0, 60)}`,
+		})),
+		...input.captureDiags.map((d) => ({
+			kind: "capture" as const,
+			text: `capture ${d.captureStatus} · turn ${d.turnConfidence}`,
+		})),
+	];
+	const confs = input.evaluatorDiags
+		.map((d) => d.confidence)
+		.filter((c): c is number => typeof c === "number");
+	const declining = confs.length >= 2 && confs[confs.length - 1]! < confs[0]!;
+	const captureBad = input.captureDiags.some((d) => d.captureStatus !== "ok");
+	const rounds = input.snapshot.chain?.currentRound ?? 0;
+	const maxR = input.snapshot.chain?.maxRounds ?? 0;
+	let likelyCause: string;
+	if (
+		live.stuck &&
+		(input.snapshot.chain?.status === "escalated" ||
+			(maxR > 1 && rounds >= maxR)) &&
+		declining
+	) {
+		likelyCause = `${rounds}/${maxR} rounds, verdict never reached approve, confidence declining → likely under-specified input or maxRounds too low`;
+	} else if (captureBad) {
+		likelyCause = `capture issues (${input.captureDiags.filter((d) => d.captureStatus !== "ok").length}) — provider output may be truncated/low-confidence`;
+	} else if (live.stuck) {
+		likelyCause = `stuck: ${live.why ?? "see status"}`;
+	} else {
+		likelyCause = "no blocking signal — run progressing";
+	}
 	const evidence = {
-		phase: null as string | null,
+		phase:
+			input.phaseRuns.find((p) => p.phaseRunId === input.focusedPhaseRunId)
+				?.phaseName ?? null,
 		chainId: input.chainId,
-		items: [] as EvidenceItem[],
-		diagnostics: [] as DiagItem[],
-		likelyCause: "",
+		items,
+		diagnostics,
+		likelyCause,
 	};
 
 	return { live, timeline, evidence, cost };

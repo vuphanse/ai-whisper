@@ -218,3 +218,63 @@ describe("buildInspectorState — timeline + cost", () => {
 		]);
 	});
 });
+
+describe("buildInspectorState — evidence", () => {
+	const handoffs: RelayHandoffLogRow[] = [
+		{ handoffId: "h1", createdAt: "2026-05-20T00:01:00.000Z", collabId: "c", senderAgent: "codex", targetAgent: "claude", status: "handed_back", captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "implement", workflowId: "wf", phaseRunId: "pr2", handbackText: "wrote plan", evaluatorVerdict: "delivered", evaluatorConfidence: 0.61, evaluatorReason: "test plan TBD", lastActivityAt: "2026-05-20T00:01:00.000Z" },
+		{ handoffId: "h2", createdAt: "2026-05-20T00:05:00.000Z", collabId: "c", senderAgent: "claude", targetAgent: "codex", status: "handed_back", captureStatus: "ok", chainId: "ch1", roundNumber: 5, handoffStep: "review", workflowId: "wf", phaseRunId: "pr2", handbackText: null, evaluatorVerdict: "findings", evaluatorConfidence: 0.43, evaluatorReason: "criterion 5 still unmet and the scope is ambiguous enough that more rounds will not converge", lastActivityAt: "2026-05-20T00:05:00.000Z" },
+	];
+	it("builds chain items, diagnostics, and a declining-confidence likely cause", () => {
+		const s = buildInspectorState({
+			snapshot: { ...liveSnap }, phaseRuns: [{ phaseRunId: "pr2", phaseIndex: 1, phaseName: "plan-writing", startedAt: "2026-05-20T00:00:00.000Z", endedAt: null, outcome: null }],
+			phaseMaxRounds: { 1: 5 }, costRows: [], workflowCreatedAt: "2026-05-20T00:00:00.000Z", chainId: "ch1",
+			evidenceHandoffs: handoffs,
+			evaluatorDiags: [
+				{ verdict: "delivered", confidence: 0.61, reason: "test plan TBD", outcome: "ok" },
+				{ verdict: "findings", confidence: 0.43, reason: "criterion 5 unmet", outcome: "ok" },
+			],
+			captureDiags: [{ captureStatus: "ok", turnConfidence: "high" }],
+			focusedPhaseRunId: "pr2",
+		});
+		expect(s.evidence.chainId).toBe("ch1");
+		expect(s.evidence.items).toHaveLength(2);
+		expect(s.evidence.items[1]).toMatchObject({ round: 5, step: "review", verdict: "findings", confidence: 0.43 });
+		expect(s.evidence.items[1]!.reasonExcerpt.length).toBeLessThanOrEqual(81);
+		expect(s.evidence.diagnostics.some((d) => d.kind === "evaluator")).toBe(true);
+		expect(s.evidence.likelyCause).toMatch(/confidence declining|under-specified|maxRounds/);
+	});
+	it("capture issue drives the likely cause when not escalated", () => {
+		const s = buildInspectorState({
+			snapshot: { ...liveSnap, chain: { currentRound: 2, maxRounds: 5, status: "active" } },
+			phaseRuns: [], phaseMaxRounds: {}, costRows: [], workflowCreatedAt: "2026-05-20T00:00:00.000Z", chainId: "ch1",
+			evidenceHandoffs: handoffs.slice(0, 1),
+			evaluatorDiags: [], captureDiags: [{ captureStatus: "no_response_captured", turnConfidence: "low" }],
+			focusedPhaseRunId: "pr2",
+		});
+		expect(s.evidence.likelyCause).toMatch(/capture issues/);
+	});
+	it("likelyCause branch 3 (stuck, no escalation/capture) and branch 4 (progressing); empty evidenceHandoffs → items []", () => {
+		const base = {
+			phaseRuns: [], phaseMaxRounds: {}, costRows: [], workflowCreatedAt: "2026-05-20T00:00:00.000Z",
+			chainId: "ch1", evidenceHandoffs: [] as RelayHandoffLogRow[],
+			evaluatorDiags: [], captureDiags: [], focusedPhaseRunId: "pr2",
+		};
+		// Branch 3: idle-stuck (now ≫ lastActivityAt), chain active, no capture/declining.
+		const stuck = buildInspectorState({
+			...base,
+			snapshot: { ...liveSnap, now: "2026-05-20T01:00:00.000Z", lastActivityAt: "2026-05-20T00:00:00.000Z", chain: { currentRound: 2, maxRounds: 5, status: "active" } },
+		});
+		expect(stuck.live.stuck).toBe(true);
+		expect(stuck.evidence.items).toEqual([]);
+		expect(stuck.evidence.likelyCause).toMatch(/^stuck: /);
+		expect(stuck.evidence.likelyCause).not.toMatch(/under-specified|capture issues/);
+		// Branch 4: not stuck (idle ~0), chain active round 1.
+		const ok = buildInspectorState({
+			...base,
+			snapshot: { ...liveSnap, now: "2026-05-20T00:14:01.000Z", lastActivityAt: "2026-05-20T00:14:00.000Z", chain: { currentRound: 1, maxRounds: 5, status: "active" } },
+		});
+		expect(ok.live.stuck).toBe(false);
+		expect(ok.evidence.likelyCause).toBe("no blocking signal — run progressing");
+		expect(ok.evidence.items).toEqual([]);
+	});
+});
