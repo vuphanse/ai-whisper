@@ -2,6 +2,9 @@ import { Box, Text } from "ink";
 import type { ReactElement } from "react";
 import type { LogLine } from "./relay-view-state.js";
 import type { WallState, WallPaneState } from "./dashboard-state.js";
+import { RelayView, type Viewport } from "./relay-view.js";
+import { fmtDur } from "./relay-view-state.js";
+import type { InspectorState } from "./dashboard-state.js";
 
 const MIN_PANE_COLS = 40;
 const MIN_PANE_ROWS = 5;
@@ -85,6 +88,100 @@ export function Wall(props: {
 			<Text color="gray">
 				{`page ${state.page + 1}/${Math.max(1, state.pageCount)} · ${state.totalRuns} runs · ↵ inspect · [ ] page · q quit`}
 			</Text>
+		</Box>
+	);
+}
+
+export type InspectorSection = "live" | "timeline" | "evidence" | "cost";
+
+function tabBar(active: InspectorSection): string {
+	const t = (k: InspectorSection, n: string) =>
+		k === active ? `[${n}]` : ` ${n} `;
+	return `${t("live", "1 Live")}${t("timeline", "2 Timeline")}${t("evidence", "3 Evidence")}${t("cost", "4 Cost")}`;
+}
+
+export function Inspector(props: {
+	state: InspectorState;
+	section: InspectorSection;
+	viewport: Viewport;
+	cols: number;
+	rows: number;
+	label: string;
+	workflowType: string | null;
+}): ReactElement {
+	const s = props.state;
+	const head = `${props.label} · ${props.workflowType ?? "manual relay"}`;
+	const innerRows = Math.max(3, props.rows - 2);
+	return (
+		<Box flexDirection="column" width={props.cols}>
+			<Text wrap="truncate" bold>
+				{head}
+			</Text>
+			<Text wrap="truncate" color="gray">
+				{`${tabBar(props.section)}   Esc wall · q quit`}
+			</Text>
+			{props.section === "live" ? (
+				<RelayView
+					state={s.live}
+					viewport={props.viewport}
+					rows={innerRows}
+					cols={props.cols}
+				/>
+			) : props.section === "timeline" ? (
+				<Box flexDirection="column">
+					<Text wrap="truncate" color="gray">
+						PHASE ROUNDS TIME ~TOK OUTCOME
+					</Text>
+					{s.timeline.map((p) => (
+						<Text key={p.phaseIndex} wrap="truncate">
+							{`${p.phaseName}  ${p.roundsUsed}/${p.maxRounds}  ${
+								p.durationMs == null ? "–" : fmtDur(p.durationMs)
+							}  ≈${p.estInTokens + p.estOutTokens}  ${p.outcome ?? "⋯"}`}
+						</Text>
+					))}
+					<Text wrap="truncate" bold>
+						{`TOTAL  ≈${
+							s.cost.estInputTokens + s.cost.estOutputTokens
+						}  ${fmtDur(s.cost.totalMs)}`}
+					</Text>
+				</Box>
+			) : props.section === "evidence" ? (
+				<Box flexDirection="column">
+					<Text wrap="truncate" color="gray">
+						{`${s.evidence.phase ?? "—"} · chain ${s.evidence.chainId ?? "—"}`}
+					</Text>
+					{s.evidence.items.map((it, i) => (
+						<Text key={i} wrap="truncate">
+							{`R${it.round ?? "-"} ${it.step ?? "-"} ${it.sender}→${it.target} ${
+								it.verdict ?? "-"
+							} ${it.confidence ?? "-"} ${it.reasonExcerpt}`}
+						</Text>
+					))}
+					{s.evidence.diagnostics.map((d, i) => (
+						<Text key={`d${i}`} wrap="truncate" color="gray">
+							{`${d.kind}: ${d.text}`}
+						</Text>
+					))}
+					<Text wrap="truncate" color="yellow">
+						{`▸ ${s.evidence.likelyCause}`}
+					</Text>
+				</Box>
+			) : (
+				<Box flexDirection="column">
+					<Text wrap="truncate">
+						{`total ${fmtDur(s.cost.totalMs)} · in ≈${
+							s.cost.estInputTokens
+						} · out ≈${s.cost.estOutputTokens}  (est, not metered)`}
+					</Text>
+					{s.cost.perPhase.map((p, i) => (
+						<Text key={i} wrap="truncate" color="gray">
+							{`${p.phaseName}  in ≈${p.estInTokens}  out ≈${
+								p.estOutTokens
+							}  ${p.durationMs == null ? "–" : fmtDur(p.durationMs)}`}
+						</Text>
+					))}
+				</Box>
+			)}
 		</Box>
 	);
 }

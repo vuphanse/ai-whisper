@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { render } from "ink-testing-library";
 import { Wall, gridCapacity } from "../packages/cli/src/runtime/dashboard-view.tsx";
 import type { WallState } from "../packages/cli/src/runtime/dashboard-state.ts";
+import { Inspector } from "../packages/cli/src/runtime/dashboard-view.tsx";
+import type { InspectorState } from "../packages/cli/src/runtime/dashboard-state.ts";
 
 function wall(p: Partial<WallState>): WallState {
 	return {
@@ -58,5 +60,46 @@ describe("Wall", () => {
 		expect((f.match(/╭/g) ?? []).length).toBe(5); // one rounded box per pane (multi-row)
 		expect(f).toContain("page 1/1");
 		expect(f).toContain("5 runs");
+	});
+});
+
+function inspState(): InspectorState {
+	return {
+		live: { wf: "spec-driven-development  wf…  \"oauth\"", progress: "Phase 2/4 plan-writing · Round 5/5 · Step review", elapsed: "total 14m · phase 11m", turn: "codex · waiting claude · handoff accepted", health: "● codex ● claude  Chain escalated", live: "", why: "STUCK 5/5 max reached → escalated", last: "findings 0.43 · capture ok", stuck: true, logLines: [] },
+		timeline: [
+			{ phaseIndex: 0, phaseName: "spec-refining", roundsUsed: 2, maxRounds: 5, durationMs: 192000, outcome: "done", estInTokens: 6000, estOutTokens: 3000 },
+			{ phaseIndex: 1, phaseName: "plan-writing", roundsUsed: 5, maxRounds: 5, durationMs: 700000, outcome: "escalated", estInTokens: 45000, estOutTokens: 29000 },
+		],
+		evidence: { phase: "plan-writing", chainId: "ch_7f3", items: [{ round: 5, step: "review", sender: "claude", target: "codex", verdict: "findings", confidence: 0.43, reasonExcerpt: "criterion 5 unmet", captureStatus: "ok" }], diagnostics: [{ kind: "evaluator", text: "verdict findings conf 0.43 · ok · criterion 5 unmet" }], likelyCause: "5/5 rounds, confidence declining → under-specified input" },
+		cost: { totalMs: 892000, estInputTokens: 51000, estOutputTokens: 32000, perPhase: [{ phaseRunId: "pr1", phaseName: "spec-refining", estInTokens: 6000, estOutTokens: 3000, durationMs: 192000 }, { phaseRunId: "pr2", phaseName: "plan-writing", estInTokens: 45000, estOutTokens: 29000, durationMs: 700000 }] },
+	};
+}
+
+describe("Inspector", () => {
+	const vp = { offset: 0, follow: true };
+	it("Timeline section shows rounds-vs-max, outcome, est tokens, TOTAL", () => {
+		const { lastFrame } = render(<Inspector state={inspState()} section="timeline" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
+		const f = lastFrame()!;
+		expect(f).toContain("plan-writing");
+		expect(f).toContain("5/5");
+		expect(f).toContain("escalated");
+		expect(f).toMatch(/TOTAL/);
+	});
+	it("Evidence section shows the chain + likely cause", () => {
+		const { lastFrame } = render(<Inspector state={inspState()} section="evidence" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
+		const f = lastFrame()!;
+		expect(f).toContain("ch_7f3");
+		expect(f).toContain("criterion 5 unmet");
+		expect(f).toContain("under-specified input");
+	});
+	it("Cost section labels the estimate and shows totals", () => {
+		const { lastFrame } = render(<Inspector state={inspState()} section="cost" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
+		const f = lastFrame()!;
+		expect(f).toContain("est, not metered");
+		expect(f).toContain("51000");
+	});
+	it("Live section renders the RelayView status rows", () => {
+		const { lastFrame } = render(<Inspector state={inspState()} section="live" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
+		expect(lastFrame()!).toContain("progress │");
 	});
 });
