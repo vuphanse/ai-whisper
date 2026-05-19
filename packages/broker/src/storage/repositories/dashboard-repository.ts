@@ -168,3 +168,42 @@ export function listActiveCollabSummaries(
 	}
 	return out;
 }
+
+// Inspector "Cost" detail. Returns CHARACTER COUNTS + timestamps only —
+// never raw request/handback text (privacy + perf: the wall path must not
+// pull large text every poll). workflowId null → manual-relay run scope.
+export function listRunCostRows(
+	db: Database.Database,
+	input: { collabId: string; workflowId: string | null },
+): RunCostRow[] {
+	const sql =
+		`SELECT phase_run_id AS phaseRunId, created_at AS createdAt,
+		        resolved_at AS resolvedAt, last_activity_at AS lastActivityAt,
+		        (LENGTH(COALESCE(request_text,'')) + LENGTH(COALESCE(root_request_text,''))) AS inChars,
+		        LENGTH(COALESCE(handback_text,'')) AS outChars
+		   FROM relay_handoff
+		  WHERE collab_id = ? AND ` +
+		(input.workflowId === null ? "workflow_id IS NULL" : "workflow_id = ?") +
+		" ORDER BY created_at ASC, handoff_id ASC";
+	const stmt = db.prepare(sql);
+	const rows = (
+		input.workflowId === null
+			? stmt.all(input.collabId)
+			: stmt.all(input.collabId, input.workflowId)
+	) as Array<{
+		phaseRunId: string | null;
+		createdAt: string;
+		resolvedAt: string | null;
+		lastActivityAt: string;
+		inChars: number;
+		outChars: number;
+	}>;
+	return rows.map((r) => ({
+		phaseRunId: r.phaseRunId,
+		createdAt: r.createdAt,
+		resolvedAt: r.resolvedAt,
+		lastActivityAt: r.lastActivityAt,
+		inChars: r.inChars,
+		outChars: r.outChars,
+	}));
+}

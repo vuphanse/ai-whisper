@@ -6,6 +6,7 @@ import { applyMigrations } from "../packages/broker/src/storage/apply-migrations
 import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
 import {
 	listActiveCollabSummaries,
+	listRunCostRows,
 } from "../packages/broker/src/storage/repositories/dashboard-repository.ts";
 
 function freshDb() {
@@ -109,5 +110,49 @@ describe("listActiveCollabSummaries", () => {
 	it("returns [] when nothing is recently active", () => {
 		const db = freshDb();
 		expect(listActiveCollabSummaries(db, { sinceMs, now: NOW })).toEqual([]);
+	});
+});
+
+function insCostHandoff(db: ReturnType<typeof freshDb>, h: { id: string; collab: string; wf?: string | null; phase?: string | null; createdAt: string; resolvedAt?: string | null; lastAct?: string; req?: string; root?: string | null; back?: string | null }) {
+	db.prepare(
+		`INSERT INTO relay_handoff (handoff_id,collab_id,sender_agent,target_agent,request_text,status,created_at,resolved_at,last_activity_at,workflow_id,phase_run_id,root_request_text,handback_text)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	).run(h.id, h.collab, "codex", "claude", h.req ?? "", "handed_back", h.createdAt, h.resolvedAt ?? null, h.lastAct ?? h.createdAt, h.wf ?? null, h.phase ?? null, h.root ?? null, h.back ?? null);
+}
+
+describe("listRunCostRows", () => {
+	it("returns per-handoff char counts + timestamps for a workflow run (no raw text)", () => {
+		const db = freshDb();
+		insCostHandoff(db, { id: "h1", collab: "c", wf: "wf", phase: "pr1", createdAt: "2026-05-20T00:00:00.000Z", resolvedAt: "2026-05-20T00:02:00.000Z", req: "abcd", root: "ef", back: "ghijk" });
+		insCostHandoff(db, { id: "h2", collab: "c", wf: "wf", phase: "pr1", createdAt: "2026-05-20T00:03:00.000Z", lastAct: "2026-05-20T00:04:00.000Z", req: "x", root: null, back: null });
+		insCostHandoff(db, { id: "hz", collab: "c", wf: "other", phase: "prZ", createdAt: "2026-05-20T00:01:00.000Z", req: "zzzzz" });
+		const rows = listRunCostRows(db, { collabId: "c", workflowId: "wf" });
+		expect(rows).toEqual([
+			{ phaseRunId: "pr1", createdAt: "2026-05-20T00:00:00.000Z", resolvedAt: "2026-05-20T00:02:00.000Z", lastActivityAt: "2026-05-20T00:00:00.000Z", inChars: 6, outChars: 5 },
+			{ phaseRunId: "pr1", createdAt: "2026-05-20T00:03:00.000Z", resolvedAt: null, lastActivityAt: "2026-05-20T00:04:00.000Z", inChars: 1, outChars: 0 },
+		]);
+		const json = JSON.stringify(rows);
+		expect(json).not.toContain("abcd");
+		expect(json).not.toContain("ghijk");
+	});
+
+	it("manual-relay run (workflowId null) scopes to workflow_id IS NULL", () => {
+		const db = freshDb();
+		insCostHandoff(db, { id: "m1", collab: "c", wf: null, createdAt: "2026-05-20T00:00:00.000Z", req: "aa", back: "bbb" });
+		insCostHandoff(db, { id: "w1", collab: "c", wf: "wf", createdAt: "2026-05-20T00:01:00.000Z", req: "ccccc" });
+		const rows = listRunCostRows(db, { collabId: "c", workflowId: null });
+		expect(rows).toEqual([
+			{ phaseRunId: null, createdAt: "2026-05-20T00:00:00.000Z", resolvedAt: null, lastActivityAt: "2026-05-20T00:00:00.000Z", inChars: 2, outChars: 3 },
+		]);
+	});
+
+	it("REGRESSION: re-read reflects an in-place handback update", () => {
+		const db = freshDb();
+		insCostHandoff(db, { id: "h", collab: "c", wf: "wf", createdAt: "2026-05-20T00:00:00.000Z", req: "ab", back: null });
+		expect(listRunCostRows(db, { collabId: "c", workflowId: "wf" })[0]?.outChars).toBe(0);
+		db.prepare("UPDATE relay_handoff SET handback_text='wxyz', resolved_at='2026-05-20T00:05:00.000Z' WHERE handoff_id='h'").run();
+		const after = listRunCostRows(db, { collabId: "c", workflowId: "wf" })[0];
+		expect(after?.outChars).toBe(4);
+		expect(after?.resolvedAt).toBe("2026-05-20T00:05:00.000Z");
 	});
 });

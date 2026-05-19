@@ -129,7 +129,9 @@ import {
 } from "../storage/repositories/relay-handoff-repository.js";
 import {
 	listActiveCollabSummaries as listActiveCollabSummariesRepo,
+	listRunCostRows as listRunCostRowsRepo,
 	type CollabSummary,
+	type RunCostRow,
 } from "../storage/repositories/dashboard-repository.js";
 import { createWorkflowControl } from "./workflow-control.js";
 import type { BrokerEventBus } from "../runtime/broker-event-bus.js";
@@ -1064,6 +1066,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				sinceMs,
 				...(now !== undefined ? { now } : {}),
 			});
+		},
+		listRunCostRows(collabId: string, workflowId: string | null): RunCostRow[] {
+			return listRunCostRowsRepo(db, { collabId, workflowId });
 		},
 		getRelayTurnState(collabId: string, now?: string) {
 			return queryRelayTurnState(db, collabId, now);
