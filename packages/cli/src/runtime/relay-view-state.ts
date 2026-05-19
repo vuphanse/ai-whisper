@@ -133,3 +133,150 @@ export function deriveLogLines(
 
 	return out;
 }
+
+export type RelayViewSnapshot = {
+	now: string;
+	idleThresholdMs: number;
+	workflow: {
+		workflowId: string;
+		workflowType: string;
+		name: string | null;
+		status: "running" | "done" | "halted" | "canceled";
+		createdAt: string;
+		haltReason?: string | null;
+	} | null;
+	phaseRuns: Array<{
+		phaseRunId: string;
+		phaseIndex: number;
+		phaseName: string;
+		startedAt: string;
+		endedAt: string | null;
+		outcome: string | null;
+	}>;
+	currentPhaseRunId: string | null;
+	currentStep: string | null;
+	totalPhases: number;
+	chain: {
+		currentRound: number;
+		maxRounds: number;
+		status: "active" | "done" | "escalated" | "abandoned";
+	} | null;
+	turn: {
+		turnOwner: "codex" | "claude" | "none";
+		waitingAgent: "codex" | "claude" | null;
+		handoffState: string;
+	};
+	sessions: Array<{ agentType: string; healthState: string }>;
+	lastActivityAt: string | null;
+	handoffs: RelayHandoffLogRow[];
+};
+
+export type RelayViewState = {
+	wf: string;
+	progress: string;
+	elapsed: string;
+	turn: string;
+	health: string;
+	live: string;
+	why: string | null; // when set, render the red ⚠ why row instead of live
+	last: string;
+	stuck: boolean;
+	logLines: LogLine[];
+};
+
+// `fmtDur` is already defined in this file (Task 4) — do NOT redefine it here.
+
+function computeLiveness(_snap: RelayViewSnapshot): {
+	stuck: boolean;
+	why: string | null;
+	liveText: string;
+} {
+	return { stuck: false, why: null, liveText: "" };
+}
+
+export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
+	const wf = snap.workflow
+		? `${snap.workflow.workflowType}  ${snap.workflow.workflowId.slice(0, 12)}…  "${snap.workflow.name ?? snap.workflow.workflowType}"`
+		: "(no workflow — manual relay)";
+
+	const cur = snap.phaseRuns.find((p) => p.phaseRunId === snap.currentPhaseRunId) ?? null;
+	const round = snap.chain?.currentRound ?? 1;
+	const maxRounds = snap.chain?.maxRounds ?? 1;
+	const progress = cur
+		? `Phase ${cur.phaseIndex + 1}/${snap.totalPhases} ${cur.phaseName} · Round ${round}/${maxRounds} · Step ${snap.currentStep ?? "-"}`
+		: "—";
+
+	const nowMs = Date.parse(snap.now);
+	const totalEl = snap.workflow ? fmtDur(nowMs - Date.parse(snap.workflow.createdAt)) : "—";
+	const phaseEl = cur ? fmtDur(nowMs - Date.parse(cur.startedAt)) : "—";
+	const elapsed = `total ${totalEl} · phase ${phaseEl}`;
+
+	const turn = `${snap.turn.turnOwner} · waiting ${snap.turn.waitingAgent ?? "none"} · handoff ${snap.turn.handoffState}`;
+
+	const dots = (["codex", "claude"] as const)
+		.map((a) => {
+			const sess = snap.sessions.find((x) => x.agentType === a);
+			const ok = sess?.healthState === "healthy";
+			return `${ok ? "●" : "●(dead)"} ${a}`;
+		})
+		.join("  ");
+
+	// stuck + why computed in Task 6; placeholder defaults overwritten there.
+	const { stuck, why, liveText } = computeLiveness(snap);
+
+	const terminal =
+		snap.workflow && snap.workflow.status !== "running" ? snap.workflow.status : null;
+	// chain.status (active/done/escalated/abandoned) is shown when not terminal
+	// and not the soft "stuck" state.
+	const chainStatus = snap.chain?.status;
+	const chainState =
+		terminal ??
+		(chainStatus && chainStatus !== "active"
+			? chainStatus
+			: stuck
+				? "stuck"
+				: "active");
+	const alive = !terminal && !stuck && (chainStatus ?? "active") === "active";
+	const health = `${dots}  Chain ${chainState}${alive ? " · ALIVE" : ""}`;
+
+	const lastHandoff = snap.handoffs[snap.handoffs.length - 1] ?? null;
+	const last = lastHandoff
+		? `${lastHandoff.evaluatorVerdict ?? "-"} ${
+				lastHandoff.evaluatorConfidence ?? "-"
+			} · capture ${lastHandoff.captureStatus ?? "-"}${
+				lastHandoff.evaluatorReason ? ` · "${lastHandoff.evaluatorReason}"` : ""
+			}`
+		: "—";
+
+	const logLines = deriveLogLines(snap.handoffs, snap.phaseRuns, snap.totalPhases);
+
+	// Spec §6: when the workflow is terminal, the log ends with an explicit
+	// terminal line.
+	if (terminal) {
+		const id = snap.workflow!.workflowId;
+		logLines.push(
+			terminal === "done"
+				? { kind: "phase-summary", ok: true, text: `✔ workflow-done: ${id}` }
+				: {
+						kind: "phase-summary",
+						ok: false,
+						text: `✖ workflow-${terminal}: ${id}${
+							snap.workflow!.haltReason ? ` — ${snap.workflow!.haltReason}` : ""
+						}`,
+					},
+		);
+	}
+
+	return {
+		wf,
+		progress,
+		elapsed,
+		turn,
+		health,
+		live: liveText,
+		why,
+		last,
+		stuck,
+		logLines,
+	};
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveLogLines } from "../packages/cli/src/runtime/relay-view-state.ts";
+import { deriveLogLines, buildRelayViewState } from "../packages/cli/src/runtime/relay-view-state.ts";
 import type { RelayHandoffLogRow } from "@ai-whisper/broker";
 
 function row(p: Partial<RelayHandoffLogRow>): RelayHandoffLogRow {
@@ -112,5 +112,53 @@ describe("deriveLogLines", () => {
 		const ev = lines.find((l) => l.kind === "event")!;
 		expect(ev.text).toContain("codex→claude");
 		expect(ev.text).not.toMatch(/P\d·R\d/);
+	});
+});
+
+const baseSnapshot = {
+	now: "2026-05-19T08:30:00.000Z",
+	idleThresholdMs: 30_000,
+	currentStep: "execute" as string | null,
+	workflow: {
+		workflowId: "wf_048c", workflowType: "spec-driven-development",
+		name: "slugify", status: "running" as const,
+		createdAt: "2026-05-19T08:22:48.000Z",
+		haltReason: null as string | null,
+	},
+	phaseRuns: [
+		{ phaseRunId: "pr1", phaseIndex: 0, phaseName: "spec-refining",
+		  startedAt: "2026-05-19T08:22:48.000Z", endedAt: "2026-05-19T08:23:18.000Z", outcome: "approve" },
+		{ phaseRunId: "pr2", phaseIndex: 2, phaseName: "plan-execution",
+		  startedAt: "2026-05-19T08:27:52.000Z", endedAt: null, outcome: null },
+	],
+	currentPhaseRunId: "pr2",
+	totalPhases: 4,
+	chain: { currentRound: 1, maxRounds: 1, status: "active" as const },
+	turn: { turnOwner: "codex" as const, waitingAgent: "claude" as const, handoffState: "accepted" as const },
+	sessions: [
+		{ agentType: "codex", healthState: "healthy" },
+		{ agentType: "claude", healthState: "healthy" },
+	],
+	lastActivityAt: "2026-05-19T08:29:52.000Z",
+	handoffs: [],
+};
+
+describe("buildRelayViewState — status", () => {
+	it("maps progress/turn/health, total+phase elapsed, ALIVE when running & not stuck", () => {
+		const s = buildRelayViewState(baseSnapshot);
+		expect(s.progress).toBe("Phase 3/4 plan-execution · Round 1/1 · Step execute");
+		expect(s.turn).toBe("codex · waiting claude · handoff accepted");
+		expect(s.health).toContain("ALIVE");
+		expect(s.elapsed).toBe("total 7m12s · phase 2m08s");
+		expect(s.stuck).toBe(false);
+	});
+
+	it("omits ALIVE and shows terminal state when workflow halted", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow, status: "halted" },
+		});
+		expect(s.health).not.toContain("ALIVE");
+		expect(s.health).toContain("halted");
 	});
 });
