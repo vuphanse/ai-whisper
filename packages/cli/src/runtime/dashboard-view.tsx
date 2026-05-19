@@ -1,5 +1,5 @@
-import { Box, Text } from "ink";
-import type { ReactElement } from "react";
+import { Box, Text, useInput, useStdin } from "ink";
+import type { ReactElement, ReactNode } from "react";
 import type { LogLine } from "./relay-view-state.js";
 import type { WallState, WallPaneState } from "./dashboard-state.js";
 import { RelayView, type Viewport } from "./relay-view.js";
@@ -183,5 +183,46 @@ export function Inspector(props: {
 				</Box>
 			)}
 		</Box>
+	);
+}
+
+type KeyEv = {
+	upArrow?: boolean;
+	downArrow?: boolean;
+	escape?: boolean;
+	key?: string;
+};
+
+// Mounted ONLY when raw mode is supported. Isolating useInput in a child
+// lets us mount it conditionally without breaking the rules of hooks — the
+// same pattern as relay-view-input's InputCapture, but dashboard-owned so
+// relay-view-input.tsx stays untouched (spec §8 / F4).
+//
+// Esc is forwarded as its own boolean (not `inputCh === ""`) because Ink
+// collapses many non-printable keys (Esc, Left/Right arrows, Tab, PageUp,
+// Home, etc.) to the same empty `inputCh`. Without this, Left/Right arrows
+// in Inspector would silently bounce to Wall.
+function DashInput(props: {
+	onKey: (ev: KeyEv) => void;
+	children: ReactNode;
+}): ReactElement {
+	useInput((inputCh, key) => {
+		if (key.escape) return props.onKey({ escape: true });
+		if (key.upArrow) return props.onKey({ upArrow: true });
+		if (key.downArrow) return props.onKey({ downArrow: true });
+		props.onKey({ key: inputCh });
+	});
+	return <>{props.children}</>;
+}
+
+export function DashboardApp(props: {
+	node: ReactElement;
+	onKey: (ev: KeyEv) => void;
+}): ReactElement {
+	const { isRawModeSupported } = useStdin();
+	return isRawModeSupported ? (
+		<DashInput onKey={props.onKey}>{props.node}</DashInput>
+	) : (
+		props.node
 	);
 }
