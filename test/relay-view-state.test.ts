@@ -163,12 +163,6 @@ describe("buildRelayViewState — status", () => {
 		expect(s.health).toContain("halted");
 	});
 
-	it("live is empty and why is null while liveness stub is in place", () => {
-		const s = buildRelayViewState(baseSnapshot);
-		expect(s.live).toBe("");
-		expect(s.why).toBeNull();
-	});
-
 	it("manual relay (workflow null) → wf label, progress —, elapsed —, last —", () => {
 		const s = buildRelayViewState({
 			...baseSnapshot, workflow: null, chain: null,
@@ -243,5 +237,62 @@ describe("buildRelayViewState — status", () => {
 			}],
 		});
 		expect(s.last).toBe('delivered 0.95 · capture ok · "looks good"');
+	});
+});
+
+describe("computeLiveness via buildRelayViewState", () => {
+	it("idle countdown to auto-handback when accepted and within threshold", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			now: "2026-05-19T08:30:00.000Z",
+			lastActivityAt: "2026-05-19T08:29:52.000Z", // idle 8s
+			idleThresholdMs: 30_000,
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted" },
+		});
+		expect(s.stuck).toBe(false);
+		expect(s.live).toBe("idle 8s · auto-handback in 22s");
+		expect(s.why).toBeNull();
+	});
+
+	it("stuck: round at maxRounds → why states round-max → escalate", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			chain: { currentRound: 5, maxRounds: 5, status: "active" as const },
+			lastActivityAt: "2026-05-19T08:26:58.000Z", // idle 182s
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toContain("round 5/5 max reached");
+	});
+
+	it("stuck: chain.status escalated/abandoned → why + health shows it", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			chain: { currentRound: 2, maxRounds: 5, status: "escalated" as const },
+			lastActivityAt: "2026-05-19T08:29:55.000Z", // only idle 5s — not idle-stuck
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toContain("chain escalated");
+		expect(s.health).toContain("Chain escalated");
+		expect(s.health).not.toContain("ALIVE");
+	});
+
+	it("stuck: idle beyond 2× threshold (≥60s) with no progress", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			idleThresholdMs: 30_000,
+			lastActivityAt: "2026-05-19T08:27:00.000Z", // idle 180s ≥ max(60, 60s)
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "pending" },
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toMatch(/STUCK \d+s/);
+	});
+
+	it("halt_reason wins as the why when workflow halted", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow!, status: "halted", haltReason: "max-rounds-reached (phase plan-writing)" },
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toContain("max-rounds-reached");
 	});
 });

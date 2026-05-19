@@ -202,12 +202,59 @@ function elapsedSince(fromIso: string | null | undefined, toIso: string): string
 	return fmtDur(b - a);
 }
 
-function computeLiveness(_snap: RelayViewSnapshot): {
+function computeLiveness(snap: RelayViewSnapshot): {
 	stuck: boolean;
 	why: string | null;
 	liveText: string;
 } {
-	return { stuck: false, why: null, liveText: "" };
+	const nowMs = Date.parse(snap.now);
+	const idleMs = snap.lastActivityAt ? nowMs - Date.parse(snap.lastActivityAt) : 0;
+	const idleS = Math.floor(idleMs / 1000);
+	const thresholdMs = snap.idleThresholdMs;
+	const stuckThresholdMs = Math.max(60_000, thresholdMs * 2);
+
+	const round = snap.chain?.currentRound ?? 1;
+	const maxRounds = snap.chain?.maxRounds ?? 1;
+	const chainStatus = snap.chain?.status;
+	const terminal =
+		snap.workflow && snap.workflow.status !== "running" ? snap.workflow.status : null;
+
+	// why precedence: halt_reason > chain escalated/abandoned > round-max
+	//                  > idle/provider-silent
+	let why: string | null = null;
+	let stuck = false;
+
+	if (terminal === "halted" || terminal === "canceled") {
+		stuck = true;
+		why = snap.workflow?.haltReason
+			? `${terminal}: ${snap.workflow.haltReason}`
+			: `workflow ${terminal}`;
+	} else if (chainStatus === "escalated" || chainStatus === "abandoned") {
+		stuck = true;
+		why = `STUCK — chain ${chainStatus}`;
+	} else if (snap.chain && round >= maxRounds && maxRounds > 1) {
+		stuck = true;
+		why = `STUCK ${fmtDur(idleMs)} — round ${round}/${maxRounds} max reached → escalated`;
+	} else if (idleMs >= stuckThresholdMs) {
+		stuck = true;
+		why = `STUCK ${idleS}s — no progress (idle > ${Math.floor(stuckThresholdMs / 1000)}s)`;
+	} else if (snap.sessions.some((s) => s.healthState !== "healthy")) {
+		stuck = true;
+		why = `STUCK — provider unhealthy`;
+	}
+
+	// live countdown (only when not stuck)
+	let liveText = `idle ${idleS}s`;
+	if (!stuck) {
+		const remainMs = Math.max(0, thresholdMs - idleMs);
+		if (snap.turn.handoffState === "accepted") {
+			liveText = `idle ${idleS}s · auto-handback in ${Math.ceil(remainMs / 1000)}s`;
+		} else if (snap.turn.handoffState === "pending") {
+			liveText = `idle ${idleS}s · auto-accept in ${Math.ceil(remainMs / 1000)}s`;
+		}
+	}
+
+	return { stuck, why, liveText };
 }
 
 export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
