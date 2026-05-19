@@ -95,7 +95,7 @@ export async function runCollabRelayMonitor(input: {
 	process.on("uncaughtException", (err) => {
 		const hardExit = setTimeout(() => process.exit(1), 3000);
 		hardExit.unref();
-		monitor.stop().finally(() => {
+		void monitor.stop().finally(() => {
 			console.error(err);
 			process.exit(1);
 		});

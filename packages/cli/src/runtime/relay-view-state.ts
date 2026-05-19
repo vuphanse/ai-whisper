@@ -248,7 +248,7 @@ function computeLiveness(snap: RelayViewSnapshot): {
 		why = `STUCK ${idleS}s — no progress (idle > ${Math.floor(stuckThresholdMs / 1000)}s)`;
 	} else if (snap.sessions.some((s) => s.healthState !== "healthy")) {
 		stuck = true;
-		why = `STUCK — provider unhealthy`;
+		why = "STUCK — provider unhealthy";
 	}
 
 	// live countdown (only when not stuck)

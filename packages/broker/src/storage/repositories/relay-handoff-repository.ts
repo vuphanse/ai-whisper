@@ -921,7 +921,7 @@ export function listRelayHandoffs(
 		capture_status, chain_id, round_number, handoff_step, workflow_id,
 		phase_run_id, handback_text, evaluator_verdict, evaluator_confidence,
 		evaluator_reason`;
-	const order = `ORDER BY created_at ASC, handoff_id ASC`;
+	const order = "ORDER BY created_at ASC, handoff_id ASC";
 	const rows = (
 		input.afterCursor
 			? db

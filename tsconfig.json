@@ -14,5 +14,5 @@
 			"@ai-whisper/adapter-claude": ["./packages/adapter-claude/src/index.ts"]
 		}
 	},
-	"include": ["test/**/*.ts", "vitest.config.ts"]
+	"include": ["test/**/*.ts", "test/**/*.tsx", "vitest.config.ts"]
 }
