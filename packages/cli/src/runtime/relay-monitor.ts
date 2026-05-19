@@ -135,6 +135,20 @@ export function createRelayMonitorRuntime(input: {
 			const curRun = phaseRuns.find((p) => p.endedAt === null) ?? null;
 			const chain = curRun ? c.getRelayChain(curRun.chainId) : null;
 			const def = getWorkflowDefinition(wfRow.workflowType);
+			// The active step changes within a phase (implement → review →
+			// fix in a review loop), so derive it from the LATEST handoff of
+			// the current phase run (buffer is ascending by created_at), not
+			// the phase definition's static initialHandoffStep. Fall back to
+			// the initial step only before the phase's first handoff exists.
+			let activeStep: string | null = null;
+			if (curRun) {
+				for (let i = buffer.length - 1; i >= 0; i--) {
+					if (buffer[i]!.phaseRunId === curRun.phaseRunId) {
+						activeStep = buffer[i]!.handoffStep;
+						break;
+					}
+				}
+			}
 			const status = (wf?.status ?? wfRow.status) as
 				| "running"
 				| "done"
@@ -160,7 +174,9 @@ export function createRelayMonitorRuntime(input: {
 				})),
 				currentPhaseRunId: curRun?.phaseRunId ?? null,
 				currentStep:
-					def?.phases[curRun?.phaseIndex ?? -1]?.initialHandoffStep ?? null,
+					activeStep ??
+					def?.phases[curRun?.phaseIndex ?? -1]?.initialHandoffStep ??
+					null,
 				totalPhases: def ? def.phases.length : 0,
 				chain: chain
 					? {

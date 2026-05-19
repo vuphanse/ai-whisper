@@ -363,3 +363,92 @@ describe("relay-monitor host — in-place mutation", () => {
 		expect(buf).not.toContain("pending");
 	});
 });
+
+// plan-writing's initialHandoffStep is "implement", but its review loop
+// moves implement → review → fix within the SAME phase run. The status
+// panel must reflect the ACTIVE step (latest handoff for curRun), not the
+// static phase-definition initial step.
+function stepBroker(handoffs: Array<Record<string, unknown>>) {
+	return {
+		db: {},
+		control: {
+			registerRelayMonitor: vi.fn(),
+			heartbeatRelayMonitor: vi.fn(),
+			listRelayHandoffs: vi.fn((_c: string, limit?: number) => {
+				const rows = handoffs.map((h) => ({ ...h }));
+				return typeof limit === "number" ? rows.slice(-limit) : rows;
+			}),
+			getRelayTurnState: vi.fn(() => ({
+				turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted",
+			})),
+			listWorkflows: vi.fn(() => [
+				{ workflowId: "wf1", workflowType: "spec-driven-development", name: "x", status: "running" },
+			]),
+			getWorkflow: vi.fn(() => ({
+				workflowId: "wf1", workflowType: "spec-driven-development", name: "x",
+				status: "running", createdAt: "2026-05-19T08:00:00.000Z", haltReason: null,
+			})),
+			getWorkflowPhaseRuns: vi.fn(() => [
+				{ phaseRunId: "pr1", phaseIndex: 1, phaseName: "plan-writing", chainId: "ch1",
+				  startedAt: "2026-05-19T08:00:00.000Z", endedAt: null, outcome: null },
+			]),
+			getRelayChain: vi.fn(() => ({ currentRound: 3, maxRounds: 5, status: "active" })),
+			listSessions: vi.fn(() => [
+				{ agentType: "codex", healthState: "healthy" },
+				{ agentType: "claude", healthState: "healthy" },
+			]),
+		},
+	};
+}
+
+function pr1Handoff(over: Record<string, unknown>): Record<string, unknown> {
+	return {
+		handoffId: "h", createdAt: "2026-05-19T08:01:00.000Z", collabId: "c1",
+		senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+		captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "implement",
+		workflowId: "wf1", phaseRunId: "pr1", handbackText: "x",
+		evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+		lastActivityAt: "2026-05-19T08:01:00.000Z", ...over,
+	};
+}
+
+describe("relay-monitor host — current step", () => {
+	it("shows the ACTIVE step (latest handoff) within a review-loop phase, not the phase's initial step", async () => {
+		const broker = stepBroker([
+			pr1Handoff({ handoffId: "h1", createdAt: "2026-05-19T08:01:00.000Z", handoffStep: "implement" }),
+			pr1Handoff({ handoffId: "h2", createdAt: "2026-05-19T08:05:00.000Z", handoffStep: "review" }),
+		]);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		});
+		m.start();
+		await new Promise((r) => setTimeout(r, 40));
+		await m.stop();
+		// plan-writing initialHandoffStep is "implement"; latest pr1 handoff is "review"
+		expect(buf).toContain("Step review");
+		expect(buf).not.toContain("Step implement");
+	});
+
+	it("falls back to the phase's initial step before the first handoff exists", async () => {
+		const broker = stepBroker([]); // no handoffs yet for pr1
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		});
+		m.start();
+		await new Promise((r) => setTimeout(r, 40));
+		await m.stop();
+		expect(buf).toContain("Step implement"); // plan-writing initialHandoffStep
+	});
+});
