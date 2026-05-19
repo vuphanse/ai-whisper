@@ -10,3 +10,6 @@ coverage
 .env
 *.sqlite
 .claude
+
+# brainstorm/visual-companion artifacts
+.superpowers/
