@@ -135,6 +135,110 @@ export function selectWallPage(input: {
 	return { pageSummaries, page, pageCount, totalRuns, selected };
 }
 
+function maxIso(rows: RunCostRow[]): string | null {
+	let m: string | null = null;
+	for (const r of rows) {
+		const t = r.resolvedAt ?? r.lastActivityAt;
+		if (m === null || t > m) m = t;
+	}
+	return m;
+}
+function minIso(rows: RunCostRow[]): string | null {
+	let m: string | null = null;
+	for (const r of rows) if (m === null || r.createdAt < m) m = r.createdAt;
+	return m;
+}
+
+export function buildInspectorState(input: {
+	snapshot: RelayViewSnapshot;
+	phaseRuns: PhaseRunRef[];
+	phaseMaxRounds: Record<number, number>;
+	costRows: RunCostRow[];
+	workflowCreatedAt: string | null;
+	chainId: string | null;
+	evidenceHandoffs: RelayHandoffLogRow[];
+	evaluatorDiags: Array<{ verdict: string | null; confidence: number | null; reason: string | null; outcome: string }>;
+	captureDiags: Array<{ captureStatus: string; turnConfidence: string }>;
+	focusedPhaseRunId: string | null;
+}): InspectorState {
+	const live = buildRelayViewState(input.snapshot);
+
+	const inByPhase = new Map<string | null, number>();
+	const outByPhase = new Map<string | null, number>();
+	let totalIn = 0;
+	let totalOut = 0;
+	for (const r of input.costRows) {
+		inByPhase.set(r.phaseRunId, (inByPhase.get(r.phaseRunId) ?? 0) + r.inChars);
+		outByPhase.set(r.phaseRunId, (outByPhase.get(r.phaseRunId) ?? 0) + r.outChars);
+		totalIn += r.inChars;
+		totalOut += r.outChars;
+	}
+
+	const roundsByPhase = new Map<string, number>();
+	for (const h of input.snapshot.handoffs) {
+		if (h.phaseRunId && h.roundNumber != null) {
+			roundsByPhase.set(
+				h.phaseRunId,
+				Math.max(roundsByPhase.get(h.phaseRunId) ?? 0, h.roundNumber),
+			);
+		}
+	}
+
+	const timeline: PhaseStat[] = input.phaseRuns
+		.slice()
+		.sort((a, b) => a.phaseIndex - b.phaseIndex)
+		.map((p) => ({
+			phaseIndex: p.phaseIndex,
+			phaseName: p.phaseName,
+			roundsUsed: roundsByPhase.get(p.phaseRunId) ?? 0,
+			maxRounds: input.phaseMaxRounds[p.phaseIndex] ?? 0,
+			durationMs:
+				p.endedAt != null ? Date.parse(p.endedAt) - Date.parse(p.startedAt) : null,
+			outcome: p.outcome,
+			estInTokens: estimateTokens(inByPhase.get(p.phaseRunId) ?? 0),
+			estOutTokens: estimateTokens(outByPhase.get(p.phaseRunId) ?? 0),
+		}));
+
+	const phaseName = new Map(input.phaseRuns.map((p) => [p.phaseRunId, p.phaseName]));
+	const perPhaseKeys: Array<string | null> = [];
+	for (const r of input.costRows) if (!perPhaseKeys.includes(r.phaseRunId)) perPhaseKeys.push(r.phaseRunId);
+	const durByPhase = new Map(
+		input.phaseRuns.map((p) => [
+			p.phaseRunId,
+			p.endedAt != null ? Date.parse(p.endedAt) - Date.parse(p.startedAt) : null,
+		]),
+	);
+	const cost: CostSummary = {
+		totalMs: (() => {
+			if (input.costRows.length === 0) return 0;
+			const end = maxIso(input.costRows);
+			const base = input.workflowCreatedAt ?? minIso(input.costRows);
+			if (!end || !base) return 0;
+			return Math.max(0, Date.parse(end) - Date.parse(base));
+		})(),
+		estInputTokens: estimateTokens(totalIn),
+		estOutputTokens: estimateTokens(totalOut),
+		perPhase: perPhaseKeys.map((k) => ({
+			phaseRunId: k,
+			phaseName: k ? (phaseName.get(k) ?? k) : "manual relay",
+			estInTokens: estimateTokens(inByPhase.get(k) ?? 0),
+			estOutTokens: estimateTokens(outByPhase.get(k) ?? 0),
+			durationMs: k ? (durByPhase.get(k) ?? null) : null,
+		})),
+	};
+
+	// Evidence is filled in by Task 6; empty shell for now.
+	const evidence = {
+		phase: null as string | null,
+		chainId: input.chainId,
+		items: [] as EvidenceItem[],
+		diagnostics: [] as DiagItem[],
+		likelyCause: "",
+	};
+
+	return { live, timeline, evidence, cost };
+}
+
 export function buildWallState(input: {
 	summaries: CollabSummary[];
 	now: string;
