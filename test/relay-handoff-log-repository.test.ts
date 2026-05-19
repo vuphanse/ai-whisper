@@ -102,13 +102,16 @@ describe("control.listRelayHandoffs", () => {
 			host: "127.0.0.1",
 			port: 4733,
 		});
-		insertHandoff(broker.db, {
-			id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
-			workflowId: "wf1", round: 1, step: "review", verdict: "approve",
-		});
-		const rows = broker.control.listRelayHandoffs("c1");
-		expect(rows.map((r) => r.handoffId)).toEqual(["h1"]);
-		expect(rows[0]?.evaluatorVerdict).toBe("approve");
-		void broker.stop();
+		try {
+			insertHandoff(broker.db, {
+				id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
+				workflowId: "wf1", round: 1, step: "review", verdict: "approve",
+			});
+			const rows = broker.control.listRelayHandoffs("c1");
+			expect(rows.map((r) => r.handoffId)).toEqual(["h1"]);
+			expect(rows[0]?.evaluatorVerdict).toBe("approve");
+		} finally {
+			void broker.stop();
+		}
 	});
 });
