@@ -174,6 +174,77 @@ describe("relay-monitor host", () => {
 		expect(broker.control.registerRelayMonitor).toHaveBeenCalledTimes(1);
 	});
 
+	it("g jumps to oldest (follow off, offset=tailStart); G resumes follow", async () => {
+		const broker = fakeBroker(
+			Array.from({ length: 30 }, (_, i) => ({
+				handoffId: `h${i}`, createdAt: `2026-05-19T00:00:${String(i).padStart(2, "0")}.000Z`,
+				collabId: "c1", senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+				captureStatus: "ok", chainId: "ch", roundNumber: 1, handoffStep: "review",
+				workflowId: null, phaseRunId: null, handbackText: `m${i}`,
+				evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+			})),
+		);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 12;
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { upArrow?: boolean; downArrow?: boolean; key?: string }): void;
+			__viewport: { offset: number; follow: boolean };
+		};
+		m.start();
+		await new Promise((r) => setTimeout(r, 30));
+		// 30 lines, rows 12 → logViewportHeight = max(3,12-9)=3 → tailStart 27.
+		m.__handleKey({ key: "g" });
+		expect(m.__viewport.follow).toBe(false);
+		expect(m.__viewport.offset).toBe(27); // oldest
+		m.__handleKey({ key: "G" });
+		expect(m.__viewport.follow).toBe(true);
+		expect(m.__viewport.offset).toBe(0); // back to live tail
+		await m.stop();
+	});
+
+	it("f toggling OFF leaves offset unchanged; q stops the host", async () => {
+		const broker = fakeBroker(
+			Array.from({ length: 30 }, (_, i) => ({
+				handoffId: `h${i}`, createdAt: `2026-05-19T00:00:${String(i).padStart(2, "0")}.000Z`,
+				collabId: "c1", senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+				captureStatus: "ok", chainId: "ch", roundNumber: 1, handoffStep: "review",
+				workflowId: null, phaseRunId: null, handbackText: `m${i}`,
+				evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+			})),
+		);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 12;
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as {
+			start(): void; stop(): Promise<void>; waitUntilStopped(): Promise<void>;
+			__handleKey(ev: { upArrow?: boolean; downArrow?: boolean; key?: string }): void;
+			__viewport: { offset: number; follow: boolean };
+		};
+		m.start();
+		await new Promise((r) => setTimeout(r, 30));
+		m.__handleKey({ upArrow: true }); // follow off, offset 1
+		expect(m.__viewport.offset).toBe(1);
+		m.__handleKey({ key: "f" }); // follow currently false → toggles ON, resets offset 0
+		expect(m.__viewport.follow).toBe(true);
+		expect(m.__viewport.offset).toBe(0);
+		m.__handleKey({ key: "f" }); // follow ON → toggles OFF, offset unchanged (0)
+		expect(m.__viewport.follow).toBe(false);
+		expect(m.__viewport.offset).toBe(0);
+		m.__handleKey({ key: "q" }); // requests stop
+		await Promise.race([
+			m.waitUntilStopped(),
+			new Promise((_r, rej) => setTimeout(() => rej(new Error("q did not stop the host")), 500)),
+		]);
+	});
+
 	it("↑/↓ adjust viewport offset and suspend follow; f restores follow", async () => {
 		const broker = fakeBroker(
 			Array.from({ length: 30 }, (_, i) => ({

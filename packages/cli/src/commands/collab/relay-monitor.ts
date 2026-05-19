@@ -85,12 +85,16 @@ export async function runCollabRelayMonitor(input: {
 	});
 
 	process.on("SIGTERM", () => {
+		const hardExit = setTimeout(() => process.exit(1), 3000);
+		hardExit.unref();
 		monitor.stop()
 			.then(() => broker.stop())
 			.then(() => process.exit(0))
 			.catch(() => process.exit(1));
 	});
 	process.on("uncaughtException", (err) => {
+		const hardExit = setTimeout(() => process.exit(1), 3000);
+		hardExit.unref();
 		monitor.stop().finally(() => {
 			console.error(err);
 			process.exit(1);

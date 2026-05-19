@@ -9,6 +9,13 @@ const STUCK_COLOR = "red"; // border + health + ⚠why share the stuck/alert col
 export const STATUS_BLOCK_ROWS = 7; // wf, progress, elapsed, turn, health, (why|live), last
 export const STATUS_ROWS = STATUS_BLOCK_ROWS + 2; // + round border (top + bottom)
 
+// Single source of truth for the log viewport height (status-block-aware,
+// min 3 lines so small terminals still show a usable log). Used by the
+// host's scroll clamp (handleKey) so it clamps to exactly what renders.
+export function logViewportHeight(rows: number): number {
+	return Math.max(3, rows - STATUS_ROWS);
+}
+
 function Row(props: { label: string; children: ReactNode; color?: string }) {
 	const colorProp = props.color !== undefined ? { color: props.color } : {};
 	return (
@@ -92,7 +99,7 @@ export function RelayView(props: {
 			<LogViewport
 				lines={s.logLines}
 				viewport={props.viewport}
-				height={Math.max(3, props.rows - STATUS_ROWS)}
+				height={logViewportHeight(props.rows)}
 				cols={props.cols}
 			/>
 		</Box>

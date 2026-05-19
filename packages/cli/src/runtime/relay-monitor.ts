@@ -3,7 +3,7 @@ import { createElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
 import type { RelayHandoffCursor, RelayHandoffLogRow } from "@ai-whisper/broker";
-import { STATUS_ROWS, type Viewport } from "./relay-view.js";
+import { STATUS_ROWS, logViewportHeight, type Viewport } from "./relay-view.js";
 import { RelayViewApp } from "./relay-view-input.js";
 import {
 	buildRelayViewState,
@@ -50,7 +50,7 @@ export function createRelayMonitorRuntime(input: {
 	});
 
 	function handleKey(ev: { upArrow?: boolean; downArrow?: boolean; key?: string }) {
-		const visibleH = Math.max(1, rows - STATUS_ROWS);
+		const visibleH = logViewportHeight(rows);
 		const linesLen = frameProps().state.logLines.length;
 		const tailStart = Math.max(0, linesLen - visibleH);
 		// offset = number of lines scrolled UP from the tail (matches
