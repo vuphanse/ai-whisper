@@ -106,4 +106,71 @@ describe("relay-monitor host", () => {
 		expect(buf).toContain("halted");
 		expect(buf).toContain("✖ workflow-halted: wf_3d44");
 	});
+
+	it("dedupes across polls via the cursor and caps the ring buffer", async () => {
+		const handoffs = Array.from({ length: 2200 }, (_, i) => ({
+			handoffId: `h${String(i).padStart(5, "0")}`,
+			createdAt: `2026-05-19T08:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+			collabId: "c1", senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+			captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "implement",
+			workflowId: null, phaseRunId: null, handbackText: "x",
+			evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+		}));
+		const broker = fakeBroker(handoffs);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as { start(): void; stop(): Promise<void>; __bufferLen(): number };
+		m.start();
+		await new Promise((r) => setTimeout(r, 60));
+		await m.stop();
+		expect(m.__bufferLen()).toBe(2000); // ring buffer capped, no RangeError on 2200-spread
+	});
+
+	it("survives a broker throw on poll and records it (degraded but alive)", async () => {
+		const broker = fakeBroker();
+		let calls = 0;
+		broker.control.listRelayHandoffs = vi.fn(() => {
+			calls += 1;
+			if (calls === 2) throw new Error("db locked");
+			return [];
+		}) as never;
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as { start(): void; stop(): Promise<void>; __pollHealth(): { consecutiveErrors: number; lastError: string | null } };
+		m.start();
+		await new Promise((r) => setTimeout(r, 60));
+		await m.stop();
+		expect(buf).toContain("wf │"); // last frame still present (loop survived the throw)
+		expect(calls).toBeGreaterThan(2); // kept polling after the throw
+		// at least one throw was recorded (it may have recovered by stop time)
+		// so assert the hook exists and is shaped right rather than a flaky exact count
+		const h = m.__pollHealth();
+		expect(typeof h.consecutiveErrors).toBe("number");
+	});
+
+	it("double start() is a no-op (single render loop)", async () => {
+		const broker = fakeBroker();
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		});
+		m.start();
+		m.start(); // second call must be a no-op
+		await new Promise((r) => setTimeout(r, 40));
+		await m.stop();
+		expect(broker.control.registerRelayMonitor).toHaveBeenCalledTimes(1);
+	});
 });

@@ -13,6 +13,15 @@ const BUFFER_CAP = 2000;
 // STATUS_ROWS is imported from relay-view.js (single source of truth — it is
 // derived there from STATUS_BLOCK_ROWS + border; do NOT re-declare it here).
 
+const DEFAULT_IDLE_THRESHOLD_MS = 30_000;
+
+function resolveIdleThresholdMs(): number {
+	const raw = process.env.AI_WHISPER_IDLE_THRESHOLD_MS;
+	if (raw === undefined) return DEFAULT_IDLE_THRESHOLD_MS;
+	const n = Number(raw);
+	return Number.isFinite(n) && n > 0 ? n : DEFAULT_IDLE_THRESHOLD_MS;
+}
+
 export function createRelayMonitorRuntime(input: {
 	broker: BrokerRuntime;
 	collabId: string;
@@ -21,8 +30,11 @@ export function createRelayMonitorRuntime(input: {
 	pollIntervalMs?: number;
 }) {
 	let stopping = false;
+	let started = false;
 	let terminalReached = false; // set true once a terminal workflow is rendered
 	let cursor: RelayHandoffCursor | undefined;
+	let consecutivePollErrors = 0;
+	let lastPollError: string | null = null;
 	const buffer: RelayHandoffLogRow[] = [];
 	const viewport: Viewport = { offset: 0, follow: true };
 	let loopResolve!: () => void;
@@ -55,7 +67,7 @@ export function createRelayMonitorRuntime(input: {
 			wfRow != null && wfRow.status !== "running" ? true : terminalReached;
 		let snap: RelayViewSnapshot = {
 			now: new Date().toISOString(),
-			idleThresholdMs: Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? 30000),
+			idleThresholdMs: resolveIdleThresholdMs(),
 			workflow: null,
 			phaseRuns: [],
 			currentPhaseRunId: null,
@@ -129,7 +141,7 @@ export function createRelayMonitorRuntime(input: {
 		});
 		const fresh = c.listRelayHandoffs(input.collabId, cursor);
 		if (fresh.length > 0) {
-			buffer.push(...fresh);
+			for (const h of fresh) buffer.push(h);
 			if (buffer.length > BUFFER_CAP) buffer.splice(0, buffer.length - BUFFER_CAP);
 			const last = fresh[fresh.length - 1]!;
 			cursor = { createdAt: last.createdAt, handoffId: last.handoffId };
@@ -137,10 +149,15 @@ export function createRelayMonitorRuntime(input: {
 		ink.rerender(createElement(RelayView, frameProps()));
 		// Spec §8: once the final (terminal) frame has been rendered, exit clean.
 		if (terminalReached) stopping = true;
+		// Reset poll-error counters on success (Task-10 seam).
+		consecutivePollErrors = 0;
+		lastPollError = null;
 	}
 
 	return {
 		start() {
+			if (started) return;
+			started = true;
 			input.broker.control.registerRelayMonitor({
 				collabId: input.collabId,
 				monitorId: input.monitorId,
@@ -150,8 +167,10 @@ export function createRelayMonitorRuntime(input: {
 				while (!stopping) {
 					try {
 						poll();
-					} catch {
+					} catch (err) {
 						// read-only; degrade silently, keep last frame
+						consecutivePollErrors += 1;
+						lastPollError = err instanceof Error ? err.message : String(err);
 					}
 					await new Promise((r) =>
 						setTimeout(r, input.pollIntervalMs ?? 250),
@@ -175,5 +194,6 @@ export function createRelayMonitorRuntime(input: {
 		__viewport: viewport,
 		__bufferLen: () => buffer.length,
 		__statusRows: STATUS_ROWS,
+		__pollHealth: () => ({ consecutiveErrors: consecutivePollErrors, lastError: lastPollError }),
 	};
 }
