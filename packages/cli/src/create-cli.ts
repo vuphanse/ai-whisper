@@ -6,6 +6,7 @@ import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
 import { runCollabReconnect } from "./commands/collab/reconnect.js";
 import { runCollabRelayMonitor } from "./commands/collab/relay-monitor.js";
+import { runCollabDashboard } from "./commands/collab/dashboard.js";
 import {
 	recordLaunchedSessions,
 	runCollabStart,
@@ -355,6 +356,13 @@ export function createCli(): Command {
 				cwd: process.cwd(),
 				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
 			});
+		});
+
+	collab
+		.command("dashboard")
+		.description("Full-screen dashboard: live wall of recently-active runs + per-run inspector")
+		.action(async () => {
+			await runCollabDashboard();
 		});
 
 	collab

@@ -88,3 +88,7 @@ export {
 export type {
 	RelayHandoffLogRow,
 } from "./storage/repositories/relay-handoff-repository.js";
+export type {
+	CollabSummary,
+	RunCostRow,
+} from "./storage/repositories/dashboard-repository.js";
