@@ -207,10 +207,17 @@ function computeLiveness(snap: RelayViewSnapshot): {
 	why: string | null;
 	liveText: string;
 } {
+	// Trusted broker timestamps, but a malformed one must not render "NaNs"
+	// (mirrors the elapsedSince guard above); clock skew must not show "-3s".
 	const nowMs = Date.parse(snap.now);
-	const idleMs = snap.lastActivityAt ? nowMs - Date.parse(snap.lastActivityAt) : 0;
+	const lastMs = snap.lastActivityAt ? Date.parse(snap.lastActivityAt) : null;
+	const idleMs =
+		lastMs !== null && !Number.isNaN(nowMs) && !Number.isNaN(lastMs)
+			? Math.max(0, nowMs - lastMs)
+			: 0;
 	const idleS = Math.floor(idleMs / 1000);
 	const thresholdMs = snap.idleThresholdMs;
+	// stuck = 2× the idle threshold, floored at 60s.
 	const stuckThresholdMs = Math.max(60_000, thresholdMs * 2);
 
 	const round = snap.chain?.currentRound ?? 1;
@@ -232,6 +239,7 @@ function computeLiveness(snap: RelayViewSnapshot): {
 	} else if (chainStatus === "escalated" || chainStatus === "abandoned") {
 		stuck = true;
 		why = `STUCK — chain ${chainStatus}`;
+	// maxRounds>1: a single-round workflow never round-max-stucks (escalation comes via chain.status).
 	} else if (snap.chain && round >= maxRounds && maxRounds > 1) {
 		stuck = true;
 		why = `STUCK ${fmtDur(idleMs)} — round ${round}/${maxRounds} max reached → escalated`;

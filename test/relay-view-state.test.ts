@@ -295,4 +295,80 @@ describe("computeLiveness via buildRelayViewState", () => {
 		expect(s.stuck).toBe(true);
 		expect(s.why).toContain("max-rounds-reached");
 	});
+
+	it("stuck: provider unhealthy when a session is not healthy", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			lastActivityAt: "2026-05-19T08:29:55.000Z", // idle 5s — not idle-stuck
+			sessions: [
+				{ agentType: "codex", healthState: "degraded" },
+				{ agentType: "claude", healthState: "healthy" },
+			],
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toContain("provider unhealthy");
+	});
+
+	it("empty sessions is NOT provider-stuck", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			lastActivityAt: "2026-05-19T08:29:55.000Z", // idle 5s
+			sessions: [],
+		});
+		expect(s.stuck).toBe(false);
+		expect(s.why).toBeNull();
+	});
+
+	it("pending handoff within threshold → auto-accept countdown", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			now: "2026-05-19T08:30:00.000Z",
+			lastActivityAt: "2026-05-19T08:29:52.000Z", // idle 8s
+			idleThresholdMs: 30_000,
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "pending" },
+		});
+		expect(s.stuck).toBe(false);
+		expect(s.live).toBe("idle 8s · auto-accept in 22s");
+	});
+
+	it("chain abandoned → stuck with why", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			chain: { currentRound: 2, maxRounds: 5, status: "abandoned" as const },
+			lastActivityAt: "2026-05-19T08:29:55.000Z", // idle 5s
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toContain("chain abandoned");
+	});
+
+	it("null lastActivityAt → idle 0s, not idle-stuck", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			lastActivityAt: null,
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted" },
+		});
+		expect(s.stuck).toBe(false);
+		expect(s.live).toBe("idle 0s · auto-handback in 30s");
+	});
+
+	it("halted with no haltReason → why is 'workflow halted'", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow!, status: "halted", haltReason: null },
+		});
+		expect(s.stuck).toBe(true);
+		expect(s.why).toBe("workflow halted");
+	});
+
+	it("unparseable timestamps degrade to idle 0s, never 'NaN'", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			now: "not-a-date",
+			lastActivityAt: "also-not-a-date",
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted" },
+		});
+		expect(s.live).not.toContain("NaN");
+		expect(s.why ?? "").not.toContain("NaN");
+		expect(s.live).toBe("idle 0s · auto-handback in 30s");
+	});
 });
