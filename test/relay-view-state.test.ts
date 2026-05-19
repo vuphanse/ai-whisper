@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveLogLines, buildRelayViewState } from "../packages/cli/src/runtime/relay-view-state.ts";
+import type { RelayViewSnapshot } from "../packages/cli/src/runtime/relay-view-state.ts";
 import type { RelayHandoffLogRow } from "@ai-whisper/broker";
 
 function row(p: Partial<RelayHandoffLogRow>): RelayHandoffLogRow {
@@ -115,7 +116,7 @@ describe("deriveLogLines", () => {
 	});
 });
 
-const baseSnapshot = {
+const baseSnapshot: RelayViewSnapshot = {
 	now: "2026-05-19T08:30:00.000Z",
 	idleThresholdMs: 30_000,
 	currentStep: "execute" as string | null,
@@ -156,9 +157,91 @@ describe("buildRelayViewState — status", () => {
 	it("omits ALIVE and shows terminal state when workflow halted", () => {
 		const s = buildRelayViewState({
 			...baseSnapshot,
-			workflow: { ...baseSnapshot.workflow, status: "halted" },
+			workflow: { ...baseSnapshot.workflow!, status: "halted" },
 		});
 		expect(s.health).not.toContain("ALIVE");
 		expect(s.health).toContain("halted");
+	});
+
+	it("live is empty and why is null while liveness stub is in place", () => {
+		const s = buildRelayViewState(baseSnapshot);
+		expect(s.live).toBe("");
+		expect(s.why).toBeNull();
+	});
+
+	it("manual relay (workflow null) → wf label, progress —, elapsed —, last —", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot, workflow: null, chain: null,
+			currentPhaseRunId: null, currentStep: null, handoffs: [],
+		});
+		expect(s.wf).toBe("(no workflow — manual relay)");
+		expect(s.progress).toBe("—");
+		expect(s.elapsed).toBe("total — · phase —");
+		expect(s.last).toBe("—");
+	});
+
+	it("chain null → Round 1/1 fallback in progress", () => {
+		const s = buildRelayViewState({ ...baseSnapshot, chain: null });
+		expect(s.progress).toBe("Phase 3/4 plan-execution · Round 1/1 · Step execute");
+	});
+
+	it("currentPhaseRunId not in phaseRuns → progress — and phase elapsed —", () => {
+		const s = buildRelayViewState({ ...baseSnapshot, currentPhaseRunId: "nope" });
+		expect(s.progress).toBe("—");
+		expect(s.elapsed).toBe("total 7m12s · phase —");
+	});
+
+	it("terminal done appends ✔ workflow-done tail line after deriveLogLines", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow!, status: "done" },
+		});
+		const tail = s.logLines[s.logLines.length - 1];
+		expect(tail).toEqual({ kind: "phase-summary", ok: true, text: "✔ workflow-done: wf_048c" });
+		expect(s.health).not.toContain("ALIVE");
+	});
+
+	it("terminal canceled with haltReason appends ✖ tail with reason", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow!, status: "canceled", haltReason: "user aborted" },
+		});
+		const tail = s.logLines[s.logLines.length - 1];
+		expect(tail).toEqual({
+			kind: "phase-summary", ok: false,
+			text: "✖ workflow-canceled: wf_048c — user aborted",
+		});
+	});
+
+	it("terminal canceled with empty-string haltReason omits the — suffix", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			workflow: { ...baseSnapshot.workflow!, status: "canceled", haltReason: "" },
+		});
+		const tail = s.logLines[s.logLines.length - 1];
+		expect(tail && tail.kind === "phase-summary" ? tail.text : "").toBe(
+			"✖ workflow-canceled: wf_048c",
+		);
+	});
+
+	it("empty sessions → both health dots render dead", () => {
+		const s = buildRelayViewState({ ...baseSnapshot, sessions: [] });
+		expect(s.health).toContain("●(dead) codex");
+		expect(s.health).toContain("●(dead) claude");
+	});
+
+	it("populated last handoff renders verdict/confidence/capture/reason", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			handoffs: [{
+				handoffId: "h", createdAt: "2026-05-19T08:29:00.000Z", collabId: "c1",
+				senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+				captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "review",
+				workflowId: "wf_048c", phaseRunId: "pr2",
+				handbackText: "done", evaluatorVerdict: "delivered",
+				evaluatorConfidence: 0.95, evaluatorReason: "looks good",
+			}],
+		});
+		expect(s.last).toBe('delivered 0.95 · capture ok · "looks good"');
 	});
 });

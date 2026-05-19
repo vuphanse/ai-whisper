@@ -186,6 +186,22 @@ export type RelayViewState = {
 
 // `fmtDur` is already defined in this file (Task 4) — do NOT redefine it here.
 
+// Canonical relay agent pair (order = display order). Task 6 liveness reuses this.
+const RELAY_AGENTS = ["codex", "claude"] as const;
+
+const WF_ID_DISPLAY_LEN = 12;
+
+// Returns a formatted elapsed string, or "—" if either timestamp is unparseable
+// (broker/DB timestamps are trusted, but a malformed one must not render "NaNs"
+// in a liveness monitor).
+function elapsedSince(fromIso: string | null | undefined, toIso: string): string {
+	if (fromIso == null) return "—";
+	const a = Date.parse(fromIso);
+	const b = Date.parse(toIso);
+	if (Number.isNaN(a) || Number.isNaN(b)) return "—";
+	return fmtDur(b - a);
+}
+
 function computeLiveness(_snap: RelayViewSnapshot): {
 	stuck: boolean;
 	why: string | null;
@@ -196,7 +212,7 @@ function computeLiveness(_snap: RelayViewSnapshot): {
 
 export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
 	const wf = snap.workflow
-		? `${snap.workflow.workflowType}  ${snap.workflow.workflowId.slice(0, 12)}…  "${snap.workflow.name ?? snap.workflow.workflowType}"`
+		? `${snap.workflow.workflowType}  ${snap.workflow.workflowId.slice(0, WF_ID_DISPLAY_LEN)}…  "${snap.workflow.name ?? snap.workflow.workflowType}"`
 		: "(no workflow — manual relay)";
 
 	const cur = snap.phaseRuns.find((p) => p.phaseRunId === snap.currentPhaseRunId) ?? null;
@@ -206,14 +222,13 @@ export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
 		? `Phase ${cur.phaseIndex + 1}/${snap.totalPhases} ${cur.phaseName} · Round ${round}/${maxRounds} · Step ${snap.currentStep ?? "-"}`
 		: "—";
 
-	const nowMs = Date.parse(snap.now);
-	const totalEl = snap.workflow ? fmtDur(nowMs - Date.parse(snap.workflow.createdAt)) : "—";
-	const phaseEl = cur ? fmtDur(nowMs - Date.parse(cur.startedAt)) : "—";
+	const totalEl = elapsedSince(snap.workflow?.createdAt, snap.now);
+	const phaseEl = elapsedSince(cur?.startedAt, snap.now);
 	const elapsed = `total ${totalEl} · phase ${phaseEl}`;
 
 	const turn = `${snap.turn.turnOwner} · waiting ${snap.turn.waitingAgent ?? "none"} · handoff ${snap.turn.handoffState}`;
 
-	const dots = (["codex", "claude"] as const)
+	const dots = RELAY_AGENTS
 		.map((a) => {
 			const sess = snap.sessions.find((x) => x.agentType === a);
 			const ok = sess?.healthState === "healthy";
