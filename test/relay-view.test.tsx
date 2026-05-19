@@ -197,3 +197,33 @@ describe("RelayView log viewport", () => {
 		expect(f).toContain("◀ LATEST");
 	});
 });
+
+describe("RelayView truncates to cols (one-liner contract)", () => {
+	it("an over-wide status value does not wrap (truncated, not soft-wrapped)", () => {
+		const wide = "W".repeat(300);
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, wf: wide, logLines: [] }}
+				viewport={{ offset: 0, follow: true }} rows={20} cols={40}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("wf │");
+		expect(f).not.toContain("W".repeat(60)); // truncated well under 300
+	});
+
+	it("an over-wide log line stays a single physical row", () => {
+		const wide: LogLine[] = [
+			{ kind: "event", isLatest: true, text: "08:00:00  " + "X".repeat(300) },
+		];
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, logLines: wide }}
+				viewport={{ offset: 0, follow: true }} rows={20} cols={40}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("08:00:00"); // head present
+		expect(f).not.toContain("X".repeat(60)); // tail truncated, no soft-wrap
+	});
+});

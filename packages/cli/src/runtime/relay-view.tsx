@@ -6,15 +6,17 @@ export type Viewport = { offset: number; follow: boolean };
 
 const GUTTER = 8; // right-aligned label column width
 const STUCK_COLOR = "red"; // border + health + ⚠why share the stuck/alert color
-const STATUS_BLOCK_ROWS = 7; // wf, progress, elapsed, turn, health, (why|live), last
-const STATUS_ROWS = STATUS_BLOCK_ROWS + 2; // + round border (top + bottom)
+export const STATUS_BLOCK_ROWS = 7; // wf, progress, elapsed, turn, health, (why|live), last
+export const STATUS_ROWS = STATUS_BLOCK_ROWS + 2; // + round border (top + bottom)
 
 function Row(props: { label: string; children: ReactNode; color?: string }) {
 	const colorProp = props.color !== undefined ? { color: props.color } : {};
 	return (
 		<Box>
-			<Text color="gray">{props.label.padStart(GUTTER)} │ </Text>
-			<Text {...colorProp}>{props.children}</Text>
+			<Box flexShrink={0}>
+				<Text color="gray">{props.label.padStart(GUTTER)} │ </Text>
+			</Box>
+			<Text {...colorProp} wrap="truncate">{props.children}</Text>
 		</Box>
 	);
 }
@@ -29,6 +31,7 @@ function LogViewport(props: {
 	lines: LogLine[];
 	viewport: Viewport;
 	height: number;
+	cols: number;
 }): ReactElement {
 	const { lines, viewport, height } = props;
 	const h = Math.max(1, height);
@@ -49,7 +52,7 @@ function LogViewport(props: {
 				// spread it conditionally (same pattern as <Row>).
 				const colorProp = color !== undefined ? { color } : {};
 				return (
-					<Text key={start + i} {...colorProp} inverse={latest}>
+					<Text key={start + i} {...colorProp} inverse={latest} wrap="truncate">
 						{line.text}
 						{latest ? "  ◀ LATEST" : ""}
 					</Text>
@@ -68,7 +71,7 @@ export function RelayView(props: {
 	const s = props.state;
 	// Parent layout: status block now; Task 8 mounts the scrollable log viewport as a sibling Box here.
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" width={props.cols}>
 			<Box flexDirection="column" borderStyle="round" borderColor={s.stuck ? STUCK_COLOR : "blue"}>
 				{/* keep STATUS_BLOCK_ROWS in sync with these Row children */}
 				<Row label="wf">{s.wf}</Row>
@@ -90,6 +93,7 @@ export function RelayView(props: {
 				lines={s.logLines}
 				viewport={props.viewport}
 				height={Math.max(3, props.rows - STATUS_ROWS)}
+				cols={props.cols}
 			/>
 		</Box>
 	);
