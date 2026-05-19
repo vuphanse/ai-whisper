@@ -50,4 +50,53 @@ describe("RelayView status block", () => {
 		expect(f).toContain("⚠ why │ STUCK 3m02s — round 5/5");
 		expect(f).not.toContain("live │");
 	});
+
+	it("stuck with why=null falls back to the live row (documented sentinel)", () => {
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, stuck: true, why: null }}
+				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("live │ idle 8s · auto-handback in 22s");
+		expect(f).not.toContain("⚠ why");
+	});
+
+	it("non-stuck with a why set still shows live, ignores why", () => {
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, stuck: false, why: "should be ignored" }}
+				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("live │ idle 8s");
+		expect(f).not.toContain("should be ignored");
+		expect(f).not.toContain("⚠ why");
+	});
+
+	it("stuck hides the live content entirely (robust: assert the live value absent)", () => {
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, stuck: true, why: "STUCK 3m02s — round 5/5 max reached → escalated" }}
+				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("⚠ why │ STUCK 3m02s — round 5/5");
+		expect(f).not.toContain(state.live); // the live string never appears when stuck
+	});
+
+	it("renders a dead provider dot in a red health row when stuck", () => {
+		const { lastFrame } = render(
+			<RelayView
+				state={{ ...state, stuck: true, why: "STUCK — provider unhealthy",
+					health: "●(dead) codex  ● claude  Chain stuck" }}
+				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
+			/>,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("health │ ●(dead) codex");
+	});
 });
