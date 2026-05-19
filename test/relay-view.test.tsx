@@ -2,7 +2,7 @@ import { render } from "ink-testing-library";
 import { Text } from "ink";
 import { describe, expect, it } from "vitest";
 import { RelayView } from "../packages/cli/src/runtime/relay-view.tsx";
-import type { RelayViewState } from "../packages/cli/src/runtime/relay-view-state.ts";
+import type { RelayViewState, LogLine } from "../packages/cli/src/runtime/relay-view-state.ts";
 
 describe("ink toolchain", () => {
 	it("renders JSX via ink-testing-library", () => {
@@ -98,5 +98,51 @@ describe("RelayView status block", () => {
 		);
 		const f = lastFrame()!;
 		expect(f).toContain("health │ ●(dead) codex");
+	});
+});
+
+const logLines: LogLine[] = [
+	{ kind: "phase-rule", text: "── phase 2/4 · plan-writing ──" },
+	{ kind: "event", isLatest: false, text: "08:21:03  P2·R1  codex→claude  implement  delivered  a" },
+	{ kind: "event", isLatest: false, text: "08:21:40  P2·R1  claude→codex  review     findings   b" },
+	{ kind: "phase-summary", ok: true, text: "✔ plan-writing — 2 rounds (4 handovers) · 3m12s → approve" },
+	{ kind: "event", isLatest: true, text: "08:22:55  P3·R1  codex→claude  execute    running…" },
+];
+
+describe("RelayView log viewport", () => {
+	it("follow-tail shows the newest window and tags the latest line", () => {
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines }} viewport={{ offset: 0, follow: true }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("08:22:55  P3·R1");
+		expect(f).toContain("◀ LATEST");
+	});
+
+	it("scrolled (follow=false) shows an older window and no LATEST tag", () => {
+		const many: LogLine[] = Array.from({ length: 50 }, (_, i) => ({
+			kind: "event", isLatest: i === 49, text: `08:00:${String(i).padStart(2, "0")}  line${i}`,
+		}));
+		// 50 lines; viewport height h = max(3, rows-STATUS_ROWS) = max(3, 20-9) = 11.
+		// tail-start = 50-11 = 39. offset = lines scrolled UP from tail →
+		// start = max(0, 39 - 29) = 10, so the window is line10…line20.
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines: many }} viewport={{ offset: 29, follow: false }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("line10"); // window starts at line10 (older window)
+		expect(f).not.toContain("line49"); // the tail is excluded
+		expect(f).not.toContain("◀ LATEST");
+	});
+
+	it("re-render with grown lines does not duplicate prior lines", () => {
+		const { lastFrame, rerender } = render(
+			<RelayView state={{ ...state, logLines: logLines.slice(0, 2) }} viewport={{ offset: 0, follow: true }} rows={20} cols={100} />,
+		);
+		rerender(
+			<RelayView state={{ ...state, logLines }} viewport={{ offset: 0, follow: true }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f.match(/08:21:03 {2}P2·R1/g)?.length ?? 0).toBe(1);
 	});
 });
