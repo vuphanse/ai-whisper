@@ -173,4 +173,54 @@ describe("relay-monitor host", () => {
 		await m.stop();
 		expect(broker.control.registerRelayMonitor).toHaveBeenCalledTimes(1);
 	});
+
+	it("↑/↓ adjust viewport offset and suspend follow; f restores follow", async () => {
+		const broker = fakeBroker(
+			Array.from({ length: 30 }, (_, i) => ({
+				handoffId: `h${i}`, createdAt: `2026-05-19T00:00:${String(i).padStart(2, "0")}.000Z`,
+				collabId: "c1", senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+				captureStatus: "ok", chainId: "ch", roundNumber: 1, handoffStep: "review",
+				workflowId: null, phaseRunId: null, handbackText: `m${i}`,
+				evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+			})),
+		);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 12;
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { upArrow?: boolean; downArrow?: boolean; key?: string }): void;
+			__viewport: { offset: number; follow: boolean };
+		};
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		m.start();
+		await new Promise((r) => setTimeout(r, 30));
+		// visibleH = rows(12) - STATUS_ROWS(9) = 3; 30 lines → tailStart = 27.
+		// offset = lines scrolled UP from the tail. Leaving follow keeps us AT
+		// the tail (offset 0); first ↑ scrolls up ONE line → offset 1 (NOT a
+		// jump to the top, which would be offset = tailStart = 27).
+		// ink 7 flushes a non-TTY stream only on unmount, so (like every other
+		// host test here) stdout content is asserted AFTER m.stop(); the live
+		// offset/follow transitions are asserted via __viewport.
+		m.__handleKey({ upArrow: true });
+		expect(m.__viewport.follow).toBe(false);
+		expect(m.__viewport.offset).toBe(1);
+		m.__handleKey({ downArrow: true }); // back toward the tail
+		expect(m.__viewport.offset).toBe(0);
+		m.__handleKey({ key: "f" }); // f restores follow
+		expect(m.__viewport.follow).toBe(true);
+		// re-suspend follow and scroll up one line so the final frame flushed
+		// at unmount is a scrolled window (follow=false → no LATEST tag).
+		m.__handleKey({ key: "f" });
+		m.__handleKey({ upArrow: true });
+		expect(m.__viewport.follow).toBe(false);
+		expect(m.__viewport.offset).toBe(1);
+		await m.stop(); // unmount → flush the final frame
+		expect(buf).toContain("m27"); // scrolled window (lines 26-28), not "m0"
+		expect(buf).not.toContain("◀ LATEST"); // follow=false → no LATEST tag
+	});
 });

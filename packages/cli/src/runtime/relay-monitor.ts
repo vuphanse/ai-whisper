@@ -3,7 +3,8 @@ import { createElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
 import type { RelayHandoffCursor, RelayHandoffLogRow } from "@ai-whisper/broker";
-import { RelayView, STATUS_ROWS, type Viewport } from "./relay-view.js";
+import { STATUS_ROWS, type Viewport } from "./relay-view.js";
+import { RelayViewApp } from "./relay-view-input.js";
 import {
 	buildRelayViewState,
 	type RelayViewSnapshot,
@@ -43,10 +44,44 @@ export function createRelayMonitorRuntime(input: {
 	const cols = (input.stdout as { columns?: number }).columns ?? 120;
 	const rows = (input.stdout as { rows?: number }).rows ?? 40;
 
-	const ink = render(createElement(RelayView, frameProps()), {
+	const ink = render(createElement(RelayViewApp, frameProps()), {
 		stdout: input.stdout as NodeJS.WriteStream,
 		exitOnCtrlC: false,
 	});
+
+	function handleKey(ev: { upArrow?: boolean; downArrow?: boolean; key?: string }) {
+		const visibleH = Math.max(1, rows - STATUS_ROWS);
+		const linesLen = frameProps().state.logLines.length;
+		const tailStart = Math.max(0, linesLen - visibleH);
+		// offset = number of lines scrolled UP from the tail (matches
+		// LogViewport's `start = clamp(tailStart - offset)`). offset 0 = tail
+		// (newest); offset = tailStart = oldest. Leaving follow keeps us at
+		// the tail (offset 0); ↑ increases offset (scroll up), ↓ decreases it
+		// (scroll back toward newest). No seed step is needed.
+		if (ev.upArrow) {
+			viewport.follow = false;
+			viewport.offset = Math.min(tailStart, viewport.offset + 1);
+		} else if (ev.downArrow) {
+			viewport.follow = false;
+			viewport.offset = Math.max(0, viewport.offset - 1);
+		} else if (ev.key === "g") {
+			viewport.follow = false;
+			viewport.offset = tailStart; // jump to the oldest buffered line
+		} else if (ev.key === "G") {
+			viewport.follow = true;
+			viewport.offset = 0; // resume following the tail
+		} else if (ev.key === "f") {
+			viewport.follow = !viewport.follow;
+			if (viewport.follow) viewport.offset = 0;
+		} else if (ev.key === "q") {
+			stopping = true;
+		}
+		try {
+			ink.rerender(createElement(RelayViewApp, frameProps()));
+		} catch {
+			/* ignore */
+		}
+	}
 
 	function frameProps() {
 		const c = input.broker.control;
@@ -129,7 +164,7 @@ export function createRelayMonitorRuntime(input: {
 			};
 		}
 		const state = buildRelayViewState(snap);
-		return { state, viewport, rows, cols };
+		return { state, viewport, rows, cols, onKey: handleKey };
 	}
 
 	function poll() {
@@ -146,7 +181,7 @@ export function createRelayMonitorRuntime(input: {
 			const last = fresh[fresh.length - 1]!;
 			cursor = { createdAt: last.createdAt, handoffId: last.handoffId };
 		}
-		ink.rerender(createElement(RelayView, frameProps()));
+		ink.rerender(createElement(RelayViewApp, frameProps()));
 		// Spec §8: once the final (terminal) frame has been rendered, exit clean.
 		if (terminalReached) stopping = true;
 		// Reset poll-error counters on success (Task-10 seam).
@@ -192,8 +227,9 @@ export function createRelayMonitorRuntime(input: {
 		},
 		// exposed for input handling (Task 10)
 		__viewport: viewport,
-		__bufferLen: () => buffer.length,
+		__handleKey: handleKey,
 		__statusRows: STATUS_ROWS,
+		__bufferLen: () => buffer.length,
 		__pollHealth: () => ({ consecutiveErrors: consecutivePollErrors, lastError: lastPollError }),
 	};
 }

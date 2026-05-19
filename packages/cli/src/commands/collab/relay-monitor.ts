@@ -84,6 +84,19 @@ export async function runCollabRelayMonitor(input: {
 			});
 	});
 
+	process.on("SIGTERM", () => {
+		monitor.stop()
+			.then(() => broker.stop())
+			.then(() => process.exit(0))
+			.catch(() => process.exit(1));
+	});
+	process.on("uncaughtException", (err) => {
+		monitor.stop().finally(() => {
+			console.error(err);
+			process.exit(1);
+		});
+	});
+
 	monitor.start();
 	await monitor.waitUntilStopped();
 	if (!stoppedBySigint) {
