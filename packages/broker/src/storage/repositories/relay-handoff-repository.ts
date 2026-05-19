@@ -873,6 +873,95 @@ export function structuredVerdictToLegacy(
 	return "escalate";
 }
 
+export type RelayHandoffCursor = { createdAt: string; handoffId: string };
+
+export type RelayHandoffLogRow = {
+	handoffId: string;
+	createdAt: string;
+	collabId: string;
+	senderAgent: "codex" | "claude";
+	targetAgent: "codex" | "claude";
+	status: string;
+	captureStatus: string | null;
+	chainId: string | null;
+	roundNumber: number | null;
+	handoffStep: string | null;
+	workflowId: string | null;
+	phaseRunId: string | null;
+	handbackText: string | null;
+	evaluatorVerdict: string | null;
+	evaluatorConfidence: number | null;
+	evaluatorReason: string | null;
+};
+
+type LogDbRow = {
+	handoff_id: string;
+	created_at: string;
+	collab_id: string;
+	sender_agent: string;
+	target_agent: string;
+	status: string;
+	capture_status: string | null;
+	chain_id: string | null;
+	round_number: number | null;
+	handoff_step: string | null;
+	workflow_id: string | null;
+	phase_run_id: string | null;
+	handback_text: string | null;
+	evaluator_verdict: string | null;
+	evaluator_confidence: number | null;
+	evaluator_reason: string | null;
+};
+
+export function listRelayHandoffs(
+	db: Database.Database,
+	input: { collabId: string; afterCursor?: RelayHandoffCursor },
+): RelayHandoffLogRow[] {
+	const cols = `handoff_id, created_at, collab_id, sender_agent, target_agent, status,
+		capture_status, chain_id, round_number, handoff_step, workflow_id,
+		phase_run_id, handback_text, evaluator_verdict, evaluator_confidence,
+		evaluator_reason`;
+	const order = `ORDER BY created_at ASC, handoff_id ASC`;
+	const rows = (
+		input.afterCursor
+			? db
+					.prepare(
+						`SELECT ${cols} FROM relay_handoff
+						 WHERE collab_id = ?
+						   AND (created_at > ? OR (created_at = ? AND handoff_id > ?))
+						 ${order}`,
+					)
+					.all(
+						input.collabId,
+						input.afterCursor.createdAt,
+						input.afterCursor.createdAt,
+						input.afterCursor.handoffId,
+					)
+			: db
+					.prepare(`SELECT ${cols} FROM relay_handoff WHERE collab_id = ? ${order}`)
+					.all(input.collabId)
+	) as LogDbRow[];
+
+	return rows.map((r) => ({
+		handoffId: r.handoff_id,
+		createdAt: r.created_at,
+		collabId: r.collab_id,
+		senderAgent: r.sender_agent as "codex" | "claude",
+		targetAgent: r.target_agent as "codex" | "claude",
+		status: r.status,
+		captureStatus: r.capture_status,
+		chainId: r.chain_id,
+		roundNumber: r.round_number,
+		handoffStep: r.handoff_step,
+		workflowId: r.workflow_id,
+		phaseRunId: r.phase_run_id,
+		handbackText: r.handback_text,
+		evaluatorVerdict: r.evaluator_verdict,
+		evaluatorConfidence: r.evaluator_confidence,
+		evaluatorReason: r.evaluator_reason,
+	}));
+}
+
 export function cleanupOrchestrationOnShutdownTxn(
 	db: Database.Database,
 	input: { collabId: string; reason: string; now: string },
