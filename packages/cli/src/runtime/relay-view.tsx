@@ -6,7 +6,8 @@ export type Viewport = { offset: number; follow: boolean };
 
 const GUTTER = 8; // right-aligned label column width
 const STUCK_COLOR = "red"; // border + health + ⚠why share the stuck/alert color
-const STATUS_ROWS = 9; // 7 status rows + round border (top + bottom)
+const STATUS_BLOCK_ROWS = 7; // wf, progress, elapsed, turn, health, (why|live), last
+const STATUS_ROWS = STATUS_BLOCK_ROWS + 2; // + round border (top + bottom)
 
 function Row(props: { label: string; children: ReactNode; color?: string }) {
 	const colorProp = props.color !== undefined ? { color: props.color } : {};
@@ -36,11 +37,11 @@ function LogViewport(props: {
 	const tailStart = Math.max(0, lines.length - h);
 	const start = viewport.follow
 		? tailStart
-		: Math.max(0, tailStart - viewport.offset);
-	const window = lines.slice(start, start + h);
+		: Math.min(tailStart, Math.max(0, tailStart - viewport.offset));
+	const visible = lines.slice(start, start + h);
 	return (
 		<Box flexDirection="column">
-			{window.map((line, i) => {
+			{visible.map((line, i) => {
 				const latest =
 					viewport.follow && line.kind === "event" && line.isLatest;
 				const color = colorFor(line);
@@ -69,6 +70,7 @@ export function RelayView(props: {
 	return (
 		<Box flexDirection="column">
 			<Box flexDirection="column" borderStyle="round" borderColor={s.stuck ? STUCK_COLOR : "blue"}>
+				{/* keep STATUS_BLOCK_ROWS in sync with these Row children */}
 				<Row label="wf">{s.wf}</Row>
 				<Row label="progress">{s.progress}</Row>
 				<Row label="elapsed" color="cyan">{s.elapsed}</Row>

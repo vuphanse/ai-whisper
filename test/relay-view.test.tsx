@@ -145,4 +145,55 @@ describe("RelayView log viewport", () => {
 		const f = lastFrame()!;
 		expect(f.match(/08:21:03 {2}P2·R1/g)?.length ?? 0).toBe(1);
 	});
+
+	it("colorFor red branch: a failed phase-summary line still renders its text", () => {
+		const withFail: LogLine[] = [
+			{ kind: "event", isLatest: false, text: "08:21:03  P2·R1  codex→claude  implement  delivered  a" },
+			{ kind: "phase-summary", ok: false, text: "✖ plan-writing — escalated (max rounds)" },
+			{ kind: "event", isLatest: true, text: "08:30:00  P2·R5  codex→claude  escalate" },
+		];
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines: withFail }} viewport={{ offset: 0, follow: true }} rows={20} cols={100} />,
+		);
+		expect(lastFrame()!).toContain("✖ plan-writing — escalated (max rounds)");
+	});
+
+	it("follow=false at offset 0 shows the tail window but NO ◀ LATEST", () => {
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines }} viewport={{ offset: 0, follow: false }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("08:22:55  P3·R1"); // tail line is visible
+		expect(f).not.toContain("◀ LATEST"); // but the tag is gated on follow
+	});
+
+	it("offset larger than the buffer clamps to the top window", () => {
+		const many: LogLine[] = Array.from({ length: 50 }, (_, i) => ({
+			kind: "event", isLatest: i === 49, text: `08:00:${String(i).padStart(2, "0")}  line${i}`,
+		}));
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines: many }} viewport={{ offset: 999, follow: false }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("line0"); // clamped to the top of the buffer
+		expect(f).not.toContain("line49"); // not the tail
+	});
+
+	it("empty logLines renders the status block with no log rows and no crash", () => {
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines: [] }} viewport={{ offset: 0, follow: true }} rows={20} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("wf │"); // status block still renders
+		expect(f).not.toContain("◀ LATEST");
+	});
+
+	it("rows below STATUS_ROWS floors the viewport to 3 lines without negative slicing", () => {
+		const { lastFrame } = render(
+			<RelayView state={{ ...state, logLines }} viewport={{ offset: 0, follow: true }} rows={5} cols={100} />,
+		);
+		const f = lastFrame()!;
+		expect(f).toContain("08:22:55  P3·R1"); // h=max(3,5-9)=3 → tail 3 lines, latest visible
+		expect(f).toContain("◀ LATEST");
+	});
 });
