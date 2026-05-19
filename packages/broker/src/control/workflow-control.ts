@@ -54,6 +54,28 @@ export interface WorkflowControlDeps {
 
 const SHA_REGEX = /^[0-9a-f]{7,40}$/;
 
+/**
+ * Resolve the {planPath} a workflow's plan-writing phase should target.
+ *
+ * Prefers the `-design.md` → `docs/superpowers/plans/<date>-<slug>.md`
+ * convention. When the spec path doesn't fit that convention, fall back to a
+ * DISTINCT sibling next to the spec (`<dir>/<stem>.plan.md`). It must never
+ * equal specPath — otherwise the kickoff instructs the implementer to write
+ * the plan over the spec, which it correctly refuses, halting the workflow.
+ */
+export function safeDerivePlanPath(specPath: string, createdAt: string): string {
+	try {
+		return derivePlanPath(specPath, createdAt);
+	} catch {
+		const slashIdx = specPath.lastIndexOf("/");
+		const dir = slashIdx >= 0 ? specPath.slice(0, slashIdx + 1) : "";
+		const base = slashIdx >= 0 ? specPath.slice(slashIdx + 1) : specPath;
+		const dotIdx = base.lastIndexOf(".");
+		const stem = dotIdx > 0 ? base.slice(0, dotIdx) : base;
+		return `${dir}${stem}.plan.md`;
+	}
+}
+
 export function createWorkflowControl(deps: WorkflowControlDeps) {
 	const { db, events } = deps;
 
@@ -308,22 +330,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		return v;
 	}
 
-	/**
-	 * derivePlanPath() throws on specPath not ending in "-design.md". At the
-	 * applyOrchestratorVerdict layer we still need to render templates that
-	 * reference {planPath} even when the caller supplied a looser spec path
-	 * (e.g. during tests or early smoke scripts). Fall back to using the
-	 * specPath itself as a placeholder so template rendering succeeds rather
-	 * than aborting an otherwise-valid state transition. The CLI workflow
-	 * create command is responsible for enforcing the convention upstream.
-	 */
-	function safeDerivePlanPath(specPath: string, createdAt: string): string {
-		try {
-			return derivePlanPath(specPath, createdAt);
-		} catch {
-			return specPath;
-		}
-	}
+	// safeDerivePlanPath is module-level (exported, unit-tested) — the closure
+	// calls below resolve to it.
 
 	function renderReviewRequestText(input: {
 		workflow: WorkflowRecord;
