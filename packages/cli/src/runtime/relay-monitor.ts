@@ -1,176 +1,17 @@
+import { render } from "ink";
+import { createElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
+import type { RelayHandoffCursor, RelayHandoffLogRow } from "@ai-whisper/broker";
+import { RelayView, STATUS_ROWS, type Viewport } from "./relay-view.js";
+import {
+	buildRelayViewState,
+	type RelayViewSnapshot,
+} from "./relay-view-state.js";
 
-const DIM = "\u001b[2m";
-const RESET = "\u001b[0m";
-const BOLD = "\u001b[1m";
-const ORANGE = "\u001b[38;5;215m";
-const BLUE = "\u001b[38;5;75m";
-const GREEN = "\u001b[38;5;114m";
-const RED = "\u001b[38;5;203m";
-const GRAY = "\u001b[38;5;244m";
-const SAVE_CURSOR = "\u001b7";
-const RESTORE_CURSOR = "\u001b8";
-const CLEAR_LINE = "\r\u001b[2K";
-
-export interface RelayEventItem {
-	id: number;
-	eventType: string;
-	senderAgent: string | null;
-	receiverAgent: string | null;
-	content: string;
-	createdAt: string;
-}
-
-function extractTime(isoTimestamp: string): string {
-	const date = new Date(isoTimestamp);
-	return [
-		String(date.getUTCHours()).padStart(2, "0"),
-		String(date.getUTCMinutes()).padStart(2, "0"),
-		String(date.getUTCSeconds()).padStart(2, "0"),
-	].join(":");
-}
-
-function agentColor(agent: string): string {
-	return agent === "claude" ? BLUE : ORANGE;
-}
-
-export function formatRelayConversationLine(input: {
-	eventType: string;
-	senderAgent: string | null;
-	receiverAgent: string | null;
-	content: string;
-	createdAt: string;
-	isLatest: boolean;
-}): string {
-	const time = extractTime(input.createdAt);
-	const latestBadge = input.isLatest ? ` ${ORANGE}${BOLD}LATEST${RESET}` : "";
-
-	if (input.eventType === "status") {
-		return `${GRAY}${DIM}${time}  ${input.content}${RESET}`;
-	}
-
-	if (input.eventType === "cancellation") {
-		return `${DIM}${time}${RESET}  ${RED}[${input.senderAgent}] relay work cancelled by user${RESET}${latestBadge}`;
-	}
-
-	const sender = input.senderAgent ?? "?";
-	const receiver = input.receiverAgent ?? "?";
-	const header = `${DIM}${time}${RESET}  ${agentColor(sender)}[${sender}]${RESET} ${DIM}→${RESET} ${agentColor(receiver)}[${receiver}]${RESET}:${latestBadge}`;
-
-	const bodyLines = input.content
-		.split("\n")
-		.map((line) => `  ${line}`)
-		.join("\n");
-
-	return `${header}\n${bodyLines}`;
-}
-
-function countRenderedLines(text: string): number {
-	return text.split("\n").length;
-}
-
-export function formatLatestBadgeClearSequence(event: RelayEventItem): string {
-	const rendered = formatRelayConversationLine({
-		eventType: event.eventType,
-		senderAgent: event.senderAgent,
-		receiverAgent: event.receiverAgent,
-		content: event.content,
-		createdAt: event.createdAt,
-		isLatest: false,
-	});
-	const header = rendered.split("\n")[0] ?? "";
-	const lines = countRenderedLines(rendered);
-	return `${SAVE_CURSOR}\u001b[${lines}A${CLEAR_LINE}${header}${RESTORE_CURSOR}`;
-}
-
-export function renderRelayConversationBatch(input: {
-	previousLatestEvent: RelayEventItem | null;
-	events: RelayEventItem[];
-}): string {
-	let output = "";
-
-	if (input.previousLatestEvent && input.events.length > 0) {
-		output += formatLatestBadgeClearSequence(input.previousLatestEvent);
-	}
-
-	const renderedEvents: string[] = [];
-
-	for (let i = 0; i < input.events.length; i++) {
-		const event = input.events[i]!;
-		const isLatest = i === input.events.length - 1;
-		renderedEvents.push(formatRelayConversationLine({
-			eventType: event.eventType,
-			senderAgent: event.senderAgent,
-			receiverAgent: event.receiverAgent,
-			content: event.content,
-			createdAt: event.createdAt,
-			isLatest,
-		}));
-	}
-
-	output += `${renderedEvents.join("\n")}\n`;
-
-	return output;
-}
-
-export function formatStatusPanel(input: {
-	providers: Array<{ name: string; health: string }>;
-	collabState: string;
-	threadCount: number;
-	activeThreadTitle: string | null;
-	uptime: string;
-	lastRelayAge: string | null;
-	turnOwner: "codex" | "claude" | "none";
-	waitingAgent: "codex" | "claude" | null;
-	handoffState: "idle" | "pending" | "deferred" | "accepted" | "stale_handoff" | "failed";
-	orchestratorEnabled?: boolean;
-	currentRound?: number;
-	maxRounds?: number;
-	chainStatus?: "active" | "done" | "escalated" | "abandoned";
-}): string {
-	const segments: string[] = [];
-
-	for (const p of input.providers) {
-		const dot =
-			p.health === "online"
-				? `${GREEN}●${RESET}`
-				: p.health === "relay_work"
-					? `${ORANGE}◉${RESET}`
-					: `${RED}●${RESET}`;
-		const stateLabel =
-			p.health === "online"
-				? `${DIM}online${RESET}`
-				: p.health === "relay_work"
-					? `${ORANGE}relay work${RESET}`
-					: `${RED}${p.health}${RESET}`;
-		segments.push(`${dot} ${p.name} ${stateLabel}`);
-	}
-
-	segments.push(`Collab: ${input.collabState}`);
-	segments.push(`Threads: ${input.threadCount}`);
-	if (input.activeThreadTitle) {
-		segments.push(`Active: ${input.activeThreadTitle}`);
-	}
-	if (input.uptime) {
-		segments.push(`Uptime: ${input.uptime}`);
-	}
-	if (input.lastRelayAge) {
-		segments.push(`${GREEN}Last relay: ${input.lastRelayAge}${RESET}`);
-	}
-	segments.push(`Turn owner: ${input.turnOwner}`);
-	if (input.waitingAgent) {
-		segments.push(`Waiting: ${input.waitingAgent}`);
-	}
-	if (input.handoffState !== "idle") {
-		segments.push(`Handoff: ${input.handoffState.replaceAll("_", " ")}`);
-	}
-	if (input.orchestratorEnabled) {
-		segments.push(`Chain: ${input.chainStatus ?? "done"} (round ${input.currentRound ?? 0}/${input.maxRounds ?? 3})`);
-	}
-
-	return segments.join(" - ");
-}
+const BUFFER_CAP = 2000;
+// STATUS_ROWS is imported from relay-view.js (single source of truth — it is
+// derived there from STATUS_BLOCK_ROWS + border; do NOT re-declare it here).
 
 export function createRelayMonitorRuntime(input: {
 	broker: BrokerRuntime;
@@ -179,161 +20,123 @@ export function createRelayMonitorRuntime(input: {
 	stdout: NodeJS.WritableStream;
 	pollIntervalMs?: number;
 }) {
-	let cursor = 0;
 	let stopping = false;
-	let previousLatestEvent: RelayEventItem | null = null;
-	let previousTurnStateKey: string | null = null;
-	let lastRenderedPhaseRunId: string | null = null;
-	let lastRenderedRound: number | null = null;
-	let lastRenderedWorkflowStatus: string | null = null;
+	let terminalReached = false; // set true once a terminal workflow is rendered
+	let cursor: RelayHandoffCursor | undefined;
+	const buffer: RelayHandoffLogRow[] = [];
+	const viewport: Viewport = { offset: 0, follow: true };
 	let loopResolve!: () => void;
-	const loopDone = new Promise<void>((r) => {
-		loopResolve = r;
+	const loopDone = new Promise<void>((r) => (loopResolve = r));
+
+	const cols = (input.stdout as { columns?: number }).columns ?? 120;
+	const rows = (input.stdout as { rows?: number }).rows ?? 40;
+
+	const ink = render(createElement(RelayView, frameProps()), {
+		stdout: input.stdout as NodeJS.WriteStream,
+		exitOnCtrlC: false,
 	});
 
-	function sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
+	function frameProps() {
+		const c = input.broker.control;
+		const turn = c.getRelayTurnState(input.collabId, new Date().toISOString());
+		const sessions = c.listSessions(input.collabId);
+		// Resolve the workflow to render: the running one, else the most-recent
+		// terminal one (so a done/halted/canceled workflow still shows its final
+		// state — spec §8 — before the host exits).
+		const allWorkflows =
+			typeof c.listWorkflows === "function"
+				? c.listWorkflows({ collabId: input.collabId })
+				: [];
+		const running = allWorkflows.find((w) => w.status === "running") ?? null;
+		// listWorkflows is ORDER BY created_at DESC → index 0 is the NEWEST.
+		const wfRow = running ?? allWorkflows[0] ?? null;
+		// terminalReached drives the host to exit after rendering the final frame.
+		terminalReached =
+			wfRow != null && wfRow.status !== "running" ? true : terminalReached;
+		let snap: RelayViewSnapshot = {
+			now: new Date().toISOString(),
+			idleThresholdMs: Number(process.env.AI_WHISPER_IDLE_THRESHOLD_MS ?? 30000),
+			workflow: null,
+			phaseRuns: [],
+			currentPhaseRunId: null,
+			currentStep: null,
+			totalPhases: 0,
+			chain: null,
+			turn: {
+				turnOwner: turn.turnOwner,
+				waitingAgent: turn.waitingAgent ?? null,
+				handoffState: turn.handoffState,
+			},
+			sessions: sessions.map((s) => ({
+				agentType: s.agentType,
+				healthState: s.healthState,
+			})),
+			lastActivityAt: buffer[buffer.length - 1]?.createdAt ?? null,
+			handoffs: buffer,
+		};
+		if (wfRow) {
+			const wf = c.getWorkflow(wfRow.workflowId);
+			const phaseRuns = c.getWorkflowPhaseRuns(wfRow.workflowId);
+			const curRun = phaseRuns.find((p) => p.endedAt === null) ?? null;
+			const chain = curRun ? c.getRelayChain(curRun.chainId) : null;
+			const def = getWorkflowDefinition(wfRow.workflowType);
+			const status = (wf?.status ?? wfRow.status) as
+				| "running"
+				| "done"
+				| "halted"
+				| "canceled";
+			snap = {
+				...snap,
+				workflow: {
+					workflowId: wfRow.workflowId,
+					workflowType: wfRow.workflowType,
+					name: (wf?.name ?? wfRow.name) ?? null,
+					status,
+					createdAt: wf?.createdAt ?? new Date().toISOString(),
+					haltReason: wf?.haltReason ?? null,
+				},
+				phaseRuns: phaseRuns.map((p) => ({
+					phaseRunId: p.phaseRunId,
+					phaseIndex: p.phaseIndex,
+					phaseName: p.phaseName,
+					startedAt: p.startedAt,
+					endedAt: p.endedAt,
+					outcome: p.outcome ?? null,
+				})),
+				currentPhaseRunId: curRun?.phaseRunId ?? null,
+				currentStep:
+					def?.phases[curRun?.phaseIndex ?? -1]?.initialHandoffStep ?? null,
+				totalPhases: def ? def.phases.length : 0,
+				chain: chain
+					? {
+							currentRound: chain.currentRound,
+							maxRounds: chain.maxRounds,
+							status: chain.status,
+						}
+					: null,
+			};
+		}
+		const state = buildRelayViewState(snap);
+		return { state, viewport, rows, cols };
 	}
 
-	function render(events: RelayEventItem[]) {
-		if (events.length === 0) {
-			return;
-		}
-
-		input.stdout.write(
-			renderRelayConversationBatch({
-				previousLatestEvent,
-				events,
-			}),
-		);
-		previousLatestEvent = events[events.length - 1] ?? previousLatestEvent;
-	}
-
-	function renderWorkflowPanel() {
-		// listWorkflows is part of workflowControl — only present when broker has workflow support
-		if (typeof input.broker.control.listWorkflows !== "function") {
-			return;
-		}
-		const runningWorkflows = input.broker.control.listWorkflows({
+	function poll() {
+		const c = input.broker.control;
+		c.heartbeatRelayMonitor({
 			collabId: input.collabId,
-			status: "running",
+			monitorId: input.monitorId,
+			now: new Date().toISOString(),
 		});
-		const workflow = runningWorkflows[0] ?? null;
-
-		// Detect terminal transitions (done / halted / canceled)
-		if (!workflow) {
-			if (lastRenderedWorkflowStatus === "running") {
-				// Workflow just transitioned out of running — check last known status
-				// by seeing if listWorkflows with no status filter has a terminal record
-				const allWorkflows = input.broker.control.listWorkflows({
-					collabId: input.collabId,
-				});
-				const latestTerminal = allWorkflows[allWorkflows.length - 1] ?? null;
-				if (latestTerminal?.status === "done") {
-					input.stdout.write(`✔ workflow-done: ${latestTerminal.workflowId}\n`);
-				} else if (latestTerminal?.status === "halted" || latestTerminal?.status === "canceled") {
-					input.stdout.write(`✖ workflow-${latestTerminal.status}: ${latestTerminal.workflowId}\n`);
-				}
-			}
-			lastRenderedWorkflowStatus = null;
-			lastRenderedPhaseRunId = null;
-			lastRenderedRound = null;
-			return;
+		const fresh = c.listRelayHandoffs(input.collabId, cursor);
+		if (fresh.length > 0) {
+			buffer.push(...fresh);
+			if (buffer.length > BUFFER_CAP) buffer.splice(0, buffer.length - BUFFER_CAP);
+			const last = fresh[fresh.length - 1]!;
+			cursor = { createdAt: last.createdAt, handoffId: last.handoffId };
 		}
-
-		lastRenderedWorkflowStatus = "running";
-
-		// Get current phase run
-		const phaseRuns = input.broker.control.getWorkflowPhaseRuns(workflow.workflowId);
-		const currentPhaseRun = phaseRuns.find((r) => r.endedAt === null) ?? null;
-
-		if (!currentPhaseRun) {
-			return;
-		}
-
-		// Get chain for round info
-		const chain = input.broker.control.getRelayChain(currentPhaseRun.chainId);
-
-		// Detect phase transitions
-		if (lastRenderedPhaseRunId !== currentPhaseRun.phaseRunId) {
-			input.stdout.write(`▶ phase-started: ${currentPhaseRun.phaseName}\n`);
-			lastRenderedPhaseRunId = currentPhaseRun.phaseRunId;
-			lastRenderedRound = chain?.currentRound ?? null;
-		} else if (chain && chain.currentRound >= 2 && lastRenderedRound !== chain.currentRound) {
-			// Round transition within same phase
-			input.stdout.write(`↻ round-started: round ${chain.currentRound}/${chain.maxRounds}\n`);
-			lastRenderedRound = chain.currentRound;
-		}
-
-		// Get full workflow record (required per spec)
-		const fullWorkflow = input.broker.control.getWorkflow(workflow.workflowId);
-
-		// Resolve totalPhases from workflow registry
-		const workflowDef = getWorkflowDefinition(workflow.workflowType);
-		const totalPhases = workflowDef ? workflowDef.phases.length : "?";
-
-		// Get handoff step from the latest handoff for this phase run
-		const latestHandoff =
-			typeof input.broker.control.getLatestHandoffForPhaseRun === "function"
-				? input.broker.control.getLatestHandoffForPhaseRun(currentPhaseRun.phaseRunId)
-				: null;
-		const handoffStep = latestHandoff?.handoffStep ?? "-";
-
-		// Render header block
-		const phaseLabel = currentPhaseRun.phaseName;
-		const phaseNum = currentPhaseRun.phaseIndex + 1;
-		const currentRound = chain?.currentRound ?? 1;
-		const maxRounds = chain?.maxRounds ?? 3;
-		const workflowLabel = (fullWorkflow?.name ?? workflow.name) ?? workflow.workflowType;
-
-		const headerLine1 = `Workflow: ${workflow.workflowId} (${workflow.workflowType}) "${workflowLabel}"`;
-		const headerLine2 = `Phase:    ${phaseLabel} (${phaseNum}/${totalPhases})   Round: ${currentRound}/${maxRounds}   Step: ${handoffStep}   Chain: ${currentPhaseRun.chainId}`;
-
-		input.stdout.write(`${headerLine1}\n${headerLine2}\n`);
-	}
-
-	function renderTurnPanel() {
-		const turn = input.broker.control.getRelayTurnState(
-			input.collabId,
-			new Date().toISOString(),
-		);
-		const orchestratorSuffix = turn.orchestratorEnabled
-			? `|${turn.chainStatus}|${turn.currentRound}`
-			: "";
-		const turnStateKey = `${turn.turnOwner}|${turn.waitingAgent ?? ""}|${turn.handoffState}${orchestratorSuffix}`;
-		if (turnStateKey === previousTurnStateKey) {
-			return;
-		}
-		previousTurnStateKey = turnStateKey;
-
-		const sessions = input.broker.control.listSessions(input.collabId);
-		const threads = input.broker.control.listThreads(input.collabId);
-		const activeThread = threads.find((t) => t.active) ?? null;
-
-		const providers = (["codex", "claude"] as const).map((agentType) => {
-			const session = sessions.find((s) => s.agentType === agentType);
-			const rawHealth = session?.healthState ?? "offline";
-			const health = rawHealth === "healthy" ? "online" : rawHealth;
-			return { name: agentType, health };
-		});
-
-		const panel = formatStatusPanel({
-			providers,
-			collabState: "active",
-			threadCount: threads.length,
-			activeThreadTitle: activeThread?.title ?? null,
-			uptime: "",
-			lastRelayAge: null,
-			turnOwner: turn.turnOwner,
-			waitingAgent: turn.waitingAgent,
-			handoffState: turn.handoffState,
-			orchestratorEnabled: turn.orchestratorEnabled,
-			currentRound: turn.currentRound,
-			maxRounds: turn.maxRounds,
-			chainStatus: turn.chainStatus,
-		});
-
-		input.stdout.write(`\n${panel}\n`);
+		ink.rerender(createElement(RelayView, frameProps()));
+		// Spec §8: once the final (terminal) frame has been rendered, exit clean.
+		if (terminalReached) stopping = true;
 	}
 
 	return {
@@ -343,41 +146,34 @@ export function createRelayMonitorRuntime(input: {
 				monitorId: input.monitorId,
 				now: new Date().toISOString(),
 			});
-
 			void (async () => {
 				while (!stopping) {
-					input.broker.control.heartbeatRelayMonitor({
-						collabId: input.collabId,
-						monitorId: input.monitorId,
-						now: new Date().toISOString(),
-					});
-
-					const events = input.broker.control.pollRelayEvents(
-						input.collabId,
-						cursor,
-					);
-
-					if (events.length > 0) {
-						cursor = events[events.length - 1]!.id;
-						render(events);
+					try {
+						poll();
+					} catch {
+						// read-only; degrade silently, keep last frame
 					}
-
-					renderWorkflowPanel();
-					renderTurnPanel();
-
-					await sleep(input.pollIntervalMs ?? 250);
+					await new Promise((r) =>
+						setTimeout(r, input.pollIntervalMs ?? 250),
+					);
 				}
+				// Flush the final (terminal) frame before resolving so a
+				// self-exit (no stop() call) still emits the last render.
+				ink.unmount();
 				loopResolve();
 			})();
 		},
-
 		async stop() {
 			stopping = true;
 			await loopDone;
+			ink.unmount();
 		},
-
 		waitUntilStopped() {
 			return loopDone;
 		},
+		// exposed for input handling (Task 10)
+		__viewport: viewport,
+		__bufferLen: () => buffer.length,
+		__statusRows: STATUS_ROWS,
 	};
 }

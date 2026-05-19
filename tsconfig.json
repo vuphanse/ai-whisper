@@ -3,6 +3,8 @@
 	"compilerOptions": {
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "react",
 		"paths": {
 			"@ai-whisper/shared": ["./packages/shared/src/index.ts"],
 			"@ai-whisper/broker": ["./packages/broker/src/index.ts"],
