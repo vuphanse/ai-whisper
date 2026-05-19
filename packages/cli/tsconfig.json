@@ -4,9 +4,11 @@
 		"composite": true,
 		"rootDir": "src",
 		"outDir": "dist",
-		"tsBuildInfoFile": "dist/.tsbuildinfo"
+		"tsBuildInfoFile": "dist/.tsbuildinfo",
+		"jsx": "react-jsx",
+		"jsxImportSource": "react"
 	},
-	"include": ["src/**/*.ts"],
+	"include": ["src/**/*.ts", "src/**/*.tsx"],
 	"references": [
 		{ "path": "../shared" },
 		{ "path": "../broker" },
