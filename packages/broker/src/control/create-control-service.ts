@@ -125,7 +125,6 @@ import {
 	markRelayChainAbandonedTxn,
 	cleanupOrchestrationOnShutdownTxn,
 	listRelayHandoffs as listRelayHandoffsRepo,
-	type RelayHandoffCursor,
 	type RelayHandoffLogRow,
 } from "../storage/repositories/relay-handoff-repository.js";
 import { createWorkflowControl } from "./workflow-control.js";
@@ -1049,11 +1048,11 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		listRelayHandoffs(
 			collabId: string,
-			afterCursor?: RelayHandoffCursor,
+			limit?: number,
 		): RelayHandoffLogRow[] {
 			return listRelayHandoffsRepo(db, {
 				collabId,
-				...(afterCursor ? { afterCursor } : {}),
+				...(typeof limit === "number" ? { limit } : {}),
 			});
 		},
 		getRelayTurnState(collabId: string, now?: string) {

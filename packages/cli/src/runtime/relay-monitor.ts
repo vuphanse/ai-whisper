@@ -2,7 +2,7 @@ import { render } from "ink";
 import { createElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
-import type { RelayHandoffCursor, RelayHandoffLogRow } from "@ai-whisper/broker";
+import type { RelayHandoffLogRow } from "@ai-whisper/broker";
 import { STATUS_ROWS, logViewportHeight, type Viewport } from "./relay-view.js";
 import { RelayViewApp } from "./relay-view-input.js";
 import {
@@ -33,10 +33,15 @@ export function createRelayMonitorRuntime(input: {
 	let stopping = false;
 	let started = false;
 	let terminalReached = false; // set true once a terminal workflow is rendered
-	let cursor: RelayHandoffCursor | undefined;
 	let consecutivePollErrors = 0;
 	let lastPollError: string | null = null;
-	const buffer: RelayHandoffLogRow[] = [];
+	// relay_handoff rows mutate IN PLACE (pending → handed_back → evaluated),
+	// so we do NOT page with an immutable cursor — each poll re-reads the
+	// bounded newest-N snapshot and replaces the buffer (merge-by-handoffId:
+	// the snapshot is authoritative, so an updated row is never stale and
+	// never duplicated). Replacement preserves the prior frame on a failed
+	// read (assignment is skipped if listRelayHandoffs throws).
+	let buffer: RelayHandoffLogRow[] = [];
 	const viewport: Viewport = { offset: 0, follow: true };
 	let loopResolve!: () => void;
 	const loopDone = new Promise<void>((r) => (loopResolve = r));
@@ -118,7 +123,10 @@ export function createRelayMonitorRuntime(input: {
 				agentType: s.agentType,
 				healthState: s.healthState,
 			})),
-			lastActivityAt: buffer[buffer.length - 1]?.createdAt ?? null,
+			lastActivityAt: buffer.reduce<string | null>((mx, r) => {
+				const t = r.lastActivityAt ?? r.createdAt;
+				return mx === null || t > mx ? t : mx;
+			}, null),
 			handoffs: buffer,
 		};
 		if (wfRow) {
@@ -174,13 +182,11 @@ export function createRelayMonitorRuntime(input: {
 			monitorId: input.monitorId,
 			now: new Date().toISOString(),
 		});
-		const fresh = c.listRelayHandoffs(input.collabId, cursor);
-		if (fresh.length > 0) {
-			for (const h of fresh) buffer.push(h);
-			if (buffer.length > BUFFER_CAP) buffer.splice(0, buffer.length - BUFFER_CAP);
-			const last = fresh[fresh.length - 1]!;
-			cursor = { createdAt: last.createdAt, handoffId: last.handoffId };
-		}
+		// Re-read the authoritative newest-N snapshot every poll so in-place
+		// handback/verdict updates are reflected (no immutable cursor). On a
+		// read failure the throw propagates before this assignment, so the
+		// last good buffer/frame is retained (degraded but alive).
+		buffer = c.listRelayHandoffs(input.collabId, BUFFER_CAP);
 		ink.rerender(createElement(RelayViewApp, frameProps()));
 		// Spec §8: once the final (terminal) frame has been rendered, exit clean.
 		if (terminalReached) stopping = true;

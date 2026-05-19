@@ -873,8 +873,6 @@ export function structuredVerdictToLegacy(
 	return "escalate";
 }
 
-export type RelayHandoffCursor = { createdAt: string; handoffId: string };
-
 export type RelayHandoffLogRow = {
 	handoffId: string;
 	createdAt: string;
@@ -892,6 +890,9 @@ export type RelayHandoffLogRow = {
 	evaluatorVerdict: string | null;
 	evaluatorConfidence: number | null;
 	evaluatorReason: string | null;
+	// Real activity timestamp (bumped by accept/defer/handback/…); the feed
+	// surfaces it so liveness reflects actual progress, not row insert time.
+	lastActivityAt: string | null;
 };
 
 type LogDbRow = {
@@ -911,36 +912,45 @@ type LogDbRow = {
 	evaluator_verdict: string | null;
 	evaluator_confidence: number | null;
 	evaluator_reason: string | null;
+	last_activity_at: string | null;
 };
 
+// IMPORTANT: relay_handoff rows mutate IN PLACE after insert (pending →
+// handed_back → evaluated) on the same handoff_id/created_at, and no column
+// is monotonically bumped on every write. So this is NOT an append-only feed
+// and must NOT be paged with an immutable (created_at,handoff_id) cursor —
+// that strands a row's later handback/verdict updates. It returns a fresh
+// bounded tail SNAPSHOT (newest `limit` rows, ascending); the consumer
+// re-reads each poll and merges by handoffId so in-place updates are seen.
 export function listRelayHandoffs(
 	db: Database.Database,
-	input: { collabId: string; afterCursor?: RelayHandoffCursor },
+	input: { collabId: string; limit?: number },
 ): RelayHandoffLogRow[] {
 	const cols = `handoff_id, created_at, collab_id, sender_agent, target_agent, status,
 		capture_status, chain_id, round_number, handoff_step, workflow_id,
 		phase_run_id, handback_text, evaluator_verdict, evaluator_confidence,
-		evaluator_reason`;
-	const order = "ORDER BY created_at ASC, handoff_id ASC";
+		evaluator_reason, last_activity_at`;
+	const limit =
+		typeof input.limit === "number" && input.limit > 0
+			? Math.floor(input.limit)
+			: null;
+	// Fetch the NEWEST `limit` rows (DESC + LIMIT), then present ascending.
 	const rows = (
-		input.afterCursor
+		limit !== null
 			? db
 					.prepare(
-						`SELECT ${cols} FROM relay_handoff
-						 WHERE collab_id = ?
-						   AND (created_at > ? OR (created_at = ? AND handoff_id > ?))
-						 ${order}`,
+						`SELECT ${cols} FROM relay_handoff WHERE collab_id = ?
+						 ORDER BY created_at DESC, handoff_id DESC LIMIT ?`,
 					)
-					.all(
-						input.collabId,
-						input.afterCursor.createdAt,
-						input.afterCursor.createdAt,
-						input.afterCursor.handoffId,
-					)
+					.all(input.collabId, limit)
 			: db
-					.prepare(`SELECT ${cols} FROM relay_handoff WHERE collab_id = ? ${order}`)
+					.prepare(
+						`SELECT ${cols} FROM relay_handoff WHERE collab_id = ?
+						 ORDER BY created_at DESC, handoff_id DESC`,
+					)
 					.all(input.collabId)
 	) as LogDbRow[];
+	rows.reverse(); // newest-N DESC → ascending for display
 
 	return rows.map((r) => ({
 		handoffId: r.handoff_id,
@@ -959,6 +969,7 @@ export function listRelayHandoffs(
 		evaluatorVerdict: r.evaluator_verdict,
 		evaluatorConfidence: r.evaluator_confidence,
 		evaluatorReason: r.evaluator_reason,
+		lastActivityAt: r.last_activity_at,
 	}));
 }
 

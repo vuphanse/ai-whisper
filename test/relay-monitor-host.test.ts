@@ -11,18 +11,15 @@ function fakeBroker(
 		control: {
 			registerRelayMonitor: vi.fn(),
 			heartbeatRelayMonitor: vi.fn(),
-			listRelayHandoffs: vi.fn(
-				(_collabId: string, after?: { createdAt: string; handoffId: string }) => {
-					const all = handoffs as Array<{ createdAt: string; handoffId: string }>;
-					return after
-						? all.filter(
-								(h) =>
-									h.createdAt > after.createdAt ||
-									(h.createdAt === after.createdAt && h.handoffId > after.handoffId),
-							)
-						: all;
-				},
-			),
+			// New contract: bounded newest-N snapshot, FRESH copies each call
+			// (a stale buffered reference must not silently update — models
+			// the real broker returning new row objects per query).
+			listRelayHandoffs: vi.fn((_collabId: string, limit?: number) => {
+				const rows = (handoffs as Array<Record<string, unknown>>).map(
+					(h) => ({ ...h }),
+				);
+				return typeof limit === "number" ? rows.slice(-limit) : rows;
+			}),
 			getRelayTurnState: vi.fn(() => ({
 				turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted",
 			})),
@@ -67,7 +64,7 @@ describe("relay-monitor host", () => {
 		expect(buf).toContain("health │");
 	});
 
-	it("incrementally appends handoffs to the buffer (cursor advances)", async () => {
+	it("re-reads the relay feed on every poll", async () => {
 		const broker = fakeBroker();
 		const stdout = new PassThrough();
 		(stdout as unknown as { columns: number }).columns = 100;
@@ -79,7 +76,7 @@ describe("relay-monitor host", () => {
 		m.start();
 		await new Promise((r) => setTimeout(r, 40));
 		await m.stop();
-		// after the first non-empty fetch the cursor is passed back
+		// the feed is polled repeatedly (re-read each tick, no cursor)
 		const calls = broker.control.listRelayHandoffs.mock.calls;
 		expect(calls.length).toBeGreaterThan(1);
 	});
@@ -107,7 +104,7 @@ describe("relay-monitor host", () => {
 		expect(buf).toContain("✖ workflow-halted: wf_3d44");
 	});
 
-	it("dedupes across polls via the cursor and caps the ring buffer", async () => {
+	it("caps the ring buffer to the newest N (snapshot)", async () => {
 		const handoffs = Array.from({ length: 2200 }, (_, i) => ({
 			handoffId: `h${String(i).padStart(5, "0")}`,
 			createdAt: `2026-05-19T08:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
@@ -293,5 +290,76 @@ describe("relay-monitor host", () => {
 		await m.stop(); // unmount → flush the final frame
 		expect(buf).toContain("m27"); // scrolled window (lines 26-28), not "m0"
 		expect(buf).not.toContain("◀ LATEST"); // follow=false → no LATEST tag
+	});
+});
+
+// Models the REAL broker: relay_handoff rows mutate in place (pending →
+// handed_back → evaluated) on the SAME handoff_id; every read returns FRESH
+// row objects (a stale buffered reference is NOT silently updated). The test
+// "mutates the DB" by patching source rows; the host only reflects it if it
+// RE-READS and merges by handoffId.
+function mutatingBroker(source: Array<Record<string, unknown>>) {
+	return {
+		db: {},
+		control: {
+			registerRelayMonitor: vi.fn(),
+			heartbeatRelayMonitor: vi.fn(),
+			listRelayHandoffs: vi.fn((_collabId: string, limit?: number) => {
+				const rows = source.map((r) => ({ ...r })); // fresh copies
+				return typeof limit === "number" ? rows.slice(-limit) : rows;
+			}),
+			getRelayTurnState: vi.fn(() => ({
+				turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted",
+			})),
+			listWorkflows: vi.fn(() => []),
+			getWorkflow: vi.fn(() => null),
+			getWorkflowPhaseRuns: vi.fn(() => []),
+			getRelayChain: vi.fn(() => null),
+			listSessions: vi.fn(() => [
+				{ agentType: "codex", healthState: "healthy" },
+				{ agentType: "claude", healthState: "healthy" },
+			]),
+		},
+	};
+}
+
+describe("relay-monitor host — in-place mutation", () => {
+	it("REGRESSION: re-reads handback/verdict updates; no stale/duplicate row", async () => {
+		const h: Record<string, unknown> = {
+			handoffId: "h1", createdAt: "2026-05-19T00:00:01.000Z", collabId: "c1",
+			senderAgent: "codex", targetAgent: "claude", status: "pending",
+			captureStatus: null, chainId: "ch", roundNumber: 1, handoffStep: "implement",
+			workflowId: null, phaseRunId: null, handbackText: null,
+			evaluatorVerdict: null, evaluatorConfidence: null, evaluatorReason: null,
+			lastActivityAt: "2026-05-19T00:00:01.000Z",
+		};
+		const broker = mutatingBroker([h]);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		const m = createRelayMonitorRuntime({
+			broker: broker as never, collabId: "c1", monitorId: "mon1",
+			stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10,
+		}) as never as { start(): void; stop(): Promise<void>; __bufferLen(): number };
+		m.start();
+		await new Promise((r) => setTimeout(r, 40)); // poll(s) see it pending
+		// In-place DB update of the SAME row (handback then evaluator) — the
+		// host already holds a stale pending copy from the earlier poll.
+		h.status = "handed_back";
+		h.handbackText = "wrote spec.plan.md; 5 tasks";
+		h.evaluatorVerdict = "delivered";
+		h.evaluatorConfidence = 0.95;
+		h.lastActivityAt = "2026-05-19T00:01:45.000Z";
+		await new Promise((r) => setTimeout(r, 40)); // further poll(s)
+		await m.stop();
+
+		// Exactly one row for the handoff — re-read & merged, never appended
+		// as a duplicate and never left stale-pending.
+		expect(m.__bufferLen()).toBe(1);
+		// The flushed frame reflects the post-update verdict, not stale pending.
+		expect(buf).toContain("delivered");
+		expect(buf).not.toContain("pending");
 	});
 });

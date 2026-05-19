@@ -10,6 +10,7 @@ function row(p: Partial<RelayHandoffLogRow>): RelayHandoffLogRow {
 		captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "implement",
 		workflowId: "wf1", phaseRunId: "pr1", handbackText: "wrote spec.plan.md; 5 tasks added",
 		evaluatorVerdict: "delivered", evaluatorConfidence: 0.95, evaluatorReason: null,
+		lastActivityAt: "2026-05-19T08:21:03.000Z",
 		...p,
 	};
 }
@@ -234,6 +235,7 @@ describe("buildRelayViewState — status", () => {
 				workflowId: "wf_048c", phaseRunId: "pr2",
 				handbackText: "done", evaluatorVerdict: "delivered",
 				evaluatorConfidence: 0.95, evaluatorReason: "looks good",
+				lastActivityAt: "2026-05-19T08:29:00.000Z",
 			}],
 		});
 		expect(s.last).toBe('delivered 0.95 · capture ok · "looks good"');

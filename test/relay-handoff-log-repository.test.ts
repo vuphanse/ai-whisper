@@ -20,6 +20,9 @@ function insertHandoff(
 		id: string;
 		collab: string;
 		createdAt: string;
+		status?: string;
+		handback?: string | null;
+		lastActivityAt?: string | null;
 		workflowId?: string | null;
 		phaseRunId?: string | null;
 		round?: number | null;
@@ -40,20 +43,51 @@ function insertHandoff(
 		  evaluator_verdict,evaluator_confidence,evaluator_reason)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	).run(
-		h.id, h.collab, "codex", "claude", "req", "handed_back",
-		h.createdAt, h.createdAt, h.capture ?? null, "chain_1",
-		h.round ?? null, "did the thing", h.workflowId ?? null,
-		h.phaseRunId ?? null, h.step ?? null, h.verdict ?? null,
+		h.id, h.collab, "codex", "claude", "req", h.status ?? "handed_back",
+		h.createdAt, h.lastActivityAt ?? h.createdAt, h.capture ?? null, "chain_1",
+		h.round ?? null, h.handback === undefined ? "did the thing" : h.handback,
+		h.workflowId ?? null, h.phaseRunId ?? null, h.step ?? null, h.verdict ?? null,
 		h.confidence ?? null, h.reason ?? null,
 	);
 }
 
+// The lifecycle the original incremental-cursor design missed: a row is
+// inserted pending, then UPDATEd in place on the same handoff_id/created_at.
+function updateHandoffInPlace(
+	db: ReturnType<typeof freshDb>,
+	id: string,
+	patch: {
+		status?: string;
+		handback?: string | null;
+		verdict?: string | null;
+		confidence?: number | null;
+		reason?: string | null;
+		lastActivityAt?: string | null;
+	},
+) {
+	db.prepare(
+		`UPDATE relay_handoff
+		    SET status = COALESCE(?, status),
+		        handback_text = COALESCE(?, handback_text),
+		        evaluator_verdict = COALESCE(?, evaluator_verdict),
+		        evaluator_confidence = COALESCE(?, evaluator_confidence),
+		        evaluator_reason = COALESCE(?, evaluator_reason),
+		        last_activity_at = COALESCE(?, last_activity_at)
+		  WHERE handoff_id = ?`,
+	).run(
+		patch.status ?? null, patch.handback ?? null, patch.verdict ?? null,
+		patch.confidence ?? null, patch.reason ?? null, patch.lastActivityAt ?? null,
+		id,
+	);
+}
+
 describe("listRelayHandoffs", () => {
-	it("returns collab handoffs ordered by (created_at, handoff_id), workflow + manual", () => {
+	it("returns collab handoffs ordered by (created_at, handoff_id), with lastActivityAt", () => {
 		const db = freshDb();
 		insertHandoff(db, { id: "h2", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z" });
 		insertHandoff(db, {
 			id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
+			lastActivityAt: "2026-05-19T00:09:00.000Z",
 			workflowId: "wf1", phaseRunId: "pr1", round: 2, step: "fix",
 			verdict: "approve", confidence: 0.95, reason: "ok", capture: "ok",
 		});
@@ -67,25 +101,61 @@ describe("listRelayHandoffs", () => {
 			roundNumber: 2, handoffStep: "fix", evaluatorVerdict: "approve",
 			evaluatorConfidence: 0.95, evaluatorReason: "ok", captureStatus: "ok",
 			senderAgent: "codex", targetAgent: "claude", status: "handed_back",
+			lastActivityAt: "2026-05-19T00:09:00.000Z",
 		});
 		expect(rows[1]).toMatchObject({
-			handoffId: "h2", workflowId: null, phaseRunId: null,
-			roundNumber: null, handoffStep: null, evaluatorVerdict: null,
+			handoffId: "h2", workflowId: null, evaluatorVerdict: null,
 		});
 	});
 
-	it("paginates with the (createdAt, handoffId) cursor incl. same-timestamp tie-break", () => {
+	it("REGRESSION: re-read reflects in-place handback/verdict updates (not stale pending)", () => {
 		const db = freshDb();
-		insertHandoff(db, { id: "a", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z" });
-		insertHandoff(db, { id: "b", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z" });
-		insertHandoff(db, { id: "c", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z" });
+		// Inserted pending — exactly how a workflow handoff starts.
+		insertHandoff(db, {
+			id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
+			status: "pending", handback: null, lastActivityAt: "2026-05-19T00:00:01.000Z",
+			workflowId: "wf1", phaseRunId: "pr1", round: 1, step: "implement",
+		});
 
 		const first = listRelayHandoffs(db, { collabId: "c1" });
-		expect(first.map((r) => r.handoffId)).toEqual(["a", "b", "c"]);
+		expect(first[0]).toMatchObject({
+			handoffId: "h1", status: "pending", handbackText: null,
+			evaluatorVerdict: null, lastActivityAt: "2026-05-19T00:00:01.000Z",
+		});
 
-		const after = { createdAt: first[1]!.createdAt, handoffId: first[1]!.handoffId };
-		const page2 = listRelayHandoffs(db, { collabId: "c1", afterCursor: after });
-		expect(page2.map((r) => r.handoffId)).toEqual(["c"]);
+		// Same row mutated in place (handback then evaluator) — created_at and
+		// handoff_id are UNCHANGED, which is what defeated the old cursor.
+		updateHandoffInPlace(db, "h1", {
+			status: "handed_back", handback: "wrote spec.plan.md; 5 tasks",
+			lastActivityAt: "2026-05-19T00:01:30.000Z",
+		});
+		updateHandoffInPlace(db, "h1", {
+			verdict: "delivered", confidence: 0.95, reason: "looks good",
+			lastActivityAt: "2026-05-19T00:01:45.000Z",
+		});
+
+		const second = listRelayHandoffs(db, { collabId: "c1" });
+		expect(second).toHaveLength(1);
+		expect(second[0]).toMatchObject({
+			handoffId: "h1", status: "handed_back",
+			handbackText: "wrote spec.plan.md; 5 tasks",
+			evaluatorVerdict: "delivered", evaluatorConfidence: 0.95,
+			evaluatorReason: "looks good",
+			lastActivityAt: "2026-05-19T00:01:45.000Z",
+		});
+	});
+
+	it("limit returns the NEWEST N rows, still ascending", () => {
+		const db = freshDb();
+		for (let i = 0; i < 5; i++) {
+			insertHandoff(db, {
+				id: `h${i}`, collab: "c1",
+				createdAt: `2026-05-19T00:00:0${i}.000Z`,
+			});
+		}
+		const rows = listRelayHandoffs(db, { collabId: "c1", limit: 3 });
+		// newest 3 (h2,h3,h4) but presented oldest→newest
+		expect(rows.map((r) => r.handoffId)).toEqual(["h2", "h3", "h4"]);
 	});
 
 	it("returns [] for an unknown collab", () => {
@@ -95,7 +165,7 @@ describe("listRelayHandoffs", () => {
 });
 
 describe("control.listRelayHandoffs", () => {
-	it("is exposed on broker.control and is collab-scoped", () => {
+	it("is exposed on broker.control, collab-scoped, and reflects in-place updates", () => {
 		const dir = mkdtempSync(join(tmpdir(), "rh-ctl-"));
 		const broker = createBrokerRuntime({
 			sqlitePath: join(dir, "state.db"),
@@ -105,11 +175,22 @@ describe("control.listRelayHandoffs", () => {
 		try {
 			insertHandoff(broker.db, {
 				id: "h1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z",
-				workflowId: "wf1", round: 1, step: "review", verdict: "approve",
+				status: "pending", handback: null, workflowId: "wf1",
+				round: 1, step: "review",
 			});
-			const rows = broker.control.listRelayHandoffs("c1");
-			expect(rows.map((r) => r.handoffId)).toEqual(["h1"]);
-			expect(rows[0]?.evaluatorVerdict).toBe("approve");
+			expect(broker.control.listRelayHandoffs("c1")[0]).toMatchObject({
+				handoffId: "h1", status: "pending", evaluatorVerdict: null,
+			});
+			updateHandoffInPlace(broker.db, "h1", {
+				status: "handed_back", verdict: "approve",
+				lastActivityAt: "2026-05-19T00:02:00.000Z",
+			});
+			const after = broker.control.listRelayHandoffs("c1");
+			expect(after[0]).toMatchObject({
+				handoffId: "h1", status: "handed_back",
+				evaluatorVerdict: "approve",
+				lastActivityAt: "2026-05-19T00:02:00.000Z",
+			});
 		} finally {
 			void broker.stop();
 		}
