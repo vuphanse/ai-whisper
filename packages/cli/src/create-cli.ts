@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { Command } from "commander";
-import { openDatabase } from "@ai-whisper/broker";
+import { waitForBrokerReady } from "./runtime/wait-for-broker-ready.js";
 import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
@@ -14,10 +14,7 @@ import {
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
 import { runCollabTell } from "./commands/collab/tell.js";
-import {
-	assessBrokerDaemon,
-	spawnBrokerDaemon,
-} from "./runtime/broker-daemon.js";
+import { spawnBrokerDaemon } from "./runtime/broker-daemon.js";
 import {
 	chooseLaunchMode,
 	detectTmux,
@@ -91,32 +88,8 @@ export function createCli(): Command {
 				isPortFreeOs: (port: number) => isPortFree(port),
 				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
 					spawnBrokerDaemon(sqlitePath, host, port, collabId),
-				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
-					const start = Date.now();
-					const delayMs = 100;
-					while (Date.now() - start < timeoutMs) {
-						const db = openDatabase(getSharedSqlitePath());
-						const row = db
-							.prepare(
-								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
-							)
-							.get(collabId) as { pid: number | null } | undefined;
-						db.close();
-						const pid = row?.pid ?? 0;
-						if (pid > 0) {
-							const health = await assessBrokerDaemon({
-								host,
-								port,
-								pid,
-							});
-							if (health.ok) return true;
-						}
-						await new Promise<void>((resolve) =>
-							setTimeout(resolve, delayMs),
-						);
-					}
-					return false;
-				},
+				waitForReady: ({ host, port, collabId, timeoutMs }) =>
+					waitForBrokerReady({ host, port, collabId, timeoutMs }),
 				signalProcess: (pid, signal) => {
 					try {
 						process.kill(pid, signal);
@@ -229,32 +202,8 @@ export function createCli(): Command {
 				isPortFreeOs: (port: number) => isPortFree(port),
 				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
 					spawnBrokerDaemon(sqlitePath, host, port, collabId),
-				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
-					const start = Date.now();
-					const delayMs = 100;
-					while (Date.now() - start < timeoutMs) {
-						const db = openDatabase(getSharedSqlitePath());
-						const row = db
-							.prepare(
-								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
-							)
-							.get(collabId) as { pid: number | null } | undefined;
-						db.close();
-						const pid = row?.pid ?? 0;
-						if (pid > 0) {
-							const health = await assessBrokerDaemon({
-								host,
-								port,
-								pid,
-							});
-							if (health.ok) return true;
-						}
-						await new Promise<void>((resolve) =>
-							setTimeout(resolve, delayMs),
-						);
-					}
-					return false;
-				},
+				waitForReady: ({ host, port, collabId, timeoutMs }) =>
+					waitForBrokerReady({ host, port, collabId, timeoutMs }),
 				signalProcess: (pid, signal) => {
 					try {
 						process.kill(pid, signal);
