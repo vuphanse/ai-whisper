@@ -37,6 +37,32 @@ describe("Wall", () => {
 		const { lastFrame } = render(<Wall state={wall({ panes: [], pageCount: 0, totalRuns: 0, selected: 0 })} cols={100} rows={24} />);
 		expect(lastFrame()!).toContain("no active collabs");
 	});
+	it("selected pane shows the ▸ marker; non-selected panes get matching padding", () => {
+		// Selected-card indicator is more visually obvious than the cyan
+		// border alone (which ink-testing-library strips). Lock in: exactly
+		// one pane shows "▸ " in the header, padding stays aligned on others.
+		const { lastFrame } = render(<Wall state={wall({})} cols={100} rows={24} />);
+		const f = lastFrame()!;
+		// wall() seeds selected=1 (the c2 / "Manual" pane), so the marker
+		// should appear on its header and NOT on c1.
+		expect(f).toContain("▸ Manual  manual relay");
+		// Exactly one ▸ marker in the entire wall frame.
+		expect((f.match(/▸ /g) ?? []).length).toBe(1);
+		// Unselected pane's header retains its "oauth" label (with leading
+		// padding for alignment); just assert the substring still renders.
+		expect(f).toContain("oauth");
+	});
+
+	it("agent tokens (codex / claude) are not stripped by the per-token coloring", () => {
+		// ink-testing-library drops ANSI escape codes, so this test locks in
+		// the SUBSTRING preservation through colorAgents (a regression would
+		// drop letters or split them with stripped escapes).
+		const { lastFrame } = render(<Wall state={wall({})} cols={100} rows={24} />);
+		const f = lastFrame()!;
+		expect(f).toContain("codex");
+		expect(f).toContain("claude");
+	});
+
 	it("chunks >colsCount panes into multiple rows and renders every pane", () => {
 		// cols=100 → colsCount = max(1, floor(100/40)) = 2; 5 panes → 3 rows (2,2,1)
 		const panes = Array.from({ length: 5 }, (_, i) => ({

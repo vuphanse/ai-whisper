@@ -19,6 +19,36 @@ function tailText(l: LogLine): string {
 	return l.text;
 }
 
+// Per-agent accent colors used throughout the dashboard so codex/claude
+// tokens read at a glance instead of all-gray. Stuck/escalated state still
+// overrides to red — escalation is the dominant signal.
+const AGENT_COLOR = { codex: "cyan", claude: "magenta" } as const;
+
+// Split a string on the literal tokens `codex` / `claude` (case-sensitive,
+// whole-word boundary) and emit a flat array of React nodes with each
+// agent token wrapped in its accent color. Plain segments inherit the
+// surrounding <Text>'s color, so we only override when we mean to.
+function colorAgents(text: string, baseKey: string): ReactNode[] {
+	const re = /\b(codex|claude)\b/g;
+	const out: ReactNode[] = [];
+	let last = 0;
+	let m: RegExpExecArray | null;
+	let n = 0;
+	while ((m = re.exec(text)) !== null) {
+		if (m.index > last) out.push(text.slice(last, m.index));
+		const agent = m[0] as keyof typeof AGENT_COLOR;
+		out.push(
+			<Text key={`${baseKey}-${n}`} color={AGENT_COLOR[agent]}>
+				{agent}
+			</Text>,
+		);
+		last = m.index + agent.length;
+		n += 1;
+	}
+	if (last < text.length) out.push(text.slice(last));
+	return out;
+}
+
 function WallPane(props: {
 	pane: WallPaneState;
 	selected: boolean;
@@ -26,7 +56,14 @@ function WallPane(props: {
 }): ReactElement {
 	const { pane } = props;
 	const borderColor = pane.stuck ? "red" : props.selected ? "cyan" : "gray";
-	const healthColorProp = pane.stuck ? { color: "red" as const } : {};
+	// Selected-card indicator: a clear chevron in the header, with matching
+	// whitespace on unselected cards so column alignment doesn't shift.
+	const marker = props.selected ? "▸ " : "  ";
+	// Stuck overrides agent coloring — when escalated the whole health line
+	// reads red and we skip the per-token coloring (escalation is louder).
+	const healthChildren = pane.stuck
+		? pane.healthLine
+		: colorAgents(pane.healthLine, "h");
 	return (
 		<Box
 			flexDirection="column"
@@ -34,15 +71,20 @@ function WallPane(props: {
 			borderStyle="round"
 			borderColor={borderColor}
 		>
-			<Text wrap="truncate" bold>
+			<Text
+				wrap="truncate"
+				bold
+				{...(props.selected ? { color: "cyan" as const } : {})}
+			>
+				{marker}
 				{pane.header}
 			</Text>
-			<Text wrap="truncate" {...healthColorProp}>
-				{pane.healthLine}
+			<Text wrap="truncate" {...(pane.stuck ? { color: "red" as const } : {})}>
+				{healthChildren}
 			</Text>
 			{pane.logTail.map((l, i) => (
 				<Text key={i} wrap="truncate" color="gray">
-					{tailText(l)}
+					{colorAgents(tailText(l), `l${i}`)}
 				</Text>
 			))}
 		</Box>
