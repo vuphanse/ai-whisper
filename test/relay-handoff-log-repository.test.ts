@@ -162,6 +162,63 @@ describe("listRelayHandoffs", () => {
 		const db = freshDb();
 		expect(listRelayHandoffs(db, { collabId: "nope" })).toEqual([]);
 	});
+
+	// The dashboard renders multiple runs per collab over time — a single collab
+	// can accumulate handoffs from several workflow runs and from manual relay
+	// turns. Without a workflow-level filter at the SQL layer, listRelayHandoffs
+	// returns mixed rows and (worse) starves a quiet run when a noisier run on
+	// the same collab consumes the LIMIT budget.
+	describe("workflowFilter", () => {
+		it("workflowId scopes to that run's handoffs only", () => {
+			const db = freshDb();
+			insertHandoff(db, { id: "ha1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z", workflowId: "wf_a", phaseRunId: "pr_a", round: 1, step: "implement" });
+			insertHandoff(db, { id: "hb1", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z", workflowId: "wf_b", phaseRunId: "pr_b", round: 1, step: "implement" });
+			insertHandoff(db, { id: "hm1", collab: "c1", createdAt: "2026-05-19T00:00:03.000Z" /* manual: workflow_id NULL */ });
+
+			const rows = listRelayHandoffs(db, { collabId: "c1", workflowFilter: { workflowId: "wf_a" } });
+			expect(rows.map((r) => r.handoffId)).toEqual(["ha1"]);
+			expect(rows.every((r) => r.workflowId === "wf_a")).toBe(true);
+		});
+
+		it("manualOnly scopes to handoffs with workflow_id IS NULL", () => {
+			const db = freshDb();
+			insertHandoff(db, { id: "ha1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z", workflowId: "wf_a", phaseRunId: "pr_a" });
+			insertHandoff(db, { id: "hm1", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z" });
+			insertHandoff(db, { id: "hm2", collab: "c1", createdAt: "2026-05-19T00:00:03.000Z" });
+
+			const rows = listRelayHandoffs(db, { collabId: "c1", workflowFilter: { manualOnly: true } });
+			expect(rows.map((r) => r.handoffId)).toEqual(["hm1", "hm2"]);
+			expect(rows.every((r) => r.workflowId === null)).toBe(true);
+		});
+
+		// STARVATION: this is the real reason the filter must be SQL-level, not
+		// post-LIMIT. With a tight LIMIT, a noisier sibling run on the same
+		// collab can consume all the budget and the selected run gets nothing.
+		it("filter is applied at SQL level — selected run is NOT starved by noisier sibling rows", () => {
+			const db = freshDb();
+			// wf_a (quiet, older): 2 rows
+			insertHandoff(db, { id: "ha1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z", workflowId: "wf_a", phaseRunId: "pr_a", round: 1, step: "implement" });
+			insertHandoff(db, { id: "ha2", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z", workflowId: "wf_a", phaseRunId: "pr_a", round: 2, step: "review" });
+			// wf_b (noisy, newer): 5 rows that would crowd out wf_a under limit=2 without SQL filter
+			for (let i = 0; i < 5; i++) {
+				insertHandoff(db, { id: `hb${i}`, collab: "c1", createdAt: `2026-05-19T00:00:1${i}.000Z`, workflowId: "wf_b", phaseRunId: "pr_b", round: i + 1, step: "implement" });
+			}
+
+			const rows = listRelayHandoffs(db, { collabId: "c1", limit: 2, workflowFilter: { workflowId: "wf_a" } });
+			expect(rows.map((r) => r.handoffId)).toEqual(["ha1", "ha2"]);
+			expect(rows.every((r) => r.workflowId === "wf_a")).toBe(true);
+		});
+
+		it("absence of workflowFilter preserves the original collab-only behavior (back-compat)", () => {
+			const db = freshDb();
+			insertHandoff(db, { id: "ha1", collab: "c1", createdAt: "2026-05-19T00:00:01.000Z", workflowId: "wf_a" });
+			insertHandoff(db, { id: "hb1", collab: "c1", createdAt: "2026-05-19T00:00:02.000Z", workflowId: "wf_b" });
+			insertHandoff(db, { id: "hm1", collab: "c1", createdAt: "2026-05-19T00:00:03.000Z" });
+
+			const rows = listRelayHandoffs(db, { collabId: "c1" });
+			expect(rows.map((r) => r.handoffId)).toEqual(["ha1", "hb1", "hm1"]);
+		});
+	});
 });
 
 describe("control.listRelayHandoffs", () => {

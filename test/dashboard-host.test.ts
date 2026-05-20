@@ -200,4 +200,51 @@ describe("dashboard host", () => {
 		expect(m.__viewport.follow).toBe(false); // toggle off
 		await m.stop();
 	});
+
+	it("forwards a workflow-scoped filter to listRelayHandoffs for each Wall pane and the Inspector", async () => {
+		// A single collab can have multiple workflow runs over time + manual
+		// relays. The dashboard must scope its handoff reads to the specific
+		// run a pane (or the Inspector) represents — otherwise the wall tail
+		// and Inspector Live can mix unrelated rows, and (with a tight LIMIT)
+		// a noisier sibling run on the same collab can starve the displayed
+		// run's tail entirely. Filter is applied SQL-side via `workflowFilter`.
+		const broker = fakeBroker([
+			S({ collabId: "c_wf", workflowId: "wf_a", workflowType: "spec-driven-development" }),
+			S({ collabId: "c_man", workflowId: null, workflowType: null, label: "manual one" }),
+		]);
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		const m = createDashboardRuntime({ broker: broker as never, dashboardId: "d1", stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10 }) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { key?: string }): void;
+			__wallSelected(): number;
+		};
+		m.start();
+		await new Promise((r) => setTimeout(r, 40));
+
+		// Wall pane forwarding: at least one call per pane, each with a filter
+		// that matches the pane's workflowId (or { manualOnly: true } for null).
+		const wallCalls = (broker.control.listRelayHandoffs as { mock: { calls: unknown[][] } }).mock.calls.map(
+			(c) => ({ collabId: c[0] as string, opts: c[2] as { workflowFilter?: unknown } | undefined }),
+		);
+		const wfCall = wallCalls.find((c) => c.collabId === "c_wf");
+		const manCall = wallCalls.find((c) => c.collabId === "c_man");
+		expect(wfCall?.opts?.workflowFilter).toEqual({ workflowId: "wf_a" });
+		expect(manCall?.opts?.workflowFilter).toEqual({ manualOnly: true });
+
+		// Inspector forwarding: Enter to inspect the workflow-backed pane.
+		// wallSelected may have been clamped by the wall page; ensure we have
+		// the workflow pane selected.
+		while (m.__wallSelected() > 0) m.__handleKey({ key: "k" });
+		(broker.control.listRelayHandoffs as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		m.__handleKey({ key: "\r" });
+		await new Promise((r) => setTimeout(r, 20));
+		const inspectorCall = (broker.control.listRelayHandoffs as { mock: { calls: unknown[][] } }).mock.calls.find(
+			(c) => (c[2] as { workflowFilter?: { workflowId?: string } } | undefined)?.workflowFilter?.workflowId === "wf_a",
+		);
+		expect(inspectorCall).toBeDefined();
+		expect(inspectorCall![1]).toBe(200); // Inspector pulls the full tail
+		await m.stop();
+	});
 });

@@ -87,6 +87,7 @@ export {
 } from "./storage/repositories/recovery-state-repository.js";
 export type {
 	RelayHandoffLogRow,
+	RelayHandoffWorkflowFilter,
 } from "./storage/repositories/relay-handoff-repository.js";
 export type {
 	CollabSummary,

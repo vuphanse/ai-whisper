@@ -82,7 +82,15 @@ export function createDashboardRuntime(input: {
 		const c = input.broker.control;
 		const isoNow = new Date().toISOString();
 		const collabId = inspectorCollabId;
-		const handoffs = c.listRelayHandoffs(collabId, 200);
+		// Scope the tail to the focused run (or to manual relays only) so a
+		// noisier sibling run on the same collab can't crowd out — or worse,
+		// starve — the rows we display. See relay-handoff-repository
+		// `RelayHandoffWorkflowFilter`.
+		const handoffs = c.listRelayHandoffs(collabId, 200, {
+			workflowFilter: inspectorWorkflowId
+				? { workflowId: inspectorWorkflowId }
+				: { manualOnly: true },
+		});
 		const wf = inspectorWorkflowId ? c.getWorkflow(inspectorWorkflowId) : null;
 		const phaseRaw = inspectorWorkflowId
 			? c.getWorkflowPhaseRuns(inspectorWorkflowId)
@@ -229,7 +237,14 @@ export function createDashboardRuntime(input: {
 			}
 		> = {};
 		for (const s of sel.pageSummaries) {
-			const handoffs = c.listRelayHandoffs(s.collabId, 8);
+			// Each pane represents ONE run on this collab — either a workflow
+			// instance (`s.workflowId`) or the manual relay slice. Scope the
+			// tail so we don't tail-mix sibling runs on the same collab.
+			const handoffs = c.listRelayHandoffs(s.collabId, 8, {
+				workflowFilter: s.workflowId
+					? { workflowId: s.workflowId }
+					: { manualOnly: true },
+			});
 			const phaseRaw = s.workflowId
 				? c.getWorkflowPhaseRuns(s.workflowId)
 				: [];
