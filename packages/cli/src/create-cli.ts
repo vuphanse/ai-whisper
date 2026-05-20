@@ -28,6 +28,7 @@ import { runWorkflowInspect } from "./commands/workflow/inspect.js";
 import { runWorkflowResume } from "./commands/workflow/resume.js";
 import { runWorkflowCancel } from "./commands/workflow/cancel.js";
 import { runWorkflowTypes } from "./commands/workflow/types.js";
+import { runSkillInstall } from "./commands/skill/install.js";
 import { connectToWorkspaceBroker } from "./runtime/broker-connect.js";
 import { CollabResolverError } from "./runtime/collab-resolver.js";
 
@@ -483,6 +484,30 @@ export function createCli(): Command {
 				console.log(t);
 			}
 		});
+
+	const skill = cli.command("skill").description("Manage bundled agent skills");
+
+	skill
+		.command("install")
+		.description(
+			"Install the bundled ai-whisper skills into your agent skill directories",
+		)
+		.option("--target <target>", "claude | codex | all (default: all)", "all")
+		.option("--force", "Overwrite existing skill destinations")
+		.action(
+			async (opts: {
+				target: "claude" | "codex" | "all";
+				force?: boolean;
+			}) => {
+				const result = await runSkillInstall({
+					target: opts.target,
+					...(opts.force ? { force: true } : {}),
+				});
+				for (const p of result.installedAt) {
+					console.log(`Installed: ${p}`);
+				}
+			},
+		);
 
 	return cli;
 }
