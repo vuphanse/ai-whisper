@@ -12,6 +12,31 @@ function tempStateRoot(): string {
 	return dir;
 }
 
+/**
+ * Wraps `runCollabStart` with stubbed daemon-spawning so unit tests never
+ * launch a real broker child process. Without this, mount's default auto-
+ * create branch shells out to `spawnBrokerDaemon` and leaves leaked
+ * tsx/node processes around after the suite. The stubs do everything the
+ * real start does at the DB level (insert collab + broker_daemon +
+ * recovery_state rows) but skip the OS-level fork.
+ */
+const stubbedRunStart: typeof runCollabStart = async (opts) => {
+	return runCollabStart({
+		...opts,
+		spawnBroker: (input) => {
+			const db = openDatabase(getSharedSqlitePath());
+			db.prepare(
+				"UPDATE broker_daemon SET pid = ?, last_heartbeat_at = ? WHERE collab_id = ?",
+			).run(91234, new Date().toISOString(), input.collabId);
+			db.close();
+			return 91234;
+		},
+		waitForReady: async () => true,
+		isPortFreeOs: async () => true,
+		signalProcess: () => {},
+	});
+};
+
 describe("runCollabMount auto-create", () => {
 	let prevStateRoot: string | undefined;
 
@@ -47,6 +72,7 @@ describe("runCollabMount auto-create", () => {
 					httpReachable: true,
 					ok: true,
 				}) as never,
+			runStartFn: stubbedRunStart,
 		});
 
 		const db = openDatabase(getSharedSqlitePath());
@@ -80,6 +106,7 @@ describe("runCollabMount auto-create", () => {
 						httpReachable: true,
 						ok: true,
 					}) as never,
+				runStartFn: stubbedRunStart,
 			});
 		}
 
