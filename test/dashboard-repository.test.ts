@@ -111,6 +111,41 @@ describe("listActiveCollabSummaries", () => {
 		const db = freshDb();
 		expect(listActiveCollabSummaries(db, { sinceMs, now: NOW })).toEqual([]);
 	});
+
+	// A single collab can have multiple workflow runs over time plus manual
+	// relays. `lastActivityAt` drives Wall liveness/stuck and the sort
+	// tie-break (`actKey`). It must reflect the RESOLVED RUN's activity, not
+	// a cross-run MAX — otherwise a sibling run's activity keeps a stale
+	// pane looking fresh and sorts it to the top.
+	it("lastActivityAt scopes to the resolved workflow run (sibling-run activity does NOT leak)", () => {
+		const db = freshDb();
+		insCollab(db, "c_mix");
+		insWorkflow(db, { id: "wf_a", collab: "c_mix", status: "running", phaseIdx: 0, createdAt: "2026-05-20T00:30:00.000Z" });
+		insWorkflow(db, { id: "wf_b", collab: "c_mix", status: "done", createdAt: "2026-05-20T00:00:00.000Z" });
+		// wf_a's latest activity is OLDER than wf_b's and OLDER than a manual relay.
+		insHandoff(db, { id: "h_a1", collab: "c_mix", wf: "wf_a", createdAt: "2026-05-20T00:50:00.000Z", lastAct: "2026-05-20T00:50:00.000Z" });
+		insHandoff(db, { id: "h_b1", collab: "c_mix", wf: "wf_b", createdAt: "2026-05-20T00:55:00.000Z", lastAct: "2026-05-20T00:58:00.000Z" });
+		insHandoff(db, { id: "h_man", collab: "c_mix", createdAt: "2026-05-20T00:56:00.000Z", lastAct: "2026-05-20T00:56:00.000Z" });
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		expect(rows[0]?.workflowId).toBe("wf_a"); // resolver picks running
+		// MUST be wf_a's latest ("00:50:00"), NOT the cross-run MAX ("00:58:00").
+		expect(rows[0]?.lastActivityAt).toBe("2026-05-20T00:50:00.000Z");
+	});
+
+	it("manual-relay lastActivityAt scopes to workflow_id IS NULL only (tagged handoffs do NOT leak)", () => {
+		const db = freshDb();
+		// No workflow records on this collab → resolver picks manual (null wf).
+		insCollab(db, "c_man_mix");
+		insHandoff(db, { id: "h_man1", collab: "c_man_mix", createdAt: "2026-05-20T00:50:00.000Z", lastAct: "2026-05-20T00:50:00.000Z" });
+		// A tagged sibling handoff (orphan workflow_id) on the same collab — must
+		// not bump the manual summary's lastActivityAt.
+		insHandoff(db, { id: "h_orphan", collab: "c_man_mix", wf: "wf_orphan", createdAt: "2026-05-20T00:55:00.000Z", lastAct: "2026-05-20T00:58:00.000Z" });
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		expect(rows[0]?.workflowId).toBe(null);
+		expect(rows[0]?.lastActivityAt).toBe("2026-05-20T00:50:00.000Z");
+	});
 });
 
 function insCostHandoff(db: ReturnType<typeof freshDb>, h: { id: string; collab: string; wf?: string | null; phase?: string | null; createdAt: string; resolvedAt?: string | null; lastAct?: string; req?: string; root?: string | null; back?: string | null }) {

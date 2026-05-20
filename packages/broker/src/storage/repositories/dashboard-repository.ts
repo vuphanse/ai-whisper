@@ -145,6 +145,27 @@ export function listActiveCollabSummaries(
 			(collab?.workspaceRoot ? basename(collab.workspaceRoot) : "") ||
 			e.collabId.slice(0, 12);
 
+		// Scope `lastActivityAt` to the RESOLVED run so it drives Wall
+		// liveness/stuck and the sort tie-break (`actKey`) by THIS run's
+		// activity, not a collab-wide MAX. Sibling-run handoffs on the
+		// same collab must not bump a stale pane back to fresh.
+		const runLastActRow = wf
+			? (db
+					.prepare(
+						`SELECT COALESCE(MAX(last_activity_at), '') AS lastAct
+						   FROM relay_handoff
+						  WHERE collab_id = ? AND workflow_id = ?`,
+					)
+					.get(e.collabId, wf.workflowId) as { lastAct: string } | undefined)
+			: (db
+					.prepare(
+						`SELECT COALESCE(MAX(last_activity_at), '') AS lastAct
+						   FROM relay_handoff
+						  WHERE collab_id = ? AND workflow_id IS NULL`,
+					)
+					.get(e.collabId) as { lastAct: string } | undefined);
+		const runLastAct = runLastActRow?.lastAct ?? "";
+
 		out.push({
 			collabId: e.collabId,
 			label,
@@ -163,7 +184,7 @@ export function listActiveCollabSummaries(
 				handoffState: turn?.handoffState ?? "idle",
 			},
 			sessions,
-			lastActivityAt: e.lastAct,
+			lastActivityAt: runLastAct,
 		});
 	}
 	return out;
