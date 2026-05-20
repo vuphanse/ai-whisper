@@ -5,7 +5,7 @@
  *
  * Run:
  *   node scripts/manual/dashboard-smoke-seed.mjs
- *   AI_WHISPER_STATE_ROOT=/tmp/aiw-dashboard-smoke node packages/cli/dist/index.js collab dashboard
+ *   AI_WHISPER_STATE_ROOT=/tmp/aiw-dashboard-smoke node packages/cli/dist/bin/whisper.js collab dashboard
  *
  * Idempotent — re-running wipes the smoke directory and re-seeds.
  *
@@ -266,7 +266,7 @@ console.log("  c_gamma  stuck workflow (escalated at 5/5)");
 console.log("");
 console.log("Launch the dashboard against this fixture:");
 console.log("");
-console.log(`  AI_WHISPER_STATE_ROOT=${stateRoot} node packages/cli/dist/index.js collab dashboard`);
+console.log(`  AI_WHISPER_STATE_ROOT=${stateRoot} node packages/cli/dist/bin/whisper.js collab dashboard`);
 console.log("");
 console.log("Cleanup when done:");
 console.log("");
