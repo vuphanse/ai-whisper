@@ -9,10 +9,13 @@ import { getSharedSqlitePath } from "../../runtime/state-root.js";
 export function runCollabStatus(input: {
 	cwd: string;
 	collabIdOverride?: string;
+	json?: boolean;
 }): string {
 	const sqlitePath = getSharedSqlitePath();
 	if (!existsSync(sqlitePath)) {
-		return `no active collab for ${input.cwd}`;
+		return input.json
+			? JSON.stringify({ error: "no_collab_for_cwd", cwd: input.cwd })
+			: `no active collab for ${input.cwd}`;
 	}
 	const db = new Database(sqlitePath, { readonly: true });
 	try {
@@ -21,6 +24,30 @@ export function runCollabStatus(input: {
 			cwd: input.cwd,
 			...(input.collabIdOverride ? { collabIdOverride: input.collabIdOverride } : {}),
 		});
+
+		if (input.json) {
+			const bindings = db
+				.prepare(
+					"SELECT agent_type, binding_state FROM session_binding WHERE collab_id = ?",
+				)
+				.all(r.collabId) as Array<{ agent_type: string; binding_state: string }>;
+			const agents = (["codex", "claude"] as const).map((agentType) => {
+				const b = bindings.find((x) => x.agent_type === agentType);
+				return {
+					agentType,
+					bindingState: b?.binding_state ?? null,
+				};
+			});
+			return JSON.stringify({
+				collabId: r.collabId,
+				workspaceRoot: r.workspaceRoot,
+				status: r.status,
+				daemon: r.daemon ?? null,
+				agents,
+				recovery: { state: r.recovery.state },
+			});
+		}
+
 		const daemonStr = r.daemon
 			? `daemon: ${r.daemon.host}:${r.daemon.port} pid=${r.daemon.pid}`
 			: "daemon: not running";
@@ -34,7 +61,9 @@ export function runCollabStatus(input: {
 		].join("\n");
 	} catch (err) {
 		if (err instanceof CollabResolverError && err.kind === "NoCollabFoundForCwd") {
-			return `no active collab for ${input.cwd}`;
+			return input.json
+				? JSON.stringify({ error: "no_collab_for_cwd", cwd: input.cwd })
+				: `no active collab for ${input.cwd}`;
 		}
 		throw err;
 	} finally {

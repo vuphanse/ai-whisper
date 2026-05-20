@@ -137,10 +137,12 @@ export function createCli(): Command {
 		.command("status")
 		.description("Show current collaboration status")
 		.option("--collab <id>", "Inspect a specific collab id (defaults to the active collab for cwd)")
-		.action((opts: { collab?: string }) => {
+		.option("--json", "Emit machine-readable JSON instead of text")
+		.action((opts: { collab?: string; json?: boolean }) => {
 			const output = runCollabStatus({
 				cwd: process.cwd(),
 				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+				...(opts.json ? { json: true } : {}),
 			});
 			console.log(output);
 		});
