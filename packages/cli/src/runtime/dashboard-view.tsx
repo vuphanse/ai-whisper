@@ -86,7 +86,7 @@ export function Wall(props: {
 				</Box>
 			))}
 			<Text color="gray">
-				{`page ${state.page + 1}/${Math.max(1, state.pageCount)} · ${state.totalRuns} runs · ↵ inspect · [ ] page · q quit`}
+				{`page ${state.page + 1}/${Math.max(1, state.pageCount)} · ${state.totalRuns} runs · ↑↓/jk select · ↵ inspect · [ ] page · q quit`}
 			</Text>
 		</Box>
 	);
@@ -118,7 +118,9 @@ export function Inspector(props: {
 				{head}
 			</Text>
 			<Text wrap="truncate" color="gray">
-				{`${tabBar(props.section)}   Esc wall · q quit`}
+				{`${tabBar(props.section)}   1-4 section${
+					props.section === "live" ? " · ↑↓/g/G/f scroll" : ""
+				} · Esc wall · q quit`}
 			</Text>
 			{props.section === "live" ? (
 				<RelayView
