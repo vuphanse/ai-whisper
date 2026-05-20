@@ -170,6 +170,76 @@ describe("relay-evaluator-diagnostics repository", () => {
 		}
 	});
 
+	// Used by the dashboard Inspector when there is no chain to scope by (e.g.
+	// brand-new workflow with no phase yet, or manual relay panes). Without an
+	// SQL-level workflow filter, the fallback mixes diagnostics from sibling
+	// workflow runs on the same collab into the displayed Evidence section.
+	describe("listByCollab workflowFilter", () => {
+		it("scopes to a specific workflow_id when { workflowId } is passed", () => {
+			const broker = newBroker();
+			try {
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_a", handoffId: "h_a", workflowId: "wf_a",
+					callGroupId: "cg_a", createdAt: "2026-05-14T10:00:00.000Z",
+				}));
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_b", handoffId: "h_b", workflowId: "wf_b",
+					callGroupId: "cg_b", createdAt: "2026-05-14T10:01:00.000Z",
+				}));
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_m", handoffId: "h_m", workflowId: null,
+					callGroupId: "cg_m", createdAt: "2026-05-14T10:02:00.000Z",
+				}));
+				const rows = listEvaluatorDiagnosticsByCollab(broker.db, "collab_a", 50, { workflowFilter: { workflowId: "wf_a" } });
+				expect(rows.map((r) => r.evaluatorId)).toEqual(["eval_a"]);
+				expect(rows.every((r) => r.workflowId === "wf_a")).toBe(true);
+			} finally {
+				void broker.stop();
+			}
+		});
+
+		it("scopes to workflow_id IS NULL when { manualOnly: true } is passed", () => {
+			const broker = newBroker();
+			try {
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_a", handoffId: "h_a", workflowId: "wf_a",
+					callGroupId: "cg_a", createdAt: "2026-05-14T10:00:00.000Z",
+				}));
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_m1", handoffId: "h_m1", workflowId: null,
+					callGroupId: "cg_m1", createdAt: "2026-05-14T10:01:00.000Z",
+				}));
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_m2", handoffId: "h_m2", workflowId: null,
+					callGroupId: "cg_m2", createdAt: "2026-05-14T10:02:00.000Z",
+				}));
+				const rows = listEvaluatorDiagnosticsByCollab(broker.db, "collab_a", 50, { workflowFilter: { manualOnly: true } });
+				expect(rows.map((r) => r.evaluatorId).sort()).toEqual(["eval_m1", "eval_m2"]);
+				expect(rows.every((r) => r.workflowId === null)).toBe(true);
+			} finally {
+				void broker.stop();
+			}
+		});
+
+		it("absence of workflowFilter preserves the original collab-only behavior (back-compat)", () => {
+			const broker = newBroker();
+			try {
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_a", handoffId: "h_a", workflowId: "wf_a",
+					callGroupId: "cg_a", createdAt: "2026-05-14T10:00:00.000Z",
+				}));
+				insertEvaluatorDiagnostic(broker.db, sampleRow({
+					evaluatorId: "eval_b", handoffId: "h_b", workflowId: "wf_b",
+					callGroupId: "cg_b", createdAt: "2026-05-14T10:01:00.000Z",
+				}));
+				const rows = listEvaluatorDiagnosticsByCollab(broker.db, "collab_a", 50);
+				expect(rows.map((r) => r.evaluatorId).sort()).toEqual(["eval_a", "eval_b"]);
+			} finally {
+				void broker.stop();
+			}
+		});
+	});
+
 	it("deleteOlderThan removes rows strictly older than the cutoff", () => {
 		const broker = newBroker();
 		try {

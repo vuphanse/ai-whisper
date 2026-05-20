@@ -98,6 +98,7 @@ import {
 	listCaptureDiagnosticsByHandoff as queryListCaptureDiagnosticsByHandoff,
 	deleteCaptureDiagnosticsOlderThan,
 	type RelayCaptureDiagnosticRecord,
+	type CaptureDiagnosticsWorkflowFilter,
 } from "../storage/repositories/relay-capture-diagnostics-repository.js";
 import {
 	insertEvaluatorDiagnostic,
@@ -106,6 +107,7 @@ import {
 	listEvaluatorDiagnosticsByHandoff as queryListEvaluatorDiagnosticsByHandoff,
 	deleteEvaluatorDiagnosticsOlderThan,
 	type RelayEvaluatorDiagnosticRecord,
+	type EvaluatorDiagnosticsWorkflowFilter,
 } from "../storage/repositories/relay-evaluator-diagnostics-repository.js";
 import {
 	createRelayHandoffTxn,
@@ -1185,8 +1187,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		listCaptureDiagnosticsByCollab(
 			collabId: string,
 			limit: number | null,
+			opts?: { workflowFilter?: CaptureDiagnosticsWorkflowFilter },
 		): RelayCaptureDiagnosticRecord[] {
-			return queryListCaptureDiagnosticsByCollab(db, collabId, limit);
+			return queryListCaptureDiagnosticsByCollab(db, collabId, limit, opts);
 		},
 		listCaptureDiagnosticsByCollabAndChain(
 			collabId: string,
@@ -1261,8 +1264,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		listEvaluatorDiagnosticsByCollab(
 			collabId: string,
 			limit: number | null,
+			opts?: { workflowFilter?: EvaluatorDiagnosticsWorkflowFilter },
 		): RelayEvaluatorDiagnosticRecord[] {
-			return queryListEvaluatorDiagnosticsByCollab(db, collabId, limit);
+			return queryListEvaluatorDiagnosticsByCollab(db, collabId, limit, opts);
 		},
 		listEvaluatorDiagnosticsByCollabAndChain(
 			collabId: string,

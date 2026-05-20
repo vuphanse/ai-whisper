@@ -247,4 +247,65 @@ describe("dashboard host", () => {
 		expect(inspectorCall![1]).toBe(200); // Inspector pulls the full tail
 		await m.stop();
 	});
+
+	it("forwards a workflow-scoped filter to the diagnostics fallback when there's no chain to scope by", async () => {
+		// The Inspector falls back to listEvaluator/CaptureDiagnosticsByCollab
+		// when getRelayChain returns null (brand-new workflow with no phase yet,
+		// or manual relay panes). Same defect class as the handoff filter —
+		// without an SQL-level workflow filter, sibling-run diagnostics on the
+		// same collab would leak into the Evidence section.
+		const broker = fakeBroker([
+			S({ collabId: "c_wf", workflowId: "wf_a", workflowType: "spec-driven-development" }),
+			S({ collabId: "c_man", workflowId: null, workflowType: null, label: "manual one" }),
+		]);
+		// Force the "no chain" fallback by returning empty phase runs (so
+		// curRun is null → chain is null → chainId is null).
+		broker.control.getWorkflowPhaseRuns = vi.fn(() => []) as never;
+		broker.control.getRelayChain = vi.fn(() => null) as never;
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		const m = createDashboardRuntime({ broker: broker as never, dashboardId: "d1", stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10 }) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { key?: string; escape?: boolean }): void;
+			__wallSelected(): number;
+		};
+		m.start();
+		await new Promise((r) => setTimeout(r, 40));
+
+		// Inspect the workflow-backed pane → fallback fires with workflowId filter.
+		while (m.__wallSelected() > 0) m.__handleKey({ key: "k" });
+		(broker.control.listEvaluatorDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		(broker.control.listCaptureDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		(broker.control.listEvaluatorDiagnosticsByCollabAndChain as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		(broker.control.listCaptureDiagnosticsByCollabAndChain as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		m.__handleKey({ key: "\r" });
+		await new Promise((r) => setTimeout(r, 20));
+
+		const evalWfCall = (broker.control.listEvaluatorDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls[0];
+		const capWfCall = (broker.control.listCaptureDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls[0];
+		expect(evalWfCall).toBeDefined();
+		expect(capWfCall).toBeDefined();
+		expect((evalWfCall![2] as { workflowFilter?: unknown }).workflowFilter).toEqual({ workflowId: "wf_a" });
+		expect((capWfCall![2] as { workflowFilter?: unknown }).workflowFilter).toEqual({ workflowId: "wf_a" });
+		// The chain-scoped variants must NOT be called when chain is null.
+		expect((broker.control.listEvaluatorDiagnosticsByCollabAndChain as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(0);
+		expect((broker.control.listCaptureDiagnosticsByCollabAndChain as { mock: { calls: unknown[][] } }).mock.calls).toHaveLength(0);
+
+		// Escape back to the wall, select the manual pane, inspect → fallback fires with manualOnly.
+		m.__handleKey({ escape: true });
+		await new Promise((r) => setTimeout(r, 20));
+		m.__handleKey({ key: "j" }); // move to manual pane
+		(broker.control.listEvaluatorDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		(broker.control.listCaptureDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls.length = 0;
+		m.__handleKey({ key: "\r" });
+		await new Promise((r) => setTimeout(r, 20));
+		const evalManCall = (broker.control.listEvaluatorDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls[0];
+		const capManCall = (broker.control.listCaptureDiagnosticsByCollab as { mock: { calls: unknown[][] } }).mock.calls[0];
+		expect(evalManCall).toBeDefined();
+		expect(capManCall).toBeDefined();
+		expect((evalManCall![2] as { workflowFilter?: unknown }).workflowFilter).toEqual({ manualOnly: true });
+		expect((capManCall![2] as { workflowFilter?: unknown }).workflowFilter).toEqual({ manualOnly: true });
+		await m.stop();
+	});
 });

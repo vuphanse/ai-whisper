@@ -115,12 +115,23 @@ export function createDashboardRuntime(input: {
 				phaseMaxRounds[i] = ph.maxRounds;
 			});
 		const chainId = chain?.chainId ?? null;
+		// When there's no chain to scope by (brand-new workflow with no phase
+		// yet, or a manual relay pane), the fallback queries must still be
+		// run-scoped — otherwise they pull diagnostics from sibling runs on
+		// the same collab. Same defect class as the listRelayHandoffs filter.
+		const diagFilter = inspectorWorkflowId
+			? { workflowId: inspectorWorkflowId }
+			: ({ manualOnly: true } as const);
 		const evalDiags = chainId
 			? c.listEvaluatorDiagnosticsByCollabAndChain(collabId, chainId, 50)
-			: c.listEvaluatorDiagnosticsByCollab(collabId, 50);
+			: c.listEvaluatorDiagnosticsByCollab(collabId, 50, {
+					workflowFilter: diagFilter,
+				});
 		const capDiags = chainId
 			? c.listCaptureDiagnosticsByCollabAndChain(collabId, chainId, 50)
-			: c.listCaptureDiagnosticsByCollab(collabId, 50);
+			: c.listCaptureDiagnosticsByCollab(collabId, 50, {
+					workflowFilter: diagFilter,
+				});
 		const costRows = c.listRunCostRows(collabId, inspectorWorkflowId);
 
 		let activeStep: string | null = null;

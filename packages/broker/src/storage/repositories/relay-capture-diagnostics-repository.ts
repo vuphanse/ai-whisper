@@ -94,29 +94,48 @@ export function insertCaptureDiagnostic(
 	);
 }
 
+// The dashboard Inspector falls back to this query when there's no chain to
+// scope by (brand-new workflow with no phase yet, or manual relay panes).
+// Without an SQL-level workflow filter, the fallback would mix sibling-run
+// diagnostics into the displayed Evidence section. Mirrors the shape used by
+// listRelayHandoffs' `workflowFilter`.
+export type CaptureDiagnosticsWorkflowFilter =
+	| { workflowId: string }
+	| { manualOnly: true };
+
 export function listCaptureDiagnosticsByCollab(
 	db: Database.Database,
 	collabId: string,
 	limit: number | null,
+	opts?: { workflowFilter?: CaptureDiagnosticsWorkflowFilter },
 ): RelayCaptureDiagnosticRecord[] {
+	const filter = opts?.workflowFilter;
+	const filterClause =
+		filter === undefined
+			? ""
+			: "workflowId" in filter
+				? " AND workflow_id = ?"
+				: " AND workflow_id IS NULL";
+	const filterArgs: string[] =
+		filter !== undefined && "workflowId" in filter ? [filter.workflowId] : [];
 	if (limit === null) {
 		const rows = db
 			.prepare(
 				`SELECT * FROM relay_capture_diagnostics
-				 WHERE collab_id = ?
+				 WHERE collab_id = ?${filterClause}
 				 ORDER BY created_at DESC`,
 			)
-			.all(collabId) as Row[];
+			.all(collabId, ...filterArgs) as Row[];
 		return rows.map(rowToRecord);
 	}
 	const rows = db
 		.prepare(
 			`SELECT * FROM relay_capture_diagnostics
-			 WHERE collab_id = ?
+			 WHERE collab_id = ?${filterClause}
 			 ORDER BY created_at DESC
 			 LIMIT ?`,
 		)
-		.all(collabId, limit) as Row[];
+		.all(collabId, ...filterArgs, limit) as Row[];
 	return rows.map(rowToRecord);
 }
 

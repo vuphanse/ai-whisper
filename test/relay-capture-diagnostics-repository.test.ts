@@ -246,4 +246,64 @@ describe("relay-capture-diagnostics repository", () => {
 			void broker.stop();
 		}
 	});
+
+	// Same defect class as the evaluator-diagnostics fallback: the dashboard
+	// Inspector falls back to listCaptureDiagnosticsByCollab when there's no
+	// chain to scope by (brand-new workflow with no phase yet, or manual relay
+	// panes). Without an SQL-level workflow filter, the fallback mixes capture
+	// diagnostics from sibling workflow runs on the same collab.
+	describe("listByCollab workflowFilter", () => {
+		function row(o: { id: string; wf: string | null; createdAt: string }) {
+			return {
+				captureId: o.id, handoffId: `h_${o.id}`, collabId: "c1",
+				chainId: null, workflowId: o.wf, targetProvider: "claude" as const,
+				captureStatus: "ok" as const,
+				clipLen: 0, turnLen: 0, turnConfidence: "low" as const,
+				jaccardScore: null, containmentScore: null,
+				clipSample: null, turnSample: null,
+				abortedByRaceGuard: false,
+				createdAt: o.createdAt,
+			};
+		}
+
+		it("scopes to a specific workflow_id when { workflowId } is passed", () => {
+			const broker = newBroker();
+			try {
+				insertCaptureDiagnostic(broker.db, row({ id: "ca", wf: "wf_a", createdAt: "2026-05-14T10:00:00.000Z" }));
+				insertCaptureDiagnostic(broker.db, row({ id: "cb", wf: "wf_b", createdAt: "2026-05-14T10:01:00.000Z" }));
+				insertCaptureDiagnostic(broker.db, row({ id: "cm", wf: null, createdAt: "2026-05-14T10:02:00.000Z" }));
+				const rows = listCaptureDiagnosticsByCollab(broker.db, "c1", 50, { workflowFilter: { workflowId: "wf_a" } });
+				expect(rows.map((r) => r.captureId)).toEqual(["ca"]);
+				expect(rows.every((r) => r.workflowId === "wf_a")).toBe(true);
+			} finally {
+				void broker.stop();
+			}
+		});
+
+		it("scopes to workflow_id IS NULL when { manualOnly: true } is passed", () => {
+			const broker = newBroker();
+			try {
+				insertCaptureDiagnostic(broker.db, row({ id: "ca", wf: "wf_a", createdAt: "2026-05-14T10:00:00.000Z" }));
+				insertCaptureDiagnostic(broker.db, row({ id: "cm1", wf: null, createdAt: "2026-05-14T10:01:00.000Z" }));
+				insertCaptureDiagnostic(broker.db, row({ id: "cm2", wf: null, createdAt: "2026-05-14T10:02:00.000Z" }));
+				const rows = listCaptureDiagnosticsByCollab(broker.db, "c1", 50, { workflowFilter: { manualOnly: true } });
+				expect(rows.map((r) => r.captureId).sort()).toEqual(["cm1", "cm2"]);
+				expect(rows.every((r) => r.workflowId === null)).toBe(true);
+			} finally {
+				void broker.stop();
+			}
+		});
+
+		it("absence of workflowFilter preserves the original collab-only behavior (back-compat)", () => {
+			const broker = newBroker();
+			try {
+				insertCaptureDiagnostic(broker.db, row({ id: "ca", wf: "wf_a", createdAt: "2026-05-14T10:00:00.000Z" }));
+				insertCaptureDiagnostic(broker.db, row({ id: "cb", wf: "wf_b", createdAt: "2026-05-14T10:01:00.000Z" }));
+				const rows = listCaptureDiagnosticsByCollab(broker.db, "c1", 50);
+				expect(rows.map((r) => r.captureId).sort()).toEqual(["ca", "cb"]);
+			} finally {
+				void broker.stop();
+			}
+		});
+	});
 });
