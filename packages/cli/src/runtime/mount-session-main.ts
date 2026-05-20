@@ -35,6 +35,12 @@ export function createMountSessionRuntime(input: {
 	claimId: string;
 	secret: string;
 	broker: BrokerRuntime;
+	/**
+	 * Extra args forwarded to the visible agent spawn (codex/claude). Wired
+	 * into createInteractiveSessionForTarget only — createProviderForTarget
+	 * (the non-visible relay/companion side) is unaffected.
+	 */
+	passthroughArgs?: string[];
 	createProvider?: typeof createProviderForTarget;
 	createInteractiveSession?: typeof createInteractiveSessionForTarget;
 	createLiveSession?: typeof createLiveSessionRuntime;
@@ -49,6 +55,7 @@ export function createMountSessionRuntime(input: {
 				target: input.target,
 				cwd: input.workspaceRoot,
 				stdout: process.stdout,
+				passthroughArgs: input.passthroughArgs ?? [],
 			});
 
 			let ownerRefreshTimer: ReturnType<typeof setInterval> | null = null;

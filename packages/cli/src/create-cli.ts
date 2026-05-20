@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { Command } from "commander";
-import { openDatabase } from "@ai-whisper/broker";
+import { waitForBrokerReady } from "./runtime/wait-for-broker-ready.js";
 import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
 import { runCollabRecover } from "./commands/collab/recover.js";
@@ -14,10 +14,7 @@ import {
 import { runCollabStatus } from "./commands/collab/status.js";
 import { runCollabStop } from "./commands/collab/stop.js";
 import { runCollabTell } from "./commands/collab/tell.js";
-import {
-	assessBrokerDaemon,
-	spawnBrokerDaemon,
-} from "./runtime/broker-daemon.js";
+import { spawnBrokerDaemon } from "./runtime/broker-daemon.js";
 import {
 	chooseLaunchMode,
 	detectTmux,
@@ -31,6 +28,7 @@ import { runWorkflowInspect } from "./commands/workflow/inspect.js";
 import { runWorkflowResume } from "./commands/workflow/resume.js";
 import { runWorkflowCancel } from "./commands/workflow/cancel.js";
 import { runWorkflowTypes } from "./commands/workflow/types.js";
+import { runSkillInstall } from "./commands/skill/install.js";
 import { connectToWorkspaceBroker } from "./runtime/broker-connect.js";
 import { CollabResolverError } from "./runtime/collab-resolver.js";
 
@@ -91,32 +89,8 @@ export function createCli(): Command {
 				isPortFreeOs: (port: number) => isPortFree(port),
 				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
 					spawnBrokerDaemon(sqlitePath, host, port, collabId),
-				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
-					const start = Date.now();
-					const delayMs = 100;
-					while (Date.now() - start < timeoutMs) {
-						const db = openDatabase(getSharedSqlitePath());
-						const row = db
-							.prepare(
-								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
-							)
-							.get(collabId) as { pid: number | null } | undefined;
-						db.close();
-						const pid = row?.pid ?? 0;
-						if (pid > 0) {
-							const health = await assessBrokerDaemon({
-								host,
-								port,
-								pid,
-							});
-							if (health.ok) return true;
-						}
-						await new Promise<void>((resolve) =>
-							setTimeout(resolve, delayMs),
-						);
-					}
-					return false;
-				},
+				waitForReady: ({ host, port, collabId, timeoutMs }) =>
+					waitForBrokerReady({ host, port, collabId, timeoutMs }),
 				signalProcess: (pid, signal) => {
 					try {
 						process.kill(pid, signal);
@@ -148,9 +122,7 @@ export function createCli(): Command {
 				`Collab started: ${r.collabId} (launch: ${launchMode})`,
 			);
 			if (launchMode === "none") {
-				console.log(
-					"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
-				);
+				console.log("Collab started (no-launch mode).");
 			}
 			if (launchMode === "tmux" && !attachTmux) {
 				const session = `whisper-${r.collabId}`;
@@ -164,10 +136,12 @@ export function createCli(): Command {
 		.command("status")
 		.description("Show current collaboration status")
 		.option("--collab <id>", "Inspect a specific collab id (defaults to the active collab for cwd)")
-		.action((opts: { collab?: string }) => {
+		.option("--json", "Emit machine-readable JSON instead of text")
+		.action((opts: { collab?: string; json?: boolean }) => {
 			const output = runCollabStatus({
 				cwd: process.cwd(),
 				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+				...(opts.json ? { json: true } : {}),
 			});
 			console.log(output);
 		});
@@ -229,32 +203,8 @@ export function createCli(): Command {
 				isPortFreeOs: (port: number) => isPortFree(port),
 				spawnBroker: ({ collabId, host, port, sqlitePath }) =>
 					spawnBrokerDaemon(sqlitePath, host, port, collabId),
-				waitForReady: async ({ host, port, collabId, timeoutMs }) => {
-					const start = Date.now();
-					const delayMs = 100;
-					while (Date.now() - start < timeoutMs) {
-						const db = openDatabase(getSharedSqlitePath());
-						const row = db
-							.prepare(
-								"SELECT pid FROM broker_daemon WHERE collab_id = ?",
-							)
-							.get(collabId) as { pid: number | null } | undefined;
-						db.close();
-						const pid = row?.pid ?? 0;
-						if (pid > 0) {
-							const health = await assessBrokerDaemon({
-								host,
-								port,
-								pid,
-							});
-							if (health.ok) return true;
-						}
-						await new Promise<void>((resolve) =>
-							setTimeout(resolve, delayMs),
-						);
-					}
-					return false;
-				},
+				waitForReady: ({ host, port, collabId, timeoutMs }) =>
+					waitForBrokerReady({ host, port, collabId, timeoutMs }),
 				signalProcess: (pid, signal) => {
 					try {
 						process.kill(pid, signal);
@@ -287,16 +237,27 @@ export function createCli(): Command {
 		.command("mount")
 		.description("Mount the current terminal as the managed session surface for a role")
 		.argument("<agent>", "Target agent: codex or claude")
+		.argument(
+			"[passthroughArgs...]",
+			"Args forwarded after `--` to the agent binary spawn (e.g. `mount codex -- --full-auto`)",
+		)
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--collab <id>", "Target a specific collab id (defaults to the active collab for cwd)")
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { collab?: string }) => {
-			await runCollabMount({
-				workspaceRoot: opts.workspace,
-				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
-				target,
-				now: new Date().toISOString(),
-			});
-		});
+		.action(
+			async (
+				target: "codex" | "claude",
+				passthroughArgs: string[],
+				opts: WorkspaceOpts & { collab?: string },
+			) => {
+				await runCollabMount({
+					workspaceRoot: opts.workspace,
+					...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+					target,
+					passthroughArgs,
+					now: new Date().toISOString(),
+				});
+			},
+		);
 
 	collab
 		.command("inspect")
@@ -418,16 +379,16 @@ export function createCli(): Command {
 		.description("Start a new workflow")
 		.requiredOption("--type <type>", "Workflow type (e.g. spec-driven-development)")
 		.requiredOption("--spec <path>", "Spec file path")
-		.requiredOption("--implementer <agent>", "Implementer agent: claude or codex")
-		.requiredOption("--reviewer <agent>", "Reviewer agent: claude or codex")
+		.option("--implementer <agent>", "Implementer agent: claude or codex (defaults to the workflow type's defaultImplementer)")
+		.option("--reviewer <agent>", "Reviewer agent: claude or codex (defaults to the workflow type's defaultReviewer)")
 		.option("--name <name>", "Optional workflow display name")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(
 			async (opts: WorkspaceOpts & {
 				type: string;
 				spec: string;
-				implementer: "claude" | "codex";
-				reviewer: "claude" | "codex";
+				implementer?: "claude" | "codex";
+				reviewer?: "claude" | "codex";
 				name?: string;
 			}) => {
 				const { broker, collabId } = await connectToWorkspaceBroker({ cwd: opts.workspace });
@@ -437,8 +398,8 @@ export function createCli(): Command {
 						collabId,
 						workflowType: opts.type,
 						specPath: opts.spec,
-						implementer: opts.implementer,
-						reviewer: opts.reviewer,
+						...(opts.implementer ? { implementer: opts.implementer } : {}),
+						...(opts.reviewer ? { reviewer: opts.reviewer } : {}),
 						...(opts.name ? { name: opts.name } : {}),
 						now: new Date().toISOString(),
 					});
@@ -523,6 +484,30 @@ export function createCli(): Command {
 				console.log(t);
 			}
 		});
+
+	const skill = cli.command("skill").description("Manage bundled agent skills");
+
+	skill
+		.command("install")
+		.description(
+			"Install the bundled ai-whisper skills into your agent skill directories",
+		)
+		.option("--target <target>", "claude | codex | all (default: all)", "all")
+		.option("--force", "Overwrite existing skill destinations")
+		.action(
+			async (opts: {
+				target: "claude" | "codex" | "all";
+				force?: boolean;
+			}) => {
+				const result = await runSkillInstall({
+					target: opts.target,
+					...(opts.force ? { force: true } : {}),
+				});
+				for (const p of result.installedAt) {
+					console.log(`Installed: ${p}`);
+				}
+			},
+		);
 
 	return cli;
 }

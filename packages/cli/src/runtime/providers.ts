@@ -58,8 +58,15 @@ export function createInteractiveSessionForTarget(input: {
 	cwd: string;
 	stdout: NodeJS.WritableStream;
 	replyTimeoutMs?: number;
+	/**
+	 * Extra args forwarded after `--` to the agent binary (e.g. `--full-auto`
+	 * for codex). Appended verbatim to the base interactive exec args; no
+	 * shell escaping — they land directly in the spawn's argv.
+	 */
+	passthroughArgs?: string[];
 }): InteractiveSessionController {
-	const execArgs = getInteractiveSessionExecArgsForTarget(input.target);
+	const baseExecArgs = getInteractiveSessionExecArgsForTarget(input.target);
+	const execArgs = [...baseExecArgs, ...(input.passthroughArgs ?? [])];
 	if (input.target === "codex") {
 		return createCodexLiveSession({
 			config: {

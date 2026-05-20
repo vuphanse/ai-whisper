@@ -1,0 +1,167 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openDatabase } from "@ai-whisper/broker";
+import { runCollabMount } from "../packages/cli/src/commands/collab/mount.ts";
+import { getSharedSqlitePath } from "../packages/cli/src/runtime/state-root.ts";
+import { runCollabStart } from "../packages/cli/src/commands/collab/start.ts";
+
+function tempStateRoot(): string {
+	const dir = mkdtempSync(join(tmpdir(), "aiw-mount-auto-"));
+	return dir;
+}
+
+describe("runCollabMount auto-create", () => {
+	let prevStateRoot: string | undefined;
+
+	beforeEach(() => {
+		prevStateRoot = process.env.AI_WHISPER_STATE_ROOT;
+	});
+
+	afterEach(() => {
+		if (prevStateRoot === undefined) {
+			delete process.env.AI_WHISPER_STATE_ROOT;
+		} else {
+			process.env.AI_WHISPER_STATE_ROOT = prevStateRoot;
+		}
+	});
+
+	it("creates a new collab in the empty workspace and binds the agent", async () => {
+		const stateRoot = tempStateRoot();
+		process.env.AI_WHISPER_STATE_ROOT = stateRoot;
+		const workspaceRoot = join(stateRoot, "ws");
+		mkdirSync(workspaceRoot, { recursive: true });
+
+		const fakeRuntime = { start: vi.fn(async () => undefined) };
+
+		await runCollabMount({
+			workspaceRoot,
+			target: "codex",
+			now: new Date().toISOString(),
+			resolveCurrentTty: () => "/dev/null",
+			createRuntime: () => fakeRuntime as never,
+			assessBroker: async () =>
+				({
+					pidAlive: true,
+					httpReachable: true,
+					ok: true,
+				}) as never,
+		});
+
+		const db = openDatabase(getSharedSqlitePath());
+		const row = db
+			.prepare("SELECT collab_id, display_name FROM collab")
+			.get() as { collab_id: string; display_name: string };
+		db.close();
+		expect(row).toBeDefined();
+		expect(row.display_name).toBe("ws");
+		expect(fakeRuntime.start).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses the existing collab when one already exists for cwd (no duplicate created)", async () => {
+		const stateRoot = tempStateRoot();
+		process.env.AI_WHISPER_STATE_ROOT = stateRoot;
+		const workspaceRoot = join(stateRoot, "ws2");
+		mkdirSync(workspaceRoot, { recursive: true });
+
+		const fakeRuntime = { start: vi.fn(async () => undefined) };
+
+		for (const target of ["codex", "claude"] as const) {
+			await runCollabMount({
+				workspaceRoot,
+				target,
+				now: new Date().toISOString(),
+				resolveCurrentTty: () => "/dev/null",
+				createRuntime: () => fakeRuntime as never,
+				assessBroker: async () =>
+					({
+						pidAlive: true,
+						httpReachable: true,
+						ok: true,
+					}) as never,
+			});
+		}
+
+		const db = openDatabase(getSharedSqlitePath());
+		const count = (
+			db.prepare("SELECT COUNT(*) AS c FROM collab").get() as {
+				c: number;
+			}
+		).c;
+		db.close();
+		expect(count).toBe(1);
+		expect(fakeRuntime.start).toHaveBeenCalledTimes(2);
+	});
+
+	it("auto-create race: tolerates a parallel mount creating the collab first", async () => {
+		const stateRoot = tempStateRoot();
+		process.env.AI_WHISPER_STATE_ROOT = stateRoot;
+		const workspaceRoot = join(stateRoot, "ws3");
+		mkdirSync(workspaceRoot, { recursive: true });
+
+		const fakeRuntime = { start: vi.fn(async () => undefined) };
+
+		// Stand-in for a parallel mount: when our mount's create branch
+		// calls runStartFn, it will first invoke the real `runCollabStart`
+		// to insert a "parallel-winner" collab row, then immediately
+		// re-invoke it (now expected to throw "active collab already
+		// exists"). The mount should swallow that and re-resolve to the
+		// parallel-created collab id.
+		let parallelCollabId: string | undefined;
+		const runStartFn: typeof runCollabStart = async (opts) => {
+			if (parallelCollabId === undefined) {
+				// "Parallel" terminal wins the race: invoke the real start.
+				const parallelOpts = {
+					...opts,
+					spawnBroker: (input: {
+						collabId: string;
+						host: string;
+						port: number;
+						sqlitePath: string;
+					}) => {
+						const db = openDatabase(getSharedSqlitePath());
+						db.prepare(
+							"UPDATE broker_daemon SET pid = ?, last_heartbeat_at = ? WHERE collab_id = ?",
+						).run(91234, new Date().toISOString(), input.collabId);
+						db.close();
+						return 91234;
+					},
+					waitForReady: async () => true,
+					isPortFreeOs: async () => true,
+					signalProcess: () => {},
+				};
+				const r = await runCollabStart(parallelOpts);
+				parallelCollabId = r.collabId;
+				// Now run the original (slow) start — which will see the
+				// active collab and throw "active collab already exists".
+				return runCollabStart(opts);
+			}
+			throw new Error("unexpected second invocation");
+		};
+
+		await runCollabMount({
+			workspaceRoot,
+			target: "codex",
+			now: new Date().toISOString(),
+			resolveCurrentTty: () => "/dev/null",
+			createRuntime: () => fakeRuntime as never,
+			assessBroker: async () =>
+				({
+					pidAlive: true,
+					httpReachable: true,
+					ok: true,
+				}) as never,
+			runStartFn,
+		});
+
+		const db = openDatabase(getSharedSqlitePath());
+		const rows = db
+			.prepare("SELECT collab_id FROM collab")
+			.all() as Array<{ collab_id: string }>;
+		db.close();
+		expect(rows.length).toBe(1);
+		expect(rows[0]?.collab_id).toBe(parallelCollabId);
+		expect(fakeRuntime.start).toHaveBeenCalledTimes(1);
+	});
+});

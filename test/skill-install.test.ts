@@ -1,0 +1,130 @@
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { runSkillInstall } from "../packages/cli/src/commands/skill/install.ts";
+
+function sandbox() {
+	const home = mkdtempSync(join(tmpdir(), "aiw-skill-home-"));
+	const cliDist = mkdtempSync(join(tmpdir(), "aiw-skill-dist-"));
+	const skillsSrc = join(cliDist, "skills", "ai-whisper-sdd");
+	mkdirSync(skillsSrc, { recursive: true });
+	writeFileSync(join(skillsSrc, "SKILL.md"), "---\nname: ai-whisper-sdd\n---\nbody");
+	return { home, cliDist };
+}
+
+describe("runSkillInstall", () => {
+	it("--target=all copies to both ~/.claude/skills/ and ~/.codex/skills/", async () => {
+		const s = sandbox();
+		const result = await runSkillInstall({
+			target: "all",
+			fakeHome: s.home,
+			bundledSkillsDir: join(s.cliDist, "skills"),
+		});
+		expect(result.installedAt).toContain(
+			join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+		);
+		expect(result.installedAt).toContain(
+			join(s.home, ".codex", "skills", "ai-whisper-sdd", "SKILL.md"),
+		);
+		expect(
+			readFileSync(
+				join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+				"utf8",
+			),
+		).toContain("ai-whisper-sdd");
+	});
+
+	it("--target=claude copies to only ~/.claude/skills/", async () => {
+		const s = sandbox();
+		await runSkillInstall({
+			target: "claude",
+			fakeHome: s.home,
+			bundledSkillsDir: join(s.cliDist, "skills"),
+		});
+		expect(
+			existsSync(join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md")),
+		).toBe(true);
+		expect(existsSync(join(s.home, ".codex"))).toBe(false);
+	});
+
+	it("--target=codex copies to only ~/.codex/skills/", async () => {
+		const s = sandbox();
+		await runSkillInstall({
+			target: "codex",
+			fakeHome: s.home,
+			bundledSkillsDir: join(s.cliDist, "skills"),
+		});
+		expect(
+			existsSync(join(s.home, ".codex", "skills", "ai-whisper-sdd", "SKILL.md")),
+		).toBe(true);
+		expect(existsSync(join(s.home, ".claude"))).toBe(false);
+	});
+
+	it("without --force, existing destinations are NOT overwritten and the command reports the conflict", async () => {
+		const s = sandbox();
+		mkdirSync(join(s.home, ".claude", "skills", "ai-whisper-sdd"), { recursive: true });
+		writeFileSync(
+			join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+			"EXISTING",
+		);
+		await expect(
+			runSkillInstall({
+				target: "claude",
+				fakeHome: s.home,
+				bundledSkillsDir: join(s.cliDist, "skills"),
+				force: false,
+			}),
+		).rejects.toThrow(/already exists|--force/);
+		expect(
+			readFileSync(
+				join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+				"utf8",
+			),
+		).toBe("EXISTING");
+	});
+
+	it("--force overwrites existing destinations", async () => {
+		const s = sandbox();
+		mkdirSync(join(s.home, ".claude", "skills", "ai-whisper-sdd"), { recursive: true });
+		writeFileSync(
+			join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+			"EXISTING",
+		);
+		await runSkillInstall({
+			target: "claude",
+			fakeHome: s.home,
+			bundledSkillsDir: join(s.cliDist, "skills"),
+			force: true,
+		});
+		expect(
+			readFileSync(
+				join(s.home, ".claude", "skills", "ai-whisper-sdd", "SKILL.md"),
+				"utf8",
+			),
+		).toContain("ai-whisper-sdd");
+	});
+
+	it("missing bundled-skills directory errors with a pointer to `pnpm build`", async () => {
+		await expect(
+			runSkillInstall({
+				target: "all",
+				fakeHome: "/tmp/aiw-irrelevant",
+				bundledSkillsDir: "/tmp/aiw-nonexistent-skills",
+			}),
+		).rejects.toThrow(/pnpm build|build/i);
+	});
+
+	it("empty bundled-skills directory errors clearly", async () => {
+		const home = mkdtempSync(join(tmpdir(), "aiw-skill-home-empty-"));
+		const cliDist = mkdtempSync(join(tmpdir(), "aiw-skill-dist-empty-"));
+		mkdirSync(join(cliDist, "skills"), { recursive: true });
+		await expect(
+			runSkillInstall({
+				target: "all",
+				fakeHome: home,
+				bundledSkillsDir: join(cliDist, "skills"),
+			}),
+		).rejects.toThrow(/no skills/i);
+	});
+});
