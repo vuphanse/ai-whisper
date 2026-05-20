@@ -922,9 +922,22 @@ type LogDbRow = {
 // that strands a row's later handback/verdict updates. It returns a fresh
 // bounded tail SNAPSHOT (newest `limit` rows, ascending); the consumer
 // re-reads each poll and merges by handoffId so in-place updates are seen.
+// A single collab can accumulate handoffs from multiple workflow runs over
+// time (and from interleaved manual relays). When the caller is scoped to one
+// run, post-LIMIT filtering would let a noisier sibling run starve the
+// selected run's tail — the filter has to be at the SQL level so LIMIT
+// applies AFTER the WHERE narrows the set.
+export type RelayHandoffWorkflowFilter =
+	| { workflowId: string }
+	| { manualOnly: true };
+
 export function listRelayHandoffs(
 	db: Database.Database,
-	input: { collabId: string; limit?: number },
+	input: {
+		collabId: string;
+		limit?: number;
+		workflowFilter?: RelayHandoffWorkflowFilter;
+	},
 ): RelayHandoffLogRow[] {
 	const cols = `handoff_id, created_at, collab_id, sender_agent, target_agent, status,
 		capture_status, chain_id, round_number, handoff_step, workflow_id,
@@ -934,21 +947,31 @@ export function listRelayHandoffs(
 		typeof input.limit === "number" && input.limit > 0
 			? Math.floor(input.limit)
 			: null;
+	const filter = input.workflowFilter;
+	const filterClause =
+		filter === undefined
+			? ""
+			: "workflowId" in filter
+				? " AND workflow_id = ?"
+				: " AND workflow_id IS NULL";
+	const filterArgs: string[] =
+		filter !== undefined && "workflowId" in filter ? [filter.workflowId] : [];
 	// Fetch the NEWEST `limit` rows (DESC + LIMIT), then present ascending.
+	const baseWhere = `WHERE collab_id = ?${filterClause}`;
 	const rows = (
 		limit !== null
 			? db
 					.prepare(
-						`SELECT ${cols} FROM relay_handoff WHERE collab_id = ?
+						`SELECT ${cols} FROM relay_handoff ${baseWhere}
 						 ORDER BY created_at DESC, handoff_id DESC LIMIT ?`,
 					)
-					.all(input.collabId, limit)
+					.all(input.collabId, ...filterArgs, limit)
 			: db
 					.prepare(
-						`SELECT ${cols} FROM relay_handoff WHERE collab_id = ?
+						`SELECT ${cols} FROM relay_handoff ${baseWhere}
 						 ORDER BY created_at DESC, handoff_id DESC`,
 					)
-					.all(input.collabId)
+					.all(input.collabId, ...filterArgs)
 	) as LogDbRow[];
 	rows.reverse(); // newest-N DESC → ascending for display
 

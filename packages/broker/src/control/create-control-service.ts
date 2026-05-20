@@ -126,6 +126,7 @@ import {
 	cleanupOrchestrationOnShutdownTxn,
 	listRelayHandoffs as listRelayHandoffsRepo,
 	type RelayHandoffLogRow,
+	type RelayHandoffWorkflowFilter,
 } from "../storage/repositories/relay-handoff-repository.js";
 import {
 	listActiveCollabSummaries as listActiveCollabSummariesRepo,
@@ -1055,10 +1056,14 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		listRelayHandoffs(
 			collabId: string,
 			limit?: number,
+			opts?: { workflowFilter?: RelayHandoffWorkflowFilter },
 		): RelayHandoffLogRow[] {
 			return listRelayHandoffsRepo(db, {
 				collabId,
 				...(typeof limit === "number" ? { limit } : {}),
+				...(opts?.workflowFilter !== undefined
+					? { workflowFilter: opts.workflowFilter }
+					: {}),
 			});
 		},
 		listActiveCollabSummaries(sinceMs: number, now?: string): CollabSummary[] {
