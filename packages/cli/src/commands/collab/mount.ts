@@ -42,9 +42,6 @@ export function recordMountedSession(input: {
 	}
 }
 
-const MONITOR_WAIT_TIMEOUT_MS = 10_000;
-const MONITOR_POLL_INTERVAL_MS = 250;
-
 export async function runCollabMount(input: {
 	workspaceRoot: string;
 	collabIdOverride?: string;
@@ -53,18 +50,7 @@ export async function runCollabMount(input: {
 	resolveCurrentTty?: () => string;
 	createRuntime?: typeof createMountSessionRuntime;
 	assessBroker?: typeof assessBrokerDaemon;
-	sleep?: (ms: number) => Promise<void>;
-	monitorWaitTimeoutMs?: number;
-	monitorPollIntervalMs?: number;
 }) {
-	const sleep =
-		input.sleep ??
-		((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-	const monitorWaitTimeoutMs =
-		input.monitorWaitTimeoutMs ?? MONITOR_WAIT_TIMEOUT_MS;
-	const monitorPollIntervalMs =
-		input.monitorPollIntervalMs ?? MONITOR_POLL_INTERVAL_MS;
-
 	const db = openDatabase(getSharedSqlitePath());
 	let resolved;
 	try {
@@ -121,17 +107,6 @@ export async function runCollabMount(input: {
 	});
 	let brokerHandedOff = false;
 	try {
-		let elapsed = 0;
-		while (!broker.control.isRelayMonitorConnected(resolved.collabId)) {
-			if (elapsed >= monitorWaitTimeoutMs) {
-				throw new Error(
-					"Relay monitor not connected. Run `whisper collab relay-monitor` in a separate terminal first.",
-				);
-			}
-			await sleep(monitorPollIntervalMs);
-			elapsed += monitorPollIntervalMs;
-		}
-
 		const current = broker.control
 			.listSessionBindings(resolved.collabId)
 			.find((binding) => binding.agentType === input.target);
