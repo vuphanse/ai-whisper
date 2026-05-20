@@ -35,7 +35,8 @@
 		"ink-testing-library": "^4.0.0"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.json",
+		"build": "tsc -p tsconfig.json && node scripts/copy-skills.mjs",
 		"typecheck": "tsc -b --emitDeclarationOnly"
-	}
+	},
+	"files": ["dist", "skills"]
 }
