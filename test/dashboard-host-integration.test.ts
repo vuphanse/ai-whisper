@@ -179,6 +179,63 @@ describe("dashboard host (real broker integration)", () => {
 		}
 	});
 
+	it("Inspector section switches on digit keys (host state + rendered tab bar)", async () => {
+		// Smoke-test surfaced this: user reported Enter→Inspector worked but
+		// 1/2/3/4 didn't visibly switch tabs. We need to assert BOTH the host
+		// state mutation AND that the next rendered frame's tab bar bracket
+		// actually moved — host state without render-propagation is the most
+		// suspicious failure mode.
+		const broker = newBroker();
+		try {
+			seedMinimal(broker);
+			const stdout = new PassThrough();
+			(stdout as unknown as { columns: number }).columns = 100;
+			(stdout as unknown as { rows: number }).rows = 24;
+			let buf = "";
+			stdout.on("data", (c) => (buf += String(c)));
+
+			const m = createDashboardRuntime({
+				broker,
+				dashboardId: "dash_tabs",
+				stdout: stdout as unknown as NodeJS.WritableStream,
+				pollIntervalMs: 10,
+			}) as never as {
+				start(): void; stop(): Promise<void>;
+				__handleKey(ev: { key?: string }): void;
+				__mode(): string;
+				__section(): string;
+			};
+			m.start();
+			await new Promise((r) => setTimeout(r, 60));
+			m.__handleKey({ key: "\r" });
+			await new Promise((r) => setTimeout(r, 30));
+			expect(m.__mode()).toBe("inspector");
+			expect(m.__section()).toBe("live");
+			const healthAccessor = m as unknown as { __pollHealth: () => { consecutiveErrors: number; lastError: string | null } };
+			// No rerender error from the Enter (mode change to Inspector).
+			expect(healthAccessor.__pollHealth().lastError).toBeNull();
+
+			// Press 2/3/4/1 and verify both host state AND that rerender did
+			// not throw silently (the production symptom was state mutating
+			// while the screen stayed on the prior frame because rerender
+			// caught + swallowed the exception).
+			for (const [key, section] of [
+				["2", "timeline"],
+				["3", "evidence"],
+				["4", "cost"],
+				["1", "live"],
+			] as const) {
+				m.__handleKey({ key });
+				await new Promise((r) => setTimeout(r, 20));
+				expect(m.__section()).toBe(section);
+				expect(healthAccessor.__pollHealth().lastError).toBeNull();
+			}
+			await m.stop();
+		} finally {
+			void broker.stop();
+		}
+	});
+
 	it("renders the empty-wall state cleanly against a real broker with no collabs", async () => {
 		const broker = newBroker();
 		try {

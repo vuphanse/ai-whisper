@@ -294,8 +294,12 @@ export function createDashboardRuntime(input: {
 			ink.rerender(
 				createElement(DashboardApp, { node: node(), onKey: handleKey }),
 			);
-		} catch {
-			/* ignore */
+		} catch (err) {
+			// Surface rerender failures through pollHealth instead of swallowing
+			// them — a silent catch here masked an Inspector section-change bug
+			// that left the previous frame on screen while host state moved on.
+			consecutivePollErrors += 1;
+			lastPollError = err instanceof Error ? err.message : String(err);
 		}
 	}
 
@@ -400,6 +404,7 @@ export function createDashboardRuntime(input: {
 			return loopDone;
 		},
 		__mode: () => mode,
+		__section: () => inspectorSection,
 		__handleKey: handleKey,
 		__viewport: viewport,
 		__wallSelected: () => wallSelected,

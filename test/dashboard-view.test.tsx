@@ -102,4 +102,25 @@ describe("Inspector", () => {
 		const { lastFrame } = render(<Inspector state={inspState()} section="live" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
 		expect(lastFrame()!).toContain("progress │");
 	});
+
+	it("tab bar bracket follows the `section` prop (live/timeline/evidence/cost)", () => {
+		// Regression smoke: user reported the wall+Inspector rendered fine but
+		// pressing 2/3/4 did not visibly switch the tab. Host state was proven
+		// to mutate correctly via __section() — verify the Inspector COMPONENT
+		// also re-renders the bracketed indicator for every section, so the
+		// bug (if any) is isolated to the host/Ink rerender layer.
+		const baseProps = { state: inspState(), viewport: vp, cols: 100, rows: 24, label: "oauth", workflowType: "spec-driven-development" as const };
+		const liveFrame = render(<Inspector {...baseProps} section="live" />).lastFrame()!;
+		expect(liveFrame).toContain("[1 Live]");
+		expect(liveFrame).toContain(" 2 Timeline ");
+		expect(liveFrame).toContain(" 3 Evidence ");
+		expect(liveFrame).toContain(" 4 Cost ");
+		const timelineFrame = render(<Inspector {...baseProps} section="timeline" />).lastFrame()!;
+		expect(timelineFrame).toContain(" 1 Live ");
+		expect(timelineFrame).toContain("[2 Timeline]");
+		const evidenceFrame = render(<Inspector {...baseProps} section="evidence" />).lastFrame()!;
+		expect(evidenceFrame).toContain("[3 Evidence]");
+		const costFrame = render(<Inspector {...baseProps} section="cost" />).lastFrame()!;
+		expect(costFrame).toContain("[4 Cost]");
+	});
 });
