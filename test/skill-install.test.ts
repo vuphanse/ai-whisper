@@ -115,6 +115,19 @@ describe("runSkillInstall", () => {
 		).rejects.toThrow(/pnpm build|build/i);
 	});
 
+	it("invalid --target value is rejected at runtime (not silently routed to .codex)", async () => {
+		// homeForTarget's ternary maps non-"claude" to .codex by default, so
+		// before this guard `--target=banana` would silently install into
+		// ~/.codex/skills. Reject at runtime regardless of CLI-layer choices().
+		await expect(
+			runSkillInstall({
+				target: "banana" as never,
+				fakeHome: "/tmp/aiw-skill-typo-irrelevant",
+				bundledSkillsDir: "/tmp/aiw-skill-typo-irrelevant-src",
+			}),
+		).rejects.toThrow(/invalid --target.*claude.*codex.*all/i);
+	});
+
 	it("empty bundled-skills directory errors clearly", async () => {
 		const home = mkdtempSync(join(tmpdir(), "aiw-skill-home-empty-"));
 		const cliDist = mkdtempSync(join(tmpdir(), "aiw-skill-dist-empty-"));

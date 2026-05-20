@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { waitForBrokerReady } from "./runtime/wait-for-broker-ready.js";
 import { runCollabMount } from "./commands/collab/mount.js";
 import { runCollabInspect } from "./commands/collab/inspect.js";
@@ -492,7 +492,11 @@ export function createCli(): Command {
 		.description(
 			"Install the bundled ai-whisper skills into your agent skill directories",
 		)
-		.option("--target <target>", "claude | codex | all (default: all)", "all")
+		.addOption(
+			new Option("--target <target>", "Agent install target")
+				.choices(["claude", "codex", "all"])
+				.default("all"),
+		)
 		.option("--force", "Overwrite existing skill destinations")
 		.action(
 			async (opts: {

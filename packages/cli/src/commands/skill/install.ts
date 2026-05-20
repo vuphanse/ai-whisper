@@ -29,9 +29,20 @@ function homeForTarget(target: "claude" | "codex", fakeHome?: string): string {
 	return path.join(home, target === "claude" ? ".claude" : ".codex", "skills");
 }
 
+const VALID_TARGETS: ReadonlySet<SkillInstallTarget> = new Set(["claude", "codex", "all"]);
+
 export async function runSkillInstall(
 	input: SkillInstallInput,
 ): Promise<SkillInstallResult> {
+	if (!VALID_TARGETS.has(input.target)) {
+		// Catch typos at runtime even when the caller bypasses the CLI's
+		// `.choices()` validation (e.g., programmatic callers, tests). The
+		// homeForTarget ternary would otherwise silently route any non-"claude"
+		// string into ~/.codex/skills.
+		throw new Error(
+			`Invalid --target value "${String(input.target)}". Expected one of: claude, codex, all.`,
+		);
+	}
 	const bundledDir = input.bundledSkillsDir ?? defaultBundledSkillsDir();
 	try {
 		await stat(bundledDir);
