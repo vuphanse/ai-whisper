@@ -236,16 +236,27 @@ export function createCli(): Command {
 		.command("mount")
 		.description("Mount the current terminal as the managed session surface for a role")
 		.argument("<agent>", "Target agent: codex or claude")
+		.argument(
+			"[passthroughArgs...]",
+			"Args forwarded after `--` to the agent binary spawn (e.g. `mount codex -- --full-auto`)",
+		)
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.option("--collab <id>", "Target a specific collab id (defaults to the active collab for cwd)")
-		.action(async (target: "codex" | "claude", opts: WorkspaceOpts & { collab?: string }) => {
-			await runCollabMount({
-				workspaceRoot: opts.workspace,
-				...(opts.collab ? { collabIdOverride: opts.collab } : {}),
-				target,
-				now: new Date().toISOString(),
-			});
-		});
+		.action(
+			async (
+				target: "codex" | "claude",
+				passthroughArgs: string[],
+				opts: WorkspaceOpts & { collab?: string },
+			) => {
+				await runCollabMount({
+					workspaceRoot: opts.workspace,
+					...(opts.collab ? { collabIdOverride: opts.collab } : {}),
+					target,
+					passthroughArgs,
+					now: new Date().toISOString(),
+				});
+			},
+		);
 
 	collab
 		.command("inspect")

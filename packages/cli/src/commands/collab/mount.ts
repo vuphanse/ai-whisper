@@ -61,6 +61,14 @@ export async function runCollabMount(input: {
 	workspaceRoot: string;
 	collabIdOverride?: string;
 	target: "codex" | "claude";
+	/**
+	 * Args forwarded after `--` to the visible agent binary spawn
+	 * (e.g. `mount codex -- --full-auto --model gpt-5`). Threaded to
+	 * createInteractiveSessionForTarget only — the relay/companion provider
+	 * side is unaffected. Defaults to []. No shell escaping; the CLI relies
+	 * on commander 13's variadic positional to yield a clean string[].
+	 */
+	passthroughArgs?: string[];
 	now: string;
 	resolveCurrentTty?: () => string;
 	createRuntime?: typeof createMountSessionRuntime;
@@ -216,6 +224,7 @@ export async function runCollabMount(input: {
 			claimId: claim.claimId,
 			secret: claim.secret,
 			broker,
+			passthroughArgs: input.passthroughArgs ?? [],
 		});
 
 		brokerHandedOff = true;
