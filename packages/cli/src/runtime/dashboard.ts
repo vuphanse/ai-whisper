@@ -361,12 +361,13 @@ export function createDashboardRuntime(input: {
 		rerender();
 	}
 
+	// The dashboard is observe-only and aggregates across ALL collabs — it is
+	// NOT attached to a specific collab the way relay-monitor is. We do NOT
+	// call registerRelayMonitor / heartbeatRelayMonitor here: those APIs
+	// validate the collabId against the `collab` table and would throw
+	// "Unknown collab: dashboard" since no such row exists. The dashboardId
+	// is still kept as an instance handle for logs + double-start guarding.
 	function poll() {
-		input.broker.control.heartbeatRelayMonitor({
-			collabId: "dashboard",
-			monitorId: input.dashboardId,
-			now: new Date().toISOString(),
-		});
 		rerender();
 		consecutivePollErrors = 0;
 		lastPollError = null;
@@ -376,11 +377,6 @@ export function createDashboardRuntime(input: {
 		start() {
 			if (started) return;
 			started = true;
-			input.broker.control.registerRelayMonitor({
-				collabId: "dashboard",
-				monitorId: input.dashboardId,
-				now: new Date().toISOString(),
-			});
 			void (async () => {
 				while (!stopping) {
 					try {

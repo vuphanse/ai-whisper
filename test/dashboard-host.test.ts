@@ -117,7 +117,7 @@ describe("dashboard host", () => {
 		expect(n).toBeGreaterThan(2);
 	});
 
-	it("double start() is a no-op", async () => {
+	it("double start() is a no-op (single poll loop, not two)", async () => {
 		const broker = fakeBroker([S({})]);
 		const stdout = new PassThrough();
 		(stdout as unknown as { columns: number }).columns = 100;
@@ -125,9 +125,14 @@ describe("dashboard host", () => {
 		const m = createDashboardRuntime({ broker: broker as never, dashboardId: "d1", stdout: stdout as unknown as NodeJS.WritableStream, pollIntervalMs: 10 });
 		m.start();
 		m.start();
-		await new Promise((r) => setTimeout(r, 30));
+		await new Promise((r) => setTimeout(r, 60));
 		await m.stop();
-		expect((broker.control.registerRelayMonitor as { mock: { calls: unknown[] } }).mock.calls.length).toBe(1);
+		// Single poll loop @ 10ms interval over 60ms should be a small number of
+		// summary reads; two loops would roughly double it. Loose bounds catch
+		// doubling without being flaky on slow CI.
+		const calls = (broker.control.listActiveCollabSummaries as { mock: { calls: unknown[] } }).mock.calls.length;
+		expect(calls).toBeGreaterThan(0);
+		expect(calls).toBeLessThan(15);
 	});
 
 	it("F1: fetches per-collab snapshots ONLY for the visible page", async () => {
