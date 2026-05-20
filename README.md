@@ -377,6 +377,37 @@ AI_WHISPER_IDLE_THRESHOLD_MS=30000
 
 When orchestrator is disabled (default), the collab uses the traditional manual relay workflow and no LLM calls are made by the broker daemon.
 
+## Daily flow (no-launch)
+
+Two terminals, one command each:
+
+```bash
+# Terminal A (claude's home):
+whisper collab mount claude -- --dangerously-skip-permissions
+
+# Terminal B (codex's home):
+whisper collab mount codex -- --full-auto
+```
+
+The first `mount` creates the collab + spins up the broker daemon for the workspace. The second discovers the existing collab and binds the other agent. No `collab start`, no `relay-monitor`, no separate kickoff terminal.
+
+To run a workflow (e.g., spec-driven-development), brainstorm a spec with the agents and then invoke the bundled skill from chat:
+
+- Claude: type `/` and pick `ai-whisper-sdd`, or just say *"run SDD on \<path\>"*
+- Codex: type `$` and pick `ai-whisper-sdd`, or natural phrasing as above
+
+The skill verifies readiness, kicks off the workflow, and exits. The dashboard (`whisper collab dashboard`) is the inspection surface during the run.
+
+## Required skills
+
+The bundled workflows (currently `spec-driven-development`; more later) rely on agent skills to verify, kick off, and report. Install them once after installing the CLI:
+
+```bash
+whisper skill install
+```
+
+This copies `ai-whisper-sdd` (and any future bundled skills) into both `~/.claude/skills/` and `~/.codex/skills/`. Re-run with `--force` after a CLI upgrade. Use `--target=claude` or `--target=codex` to install for only one agent.
+
 ### Autonomous workflows
 
 Multi-phase pipelines that drive both agents through a structured task. Today the only registered workflow type is `spec-driven-development`, which runs spec-refining → plan-writing → plan-execution → code-review.
