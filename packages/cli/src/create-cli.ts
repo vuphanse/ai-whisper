@@ -121,9 +121,7 @@ export function createCli(): Command {
 				`Collab started: ${r.collabId} (launch: ${launchMode})`,
 			);
 			if (launchMode === "none") {
-				console.log(
-					"Collab started (no-launch mode).\nNext: run \"whisper collab relay-monitor\" in a separate terminal before mounting providers.",
-				);
+				console.log("Collab started (no-launch mode).");
 			}
 			if (launchMode === "tmux" && !attachTmux) {
 				const session = `whisper-${r.collabId}`;
