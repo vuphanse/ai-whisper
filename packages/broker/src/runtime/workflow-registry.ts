@@ -19,12 +19,16 @@ export interface WorkflowDefinition {
 	displayName: string;
 	description: string;
 	phases: PhaseConfig[];
+	defaultImplementer?: "claude" | "codex";
+	defaultReviewer?: "claude" | "codex";
 }
 
 export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 	type: "spec-driven-development",
 	displayName: "Spec-Driven Development",
 	description: "Spec refining → plan writing → execution → code review",
+	defaultImplementer: "claude" as const,
+	defaultReviewer: "codex" as const,
 	phases: [
 		{
 			name: "spec-refining",
