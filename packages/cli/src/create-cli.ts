@@ -418,16 +418,16 @@ export function createCli(): Command {
 		.description("Start a new workflow")
 		.requiredOption("--type <type>", "Workflow type (e.g. spec-driven-development)")
 		.requiredOption("--spec <path>", "Spec file path")
-		.requiredOption("--implementer <agent>", "Implementer agent: claude or codex")
-		.requiredOption("--reviewer <agent>", "Reviewer agent: claude or codex")
+		.option("--implementer <agent>", "Implementer agent: claude or codex (defaults to the workflow type's defaultImplementer)")
+		.option("--reviewer <agent>", "Reviewer agent: claude or codex (defaults to the workflow type's defaultReviewer)")
 		.option("--name <name>", "Optional workflow display name")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(
 			async (opts: WorkspaceOpts & {
 				type: string;
 				spec: string;
-				implementer: "claude" | "codex";
-				reviewer: "claude" | "codex";
+				implementer?: "claude" | "codex";
+				reviewer?: "claude" | "codex";
 				name?: string;
 			}) => {
 				const { broker, collabId } = await connectToWorkspaceBroker({ cwd: opts.workspace });
@@ -437,8 +437,8 @@ export function createCli(): Command {
 						collabId,
 						workflowType: opts.type,
 						specPath: opts.spec,
-						implementer: opts.implementer,
-						reviewer: opts.reviewer,
+						...(opts.implementer ? { implementer: opts.implementer } : {}),
+						...(opts.reviewer ? { reviewer: opts.reviewer } : {}),
 						...(opts.name ? { name: opts.name } : {}),
 						now: new Date().toISOString(),
 					});
