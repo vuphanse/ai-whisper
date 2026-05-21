@@ -51,6 +51,10 @@ import {
 	upsertSessionBinding,
 } from "../storage/repositories/session-binding-repository.js";
 import {
+	listSessionAttachmentsByCollab,
+	type SessionAttachmentRecord,
+} from "../storage/repositories/session-attachment-repository.js";
+import {
 	insertSession,
 	getSession,
 	listSessionsForCollab as listSessions,
@@ -947,6 +951,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		listSessionBindings(collabId: string) {
 			return listSessionBindingsForCollab(db, collabId);
+		},
+		listSessionAttachments(collabId: string): SessionAttachmentRecord[] {
+			return listSessionAttachmentsByCollab(db, collabId);
 		},
 		resolveBoundSession(collabId: string, agentType: "codex" | "claude"): string {
 			const binding = getSessionBinding(db, collabId, agentType);
