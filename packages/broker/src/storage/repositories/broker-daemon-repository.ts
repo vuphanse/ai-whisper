@@ -8,6 +8,7 @@ export type BrokerDaemonRecord = {
 	pidStartTime: string | null;
 	startedAt: string;
 	lastHeartbeatAt: string;
+	evaluatorStatus: string | null;
 };
 
 type Row = {
@@ -18,6 +19,7 @@ type Row = {
 	pid_start_time: string | null;
 	started_at: string;
 	last_heartbeat_at: string;
+	evaluator_status: string | null;
 };
 
 function toRecord(row: Row): BrokerDaemonRecord {
@@ -29,6 +31,7 @@ function toRecord(row: Row): BrokerDaemonRecord {
 		pidStartTime: row.pid_start_time,
 		startedAt: row.started_at,
 		lastHeartbeatAt: row.last_heartbeat_at,
+		evaluatorStatus: row.evaluator_status,
 	};
 }
 
@@ -76,7 +79,7 @@ export function getBrokerDaemonByCollab(
 ): BrokerDaemonRecord | null {
 	const row = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at FROM broker_daemon WHERE collab_id = ?",
+			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE collab_id = ?",
 		)
 		.get(collabId) as Row | undefined;
 	return row ? toRecord(row) : null;
@@ -88,7 +91,7 @@ export function getBrokerDaemonByPort(
 ): BrokerDaemonRecord | null {
 	const row = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at FROM broker_daemon WHERE port = ?",
+			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE port = ?",
 		)
 		.get(port) as Row | undefined;
 	return row ? toRecord(row) : null;
@@ -107,7 +110,7 @@ export function listStaleBrokerDaemons(
 ): BrokerDaemonRecord[] {
 	const rows = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at FROM broker_daemon WHERE last_heartbeat_at < ?",
+			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE last_heartbeat_at < ?",
 		)
 		.all(cutoffIso) as Row[];
 	return rows.map(toRecord);
@@ -116,8 +119,18 @@ export function listStaleBrokerDaemons(
 export function listAllBrokerDaemons(db: Database.Database): BrokerDaemonRecord[] {
 	const rows = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at FROM broker_daemon",
+			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon",
 		)
 		.all() as Row[];
 	return rows.map(toRecord);
+}
+
+export function setBrokerDaemonEvaluatorStatus(
+	db: Database.Database,
+	input: { collabId: string; status: string },
+): void {
+	db.prepare("UPDATE broker_daemon SET evaluator_status = ? WHERE collab_id = ?").run(
+		input.status,
+		input.collabId,
+	);
 }

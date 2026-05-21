@@ -9,6 +9,7 @@ import {
 	insertBrokerDaemon,
 	updateBrokerDaemonPid,
 	upsertRecoveryState,
+	setBrokerDaemonEvaluatorStatus,
 } from "../packages/broker/src/index.ts";
 import { upsertSessionBinding } from "../packages/broker/src/storage/repositories/session-binding-repository.ts";
 import { workspaceIdFromPath } from "../packages/cli/src/runtime/workspace-id.ts";
@@ -24,6 +25,7 @@ type StatusJsonShape = {
 	daemon: { host: string; port: number; pid: number } | null;
 	agents: AgentEntry[];
 	recovery: { state: string };
+	evaluator: { ready: boolean; status: string };
 };
 
 type ErrorJsonShape = {
@@ -213,6 +215,82 @@ describe("runCollabStatus --json", () => {
 		) as ErrorJsonShape;
 
 		expect(parsed).toEqual({ error: "no_collab_for_cwd", cwd: "/tmp/aiw-status-empty-dir" });
+	});
+
+	it("evaluator ready:true when evaluator_status is 'ready'", () => {
+		const { ws, db, wsId } = makeSandbox();
+		const collabId = "collab_eval_ready";
+		insertCollab(db, collabId, ws, wsId);
+		insertBrokerDaemon(db, {
+			collabId,
+			host: "127.0.0.1",
+			port: 4600,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: new Date().toISOString(),
+		});
+		setBrokerDaemonEvaluatorStatus(db, { collabId, status: "ready" });
+		db.close();
+
+		const parsed = JSON.parse(runCollabStatus({ cwd: ws, json: true })) as StatusJsonShape;
+
+		expect(parsed.evaluator).toEqual({ ready: true, status: "ready" });
+	});
+
+	it("evaluator ready:false when evaluator_status is 'missing_anthropic_key'", () => {
+		const { ws, db, wsId } = makeSandbox();
+		const collabId = "collab_eval_missing_key";
+		insertCollab(db, collabId, ws, wsId);
+		insertBrokerDaemon(db, {
+			collabId,
+			host: "127.0.0.1",
+			port: 4601,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: new Date().toISOString(),
+		});
+		setBrokerDaemonEvaluatorStatus(db, { collabId, status: "missing_anthropic_key" });
+		db.close();
+
+		const parsed = JSON.parse(runCollabStatus({ cwd: ws, json: true })) as StatusJsonShape;
+
+		expect(parsed.evaluator).toEqual({ ready: false, status: "missing_anthropic_key" });
+	});
+
+	it("evaluator ready:false when evaluator_status is 'invalid_config'", () => {
+		const { ws, db, wsId } = makeSandbox();
+		const collabId = "collab_eval_invalid";
+		insertCollab(db, collabId, ws, wsId);
+		insertBrokerDaemon(db, {
+			collabId,
+			host: "127.0.0.1",
+			port: 4602,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: new Date().toISOString(),
+		});
+		setBrokerDaemonEvaluatorStatus(db, { collabId, status: "invalid_config" });
+		db.close();
+
+		const parsed = JSON.parse(runCollabStatus({ cwd: ws, json: true })) as StatusJsonShape;
+
+		expect(parsed.evaluator).toEqual({ ready: false, status: "invalid_config" });
+	});
+
+	it("evaluator ready:true with status 'unknown' when daemon row has NULL evaluator_status", () => {
+		const { ws, db, wsId } = makeSandbox();
+		const collabId = "collab_eval_null";
+		insertCollab(db, collabId, ws, wsId);
+		// Insert daemon but do NOT set evaluator_status — stays NULL
+		insertBrokerDaemon(db, {
+			collabId,
+			host: "127.0.0.1",
+			port: 4603,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: new Date().toISOString(),
+		});
+		db.close();
+
+		const parsed = JSON.parse(runCollabStatus({ cwd: ws, json: true })) as StatusJsonShape;
+
+		expect(parsed.evaluator).toEqual({ ready: true, status: "unknown" });
 	});
 
 	it("no-collab JSON error when DB exists but no collab for cwd", () => {

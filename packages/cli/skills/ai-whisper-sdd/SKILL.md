@@ -44,7 +44,8 @@ Parse the JSON. The expected shape is:
     { "agentType": "codex",  "bindingState": "bound" | "pending_attach" | "unbound" | null },
     { "agentType": "claude", "bindingState": "bound" | "pending_attach" | "unbound" | null }
   ],
-  "recovery": { "state": "normal" | "recovery_required" | "recovered" }
+  "recovery": { "state": "normal" | "recovery_required" | "recovered" },
+  "evaluator": { "ready": true | false, "status": "ready" | "missing_anthropic_key" | "invalid_config" | "disabled" | "unknown" }
 }
 ```
 
@@ -53,6 +54,7 @@ Required for readiness:
 - `status === "active"`
 - `recovery.state === "normal"`
 - BOTH `agents[*].bindingState === "bound"` (for `codex` AND `claude`)
+- `evaluator.status` is NOT `"missing_anthropic_key"` or `"invalid_config"` (i.e., `ready`, `disabled`, and `unknown` all pass this gate; only the two true-misconfiguration statuses block)
 
 If the JSON has `{ "error": "no_collab_for_cwd", ... }`:
 
@@ -71,6 +73,18 @@ If one agent's `bindingState` is anything but `"bound"`:
 > <Agent> is not mounted (current bindingState: `<state>`). Run `whisper collab mount <agent>` in a separate terminal, then re-run this skill.
 
 (Do NOT append permission flags — mount already spawns the agent in full-permission mode; passing `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` again can crash the agent on a duplicate-argument error.)
+
+If `evaluator.status === "missing_anthropic_key"` (i.e., `evaluator.ready === false` AND status is `missing_anthropic_key`):
+
+> The evaluator has no Anthropic API key. Create `~/.ai-whisper/auth.json` with `{ "ANTHROPIC_API_KEY": "sk-ant-..." }` (chmod 600), then restart the daemon (`whisper collab stop` and re-mount, or restart the broker), and re-run this skill. See the README "Evaluator configuration" section.
+
+If `evaluator.status === "invalid_config"` (i.e., `evaluator.ready === false` AND status is `invalid_config`):
+
+> The evaluator config is malformed. Fix the JSON in `~/.ai-whisper/auth.json` or `~/.ai-whisper/config.json`, then restart the daemon and re-run this skill. See the README "Evaluator configuration" section.
+
+If `evaluator.status === "disabled"`: this means the orchestrator is intentionally off — it is NOT a misconfiguration and does NOT block this skill gate. Proceed to step 3; `workflow start` will surface the orchestrator-disabled error itself.
+
+(Note: `evaluator.ready` is `false` for `missing_anthropic_key`, `invalid_config`, AND `disabled`; it is `true` only for `ready` and `unknown`. That's why this gate keys off `status` rather than `ready` — so `disabled` does not block the skill while the two true-misconfiguration statuses do.)
 
 ### 3. Kick off the workflow
 
