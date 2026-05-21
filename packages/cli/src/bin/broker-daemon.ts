@@ -16,6 +16,7 @@ import {
 	loadEvaluatorConfig,
 	type ResolvedEvaluatorConfig,
 } from "../runtime/evaluator-config.js";
+import { recordEvaluatorStatus } from "../runtime/record-evaluator-status.js";
 import { execFile } from "node:child_process";
 
 const sqlitePath = process.env.AI_WHISPER_BROKER_SQLITE!;
@@ -90,6 +91,15 @@ async function readWorkspaceHead(cId: string): Promise<string> {
 				else resolve(stdout.trim());
 			},
 		);
+	});
+}
+
+if (collabId) {
+	recordEvaluatorStatus(broker.db, {
+		collabId,
+		resolved,
+		loaderError,
+		orchestratorEnabled: Boolean(collab?.orchestratorEnabled),
 	});
 }
 
