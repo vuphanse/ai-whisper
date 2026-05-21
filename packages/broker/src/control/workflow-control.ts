@@ -767,6 +767,39 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					action = "phase-advanced";
 				}
 			} else if (normalized.verdict === "findings") {
+				const findingsText =
+					input.followUpMessage ?? "Address the reviewer's findings.";
+				let fixRequestText: string;
+				if (phase.repeatUntilComplete && phase.stepTemplates.fix) {
+					// Ralph fix step: use the phase's fix template (it instructs the
+					// implementer to append generalizable lessons to LEARNINGS.md,
+					// update PROGRESS.md, and end with the item marker — the
+					// anti-amnesia requirement), rendered with ralphDir, then append
+					// the reviewer findings. The generic prompt below lacks all of that.
+					const ctx = workflow.workflowContext as { commitRange?: string };
+					const collab = getCollab(db, workflow.collabId);
+					const ralphDir = collab
+						? ralphRunDir(collab.workspaceRoot, workflow.workflowId)
+						: "";
+					const fixTmpl = renderTemplate(phase.stepTemplates.fix, {
+						specPath: workflow.specPath,
+						planPath: safeDerivePlanPath(
+							workflow.specPath,
+							workflow.createdAt,
+						),
+						commitRange: ctx.commitRange ?? "HEAD",
+						ralphDir,
+					});
+					fixRequestText = `${fixTmpl}\n\nReviewer findings:\n${findingsText}`;
+				} else {
+					// Wrap the raw reviewer findings in an imperative directive so
+					// the implementer applies them instead of replying with a
+					// clarification question (which the orchestrator would
+					// correctly, but uselessly, escalate as non-delivery).
+					fixRequestText =
+						"Apply the following reviewer findings now. This is an autonomous workflow — no human will respond. Make the changes yourself and hand back the corrected deliverable; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.\n\nFindings:\n" +
+						findingsText;
+				}
 				nextHandoffId = createContinuationHandoff({
 					workflow,
 					chain,
@@ -774,13 +807,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					nextStep: "fix",
 					sender: getAgentForRole(workflow, "reviewer"),
 					target: getAgentForRole(workflow, "implementer"),
-					// Wrap the raw reviewer findings in an imperative directive so
-					// the implementer applies them instead of replying with a
-					// clarification question (which the orchestrator would
-					// correctly, but uselessly, escalate as non-delivery).
-					requestText:
-						"Apply the following reviewer findings now. This is an autonomous workflow — no human will respond. Make the changes yourself and hand back the corrected deliverable; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.\n\nFindings:\n" +
-						(input.followUpMessage ?? "Address the reviewer's findings."),
+					requestText: fixRequestText,
 					incrementRound: false,
 					now: input.now,
 				});

@@ -377,3 +377,52 @@ describe("applyOrchestratorVerdict — ralph review approve mechanics", () => {
 		}
 	});
 });
+
+describe("applyOrchestratorVerdict — ralph findings uses the ralph fix template", () => {
+	it("the fix handoff carries LEARNINGS.md + the item marker + ralphDir + the findings", async () => {
+		const broker = makeRalphBroker();
+		try {
+			const now = "2026-05-21T00:00:00.000Z";
+			seedRalphCollab(broker, now);
+			const { workflowId, handoffId } = startRalphWorkflow(broker, now);
+
+			// implement → delivered (item) → review handoff
+			setHandback(broker, handoffId, "Did the work.\n[[RALPH:ITEM-DELIVERED]]");
+			broker.control.applyOrchestratorVerdict({
+				handoffId,
+				verdict: "delivered",
+				confidence: 0.9,
+				reason: "delivered",
+				now,
+			});
+			const reviewHandoffId = latestHandoffIdForStep(broker, workflowId, "review");
+			setHandback(broker, reviewHandoffId, "Findings: the chunk is incomplete.");
+
+			// review → findings → fix handoff
+			broker.control.applyOrchestratorVerdict({
+				handoffId: reviewHandoffId,
+				verdict: "findings",
+				confidence: 0.9,
+				reason: "reviewer raised findings",
+				followUpMessage: "Handle the empty-input edge case.",
+				now,
+			});
+
+			const fixReq = (
+				broker.db
+					.prepare(
+						"SELECT request_text FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'fix' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+					)
+					.get(workflowId) as { request_text: string }
+			).request_text;
+
+			// Anti-amnesia: the ralph fix template (not the generic SDD prompt) is used.
+			expect(fixReq).toContain("LEARNINGS.md");
+			expect(fixReq).toContain("[[RALPH:ITEM-DELIVERED]]");
+			expect(fixReq).toContain(ralphRunDir("/tmp/ralph", workflowId)); // ralphDir rendered (workspaceRoot from seedRalphCollab)
+			expect(fixReq).toContain("Handle the empty-input edge case."); // findings appended
+		} finally {
+			await broker.stop();
+		}
+	});
+});
