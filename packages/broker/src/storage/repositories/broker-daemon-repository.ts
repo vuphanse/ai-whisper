@@ -22,6 +22,20 @@ type Row = {
 	evaluator_status: string | null;
 };
 
+// evaluator_status may be absent on a pre-migration (v3) DB read before the
+// daemon has applied the migration — e.g. a read-only `collab status` (or the
+// resolveCollab it calls) right after a CLI upgrade, before the new daemon
+// restarts and migrates. Select NULL for the column when it is missing so reads
+// degrade to evaluatorStatus: null (-> "unknown" -> ready) instead of throwing
+// "no such column: evaluator_status".
+function brokerDaemonSelectColumns(db: Database.Database): string {
+	const hasEvaluatorStatus = (
+		db.prepare("PRAGMA table_info(broker_daemon)").all() as Array<{ name: string }>
+	).some((column) => column.name === "evaluator_status");
+	const tail = hasEvaluatorStatus ? "evaluator_status" : "NULL AS evaluator_status";
+	return `collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, ${tail}`;
+}
+
 function toRecord(row: Row): BrokerDaemonRecord {
 	return {
 		collabId: row.collab_id,
@@ -79,7 +93,7 @@ export function getBrokerDaemonByCollab(
 ): BrokerDaemonRecord | null {
 	const row = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE collab_id = ?",
+			`SELECT ${brokerDaemonSelectColumns(db)} FROM broker_daemon WHERE collab_id = ?`,
 		)
 		.get(collabId) as Row | undefined;
 	return row ? toRecord(row) : null;
@@ -91,7 +105,7 @@ export function getBrokerDaemonByPort(
 ): BrokerDaemonRecord | null {
 	const row = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE port = ?",
+			`SELECT ${brokerDaemonSelectColumns(db)} FROM broker_daemon WHERE port = ?`,
 		)
 		.get(port) as Row | undefined;
 	return row ? toRecord(row) : null;
@@ -110,7 +124,7 @@ export function listStaleBrokerDaemons(
 ): BrokerDaemonRecord[] {
 	const rows = db
 		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon WHERE last_heartbeat_at < ?",
+			`SELECT ${brokerDaemonSelectColumns(db)} FROM broker_daemon WHERE last_heartbeat_at < ?`,
 		)
 		.all(cutoffIso) as Row[];
 	return rows.map(toRecord);
@@ -118,9 +132,7 @@ export function listStaleBrokerDaemons(
 
 export function listAllBrokerDaemons(db: Database.Database): BrokerDaemonRecord[] {
 	const rows = db
-		.prepare(
-			"SELECT collab_id, host, port, pid, pid_start_time, started_at, last_heartbeat_at, evaluator_status FROM broker_daemon",
-		)
+		.prepare(`SELECT ${brokerDaemonSelectColumns(db)} FROM broker_daemon`)
 		.all() as Row[];
 	return rows.map(toRecord);
 }

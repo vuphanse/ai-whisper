@@ -9,6 +9,7 @@ import {
 	updateBrokerDaemonPid,
 	updateBrokerDaemonHeartbeat,
 	getBrokerDaemonByCollab,
+	getBrokerDaemonByPort,
 	deleteBrokerDaemonByCollab,
 	listStaleBrokerDaemons,
 	listAllBrokerDaemons,
@@ -39,6 +40,31 @@ describe("broker-daemon-repository", () => {
 		expect(row?.pid).toBeNull();
 		expect(row?.pidStartTime).toBeNull();
 		expect(row?.port).toBe(4500);
+	});
+
+	it("reads degrade to evaluatorStatus null on a pre-migration DB lacking the column", () => {
+		// Regression: a read-only `collab status` (or resolveCollab) against an
+		// existing v3 state.db, before the upgraded daemon has applied the
+		// migration, must NOT throw "no such column: evaluator_status".
+		const db = freshDb();
+		insertBrokerDaemon(db, {
+			collabId: "c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		// Simulate the pre-migration shape: drop the column the migration adds.
+		db.exec("ALTER TABLE broker_daemon DROP COLUMN evaluator_status");
+		db.pragma("user_version = 3");
+
+		expect(() => getBrokerDaemonByCollab(db, "c1")).not.toThrow();
+		expect(getBrokerDaemonByCollab(db, "c1")?.evaluatorStatus).toBeNull();
+		expect(getBrokerDaemonByPort(db, 4500)?.evaluatorStatus).toBeNull();
+		expect(() => listAllBrokerDaemons(db)).not.toThrow();
+		expect(() =>
+			listStaleBrokerDaemons(db, "2099-01-01T00:00:00Z"),
+		).not.toThrow();
 	});
 
 	it("updates pid and pid_start_time atomically", () => {

@@ -293,6 +293,31 @@ describe("runCollabStatus --json", () => {
 		expect(parsed.evaluator).toEqual({ ready: true, status: "unknown" });
 	});
 
+	it("does not crash on a pre-migration (v3) DB lacking evaluator_status; reports unknown", () => {
+		// Regression: an existing state.db at schema v3 (before the upgraded
+		// daemon restarts and migrates) must let `collab status --json` (and the
+		// resolveCollab it calls) report evaluator unknown/ready instead of
+		// crashing the SDD preflight with "no such column: evaluator_status".
+		const { ws, db, wsId } = makeSandbox();
+		const collabId = "collab_eval_premigration";
+		insertCollab(db, collabId, ws, wsId);
+		insertBrokerDaemon(db, {
+			collabId,
+			host: "127.0.0.1",
+			port: 4604,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: new Date().toISOString(),
+		});
+		// Simulate the v3 shape: drop the column the migration adds.
+		db.exec("ALTER TABLE broker_daemon DROP COLUMN evaluator_status");
+		db.pragma("user_version = 3");
+		db.close();
+
+		const parsed = JSON.parse(runCollabStatus({ cwd: ws, json: true })) as StatusJsonShape;
+
+		expect(parsed.evaluator).toEqual({ ready: true, status: "unknown" });
+	});
+
 	it("no-collab JSON error when DB exists but no collab for cwd", () => {
 		const { db } = makeSandbox();
 		// DB exists but no collab row — CollabResolverError(NoCollabFoundForCwd) path
