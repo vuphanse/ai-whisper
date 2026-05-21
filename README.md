@@ -474,7 +474,7 @@ Check the `evaluator` field — `evaluator.ready` should be `true` and `evaluato
 
 ### Autonomous workflows
 
-Multi-phase pipelines that drive both agents through a structured task. Today the only registered workflow type is `spec-driven-development`, which runs spec-refining → plan-writing → plan-execution → code-review.
+Multi-phase pipelines that drive both agents through a structured task. Registered workflow types: `spec-driven-development` (spec-refining → plan-writing → plan-execution → code-review) and `ralph-loop` (an open-ended grind-to-completion loop — see [Ralph loop](#ralph-loop) below).
 
 Start a workflow once you have a collab running and both agents mounted:
 
@@ -494,6 +494,26 @@ What the workflow does:
 - **Phase 3 — code-review** (review-loop, maxRounds=5): reviewer reviews the commits; loops until approve or halt.
 
 While a workflow is running the manual hotkeys (`a/e/d/h/space/Ctrl+H`) are no-ops — the broker drives the chain. Operators observe via `whisper collab relay-monitor` and the SQLite tables (`workflows`, `relay_chains`, `relay_handoff`).
+
+### Ralph loop
+
+`ralph-loop` grinds an open-ended goal to completion: the implementer does the next chunk, an independent reviewer gates each chunk, and the loop repeats until the reviewer confirms the whole goal is done. It is the "ralph" technique (re-run an agent on the same goal until finished) with ai-whisper's cross-model review bar and durable orchestration added — so the output meets a bar instead of being unchecked self-loop output.
+
+```bash
+whisper workflow start --type ralph-loop --spec docs/path/to/GOAL.md
+# defaults: implementer=claude, reviewer=codex (override with --implementer/--reviewer)
+```
+
+The **goal file** (`--spec`) describes the work plus explicit completion/acceptance criteria. If you want checklist-style control, put the checklist in the goal file — the implementer copies it into `PROGRESS.md` on the first item. For open-ended goals (e.g. "convert every `.js` file to TypeScript"), the implementer derives the next chunk itself each round.
+
+Per run, the implementer keeps durable memory under `<workspace>/.ai-whisper/ralph/<workflowId>/`:
+
+- `PROGRESS.md` — the work ledger (done / remaining).
+- `LEARNINGS.md` — generalizable corrections so a re-oriented agent does not repeat a mistake.
+
+ai-whisper writes only inside `.ai-whisper/` and self-ignores it (a `.ai-whisper/.gitignore` of `*`); it never edits your root `.gitignore`. The implementer **auto-commits its work per item** (the bookkeeping under `.ai-whisper/` is never committed).
+
+The loop stops when: the reviewer confirms completion (workflow `done`); a single item can't pass review within its round budget (escalation → `halted`); or the outer iteration cap is reached (`halted`). Inspect a run with `whisper collab dashboard` (verdict history, per-item rounds, cost). Like all workflows, `ralph-loop` requires the evaluator to be configured — see [Evaluator configuration](#evaluator-configuration-required-for-workflows).
 
 Other workflow commands:
 
