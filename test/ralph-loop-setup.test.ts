@@ -29,4 +29,15 @@ describe("ensureRalphWorkspace", () => {
 		ensureRalphWorkspace(ws, "wf_1");
 		expect(readFileSync(join(ws, ".ai-whisper", ".gitignore"), "utf8")).toBe("custom\n");
 	});
+
+	it("guarantees ralph run-state is ignored even when .ai-whisper/.gitignore has incompatible content", () => {
+		// A pre-existing .ai-whisper/.gitignore that does NOT ignore ralph/ must
+		// not leave run-state trackable: a self-owned ralph/.gitignore ('*')
+		// ignores everything under the ralph/ dir regardless of the parent.
+		mkdirSync(join(ws, ".ai-whisper"), { recursive: true });
+		writeFileSync(join(ws, ".ai-whisper", ".gitignore"), "keep-me.txt\n");
+		ensureRalphWorkspace(ws, "wf_1");
+		expect(readFileSync(join(ws, ".ai-whisper", ".gitignore"), "utf8")).toBe("keep-me.txt\n"); // user file untouched
+		expect(readFileSync(join(ws, ".ai-whisper", "ralph", ".gitignore"), "utf8").trim()).toBe("*");
+	});
 });
