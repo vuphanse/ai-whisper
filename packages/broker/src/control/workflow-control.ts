@@ -651,7 +651,82 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					}
 				}
 
-				if (!nextPhase) {
+				if (phase.repeatUntilComplete) {
+					// Ralph single looping phase: a review-step approve does NOT mark
+					// the workflow done the way SDD's final-phase approve does. The
+					// completion claim (persisted on the `delivered` verdict from the
+					// implementer's GOAL-COMPLETE marker) decides loop-vs-complete.
+					// Each arm only sets state + `action` and FALLS THROUGH to the
+					// shared emission block — never `return` (that would commit DB
+					// state but skip terminal-event emission).
+					const rctx = workflow.workflowContext as {
+						ralphCompletionClaim?: boolean;
+						ralphIteration?: number;
+					};
+					if (rctx.ralphCompletionClaim === true) {
+						setWorkflowStatus(db, {
+							workflowId: workflow.workflowId,
+							status: "done",
+							haltReason: null,
+							now: input.now,
+						});
+						upsertRelayTurnState(db, {
+							collabId: workflow.collabId,
+							turnOwner: "none",
+							waitingAgent: null,
+							unresolvedHandoffId: null,
+							handoffState: "idle",
+							updatedAt: input.now,
+							orchestratorEnabled: true,
+							currentRound: chain.currentRound,
+							maxRounds: chain.maxRounds,
+							chainStatus: "done",
+						});
+						action = "workflow-done";
+					} else {
+						const iteration = (rctx.ralphIteration ?? 0) + 1;
+						// Cap is exclusive: iterations 1..maxIterations-1 loop; reaching maxIterations halts.
+						if (iteration >= phase.maxIterations!) {
+							setWorkflowStatus(db, {
+								workflowId: workflow.workflowId,
+								status: "halted",
+								haltReason: `ralph loop hit maxIterations cap (${phase.maxIterations}) without completion`,
+								now: input.now,
+							});
+							upsertRelayTurnState(db, {
+								collabId: workflow.collabId,
+								turnOwner: "none",
+								waitingAgent: null,
+								unresolvedHandoffId: null,
+								handoffState: "idle",
+								updatedAt: input.now,
+								orchestratorEnabled: true,
+								currentRound: chain.currentRound,
+								maxRounds: chain.maxRounds,
+								chainStatus: "escalated",
+							});
+							action = "workflow-halted";
+						} else {
+							updateWorkflowContext(db, {
+								workflowId: workflow.workflowId,
+								patch: { ralphIteration: iteration },
+								now: input.now,
+							});
+							// currentPhaseIndex is never incremented → re-kicks the
+							// SAME phase with a fresh chain/run/implement handoff.
+							const kickoff = kickoffNextPhaseInternal({
+								workflow: getWorkflowById(db, workflow.workflowId)!,
+								definition,
+								workspaceHeadSha: input.workspaceHeadSha,
+								now: input.now,
+							});
+							nextHandoffId = kickoff.handoffId;
+							nextPhaseRunId = kickoff.phaseRunId;
+							pendingEmissions.push(...kickoff.emissions);
+							action = "phase-advanced";
+						}
+					}
+				} else if (!nextPhase) {
 					setWorkflowStatus(db, {
 						workflowId: workflow.workflowId,
 						status: "done",

@@ -103,10 +103,82 @@ function latestReviewRequest(
 	return (
 		broker.db
 			.prepare(
-				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'review' ORDER BY created_at DESC LIMIT 1",
+				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? AND handoff_step = 'review' ORDER BY created_at DESC, rowid DESC LIMIT 1",
 			)
 			.get(workflowId) as { request_text: string }
 	).request_text;
+}
+
+function latestHandoffIdForStep(
+	broker: ReturnType<typeof makeRalphBroker>,
+	workflowId: string,
+	step: string,
+): string {
+	return (
+		broker.db
+			.prepare(
+				"SELECT handoff_id FROM relay_handoff WHERE workflow_id = ? AND handoff_step = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+			)
+			.get(workflowId, step) as { handoff_id: string }
+	).handoff_id;
+}
+
+function countOpenPhaseRuns(
+	broker: ReturnType<typeof makeRalphBroker>,
+	workflowId: string,
+): number {
+	return (
+		broker.db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM workflow_phases WHERE workflow_id = ? AND ended_at IS NULL",
+			)
+			.get(workflowId) as { n: number }
+	).n;
+}
+
+function patchRalphIteration(
+	broker: ReturnType<typeof makeRalphBroker>,
+	workflowId: string,
+	iteration: number,
+) {
+	const row = broker.db
+		.prepare("SELECT workflow_context FROM workflows WHERE workflow_id = ?")
+		.get(workflowId) as { workflow_context: string };
+	const ctx = JSON.parse(row.workflow_context) as Record<string, unknown>;
+	ctx.ralphIteration = iteration;
+	broker.db
+		.prepare("UPDATE workflows SET workflow_context = ? WHERE workflow_id = ?")
+		.run(JSON.stringify(ctx), workflowId);
+}
+
+/**
+ * Drive a ralph workflow to a review-step approve: start the implement
+ * handoff, hand it back with the given marker, apply `delivered` (→ creates the
+ * review handoff), then hand back + return the review handoff id ready for the
+ * approve verdict.
+ */
+function driveToReviewApprove(
+	broker: ReturnType<typeof makeRalphBroker>,
+	workflowId: string,
+	implementHandoffId: string,
+	implementMarker: string,
+	now: string,
+): string {
+	setHandback(
+		broker,
+		implementHandoffId,
+		`Did the work.\n${implementMarker}`,
+	);
+	broker.control.applyOrchestratorVerdict({
+		handoffId: implementHandoffId,
+		verdict: "delivered",
+		confidence: 0.9,
+		reason: "implementer delivered",
+		now,
+	});
+	const reviewHandoffId = latestHandoffIdForStep(broker, workflowId, "review");
+	setHandback(broker, reviewHandoffId, "Looks good, approving.");
+	return reviewHandoffId;
 }
 
 describe("applyOrchestratorVerdict — ralph delivered persists ralphCompletionClaim", () => {
@@ -167,6 +239,139 @@ describe("applyOrchestratorVerdict — ralph delivered persists ralphCompletionC
 			const reviewText = latestReviewRequest(broker, workflowId);
 			expect(reviewText).not.toContain("ENTIRE");
 			expect(reviewText).toContain("latest delivered chunk");
+		} finally {
+			await broker.stop();
+		}
+	});
+});
+
+describe("applyOrchestratorVerdict — ralph review approve mechanics", () => {
+	it("loop: claim falsy → re-kicks SAME phase, increments ralphIteration", async () => {
+		const broker = makeRalphBroker();
+		try {
+			seedRalphCollab(broker);
+			const { workflowId, handoffId } = startRalphWorkflow(broker);
+			const reviewHandoffId = driveToReviewApprove(
+				broker,
+				workflowId,
+				handoffId,
+				"[[RALPH:ITEM-DELIVERED]]",
+				new Date().toISOString(),
+			);
+
+			// On the loop path the workflow must NOT terminate: subscribe before
+			// applying and assert no terminal workflow event is emitted (only the
+			// re-kick events like workflow.phase-done / phase-started should fire).
+			const terminal: string[] = [];
+			for (const name of ["workflow.done", "workflow.halted"] as const) {
+				broker.events.on(name, () => terminal.push(name));
+			}
+
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId: reviewHandoffId,
+				verdict: "approve",
+				confidence: 0.9,
+				reason: "item accepted",
+				now: new Date().toISOString(),
+			});
+
+			expect(result.action).toBe("phase-advanced");
+			expect(terminal).toEqual([]);
+			const wf = broker.control.getWorkflow(workflowId);
+			expect(wf?.status).toBe("running");
+			// Same phase — never incremented.
+			expect(wf?.currentPhaseIndex).toBe(0);
+			expect(
+				(wf?.workflowContext as { ralphIteration?: number }).ralphIteration,
+			).toBe(1);
+			// A fresh open phase run exists for the next item.
+			expect(countOpenPhaseRuns(broker, workflowId)).toBe(1);
+			// The re-kick produced a NEW implement handoff. Assert via the verdict
+			// return value (which carries the next handoff id) rather than a
+			// timestamp-ordered DB query, so a same-ms tie cannot make this flaky.
+			expect(result.nextHandoffId).toBeDefined();
+			expect(result.nextHandoffId).not.toBe(handoffId);
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("complete: claim true → workflow done + workflow.done event", async () => {
+		const broker = makeRalphBroker();
+		try {
+			seedRalphCollab(broker);
+			const { workflowId, handoffId } = startRalphWorkflow(broker);
+			const reviewHandoffId = driveToReviewApprove(
+				broker,
+				workflowId,
+				handoffId,
+				"[[RALPH:GOAL-COMPLETE]]",
+				new Date().toISOString(),
+			);
+
+			const seen: string[] = [];
+			for (const name of [
+				"chain.resolved",
+				"workflow.phase-done",
+				"workflow.done",
+			] as const) {
+				broker.events.on(name, () => seen.push(name));
+			}
+
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId: reviewHandoffId,
+				verdict: "approve",
+				confidence: 0.95,
+				reason: "acceptance gate passed",
+				now: new Date().toISOString(),
+			});
+
+			expect(result.action).toBe("workflow-done");
+			expect(broker.control.getWorkflow(workflowId)?.status).toBe("done");
+			expect(seen).toEqual([
+				"chain.resolved",
+				"workflow.phase-done",
+				"workflow.done",
+			]);
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("cap: ralphIteration at maxIterations-1, claim falsy → halted + workflow.halted event", async () => {
+		const broker = makeRalphBroker();
+		try {
+			seedRalphCollab(broker);
+			const { workflowId, handoffId } = startRalphWorkflow(broker);
+			// ralph-loop default maxIterations is 100 → seed at 99 so the next
+			// iteration (100) hits the cap.
+			patchRalphIteration(broker, workflowId, 99);
+			const reviewHandoffId = driveToReviewApprove(
+				broker,
+				workflowId,
+				handoffId,
+				"[[RALPH:ITEM-DELIVERED]]",
+				new Date().toISOString(),
+			);
+			// The `delivered` verdict inside driveToReviewApprove only patches
+			// ralphCompletionClaim, so the seeded ralphIteration=99 survives.
+
+			const halted: unknown[] = [];
+			broker.events.on("workflow.halted", (e) => halted.push(e));
+
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId: reviewHandoffId,
+				verdict: "approve",
+				confidence: 0.9,
+				reason: "item accepted",
+				now: new Date().toISOString(),
+			});
+
+			expect(result.action).toBe("workflow-halted");
+			const wf = broker.control.getWorkflow(workflowId);
+			expect(wf?.status).toBe("halted");
+			expect(wf?.haltReason).toContain("maxIterations");
+			expect(halted).toHaveLength(1);
 		} finally {
 			await broker.stop();
 		}
