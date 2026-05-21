@@ -1,0 +1,140 @@
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { getStateRoot } from "./state-root.js";
+
+export type EvaluatorStatus =
+	| "ready"
+	| "missing_anthropic_key"
+	| "invalid_config"
+	| "disabled"
+	| "unknown";
+
+export interface ResolvedEvaluatorConfig {
+	provider: "anthropic" | "ollama";
+	fallback: "anthropic" | "ollama" | null;
+	anthropic: { apiKey: string | null; model: string | null };
+	ollama: { host: string | null; model: string | null };
+}
+
+// Minimal KEY=VALUE parser. Handles comments (#), blank lines, surrounding
+// single/double quotes. NOT full dotenv (no interpolation/escaping) — that's a
+// documented limitation; for anything fancier, export a real env var (highest
+// precedence). Returns a flat record; callers apply it only where process.env
+// does not already define the key.
+function parseDotEnv(text: string): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		if (line === "" || line.startsWith("#")) continue;
+		const eq = line.indexOf("=");
+		if (eq <= 0) continue; // no key, skip (don't throw)
+		const key = line.slice(0, eq).trim();
+		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+		let val = line.slice(eq + 1).trim();
+		if (
+			val.length >= 2 &&
+			((val.startsWith('"') && val.endsWith('"')) ||
+				(val.startsWith("'") && val.endsWith("'")))
+		) {
+			val = val.slice(1, -1);
+		}
+		out[key] = val;
+	}
+	return out;
+}
+
+// Non-throwing perms hygiene check (spec error-handling §): auth.json holds a
+// secret, so warn (don't fail) if it's group/world readable. POSIX-only; skipped
+// on Windows where st_mode perms bits aren't meaningful.
+function warnIfLoosePerms(path: string): void {
+	if (process.platform === "win32") return;
+	let mode: number;
+	try {
+		mode = statSync(path).mode;
+	} catch {
+		return; // missing/unreadable — readJsonFile handles ENOENT
+	}
+	if (mode & 0o077) {
+		console.error(
+			`Warning: ${path} is accessible by group/world; it holds secrets. Run: chmod 600 ${path}`,
+		);
+	}
+}
+
+function readJsonFile(path: string, label: string): Record<string, unknown> | null {
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+		throw err;
+	}
+	try {
+		return JSON.parse(text) as Record<string, unknown>;
+	} catch (err) {
+		throw new Error(`Invalid ${label}: ${(err as Error).message}`);
+	}
+}
+
+export function loadEvaluatorConfig(): ResolvedEvaluatorConfig {
+	const root = getStateRoot();
+
+	// .env (lowest of the "env" tier — only fills keys process.env lacks).
+	let dotenv: Record<string, string> = {};
+	try {
+		dotenv = parseDotEnv(readFileSync(join(root, ".env"), "utf8"));
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+	const envGet = (k: string): string | undefined =>
+		process.env[k] ?? dotenv[k];
+
+	const authPath = join(root, "auth.json");
+	warnIfLoosePerms(authPath);
+	const auth = readJsonFile(authPath, "auth.json");
+	const config = readJsonFile(join(root, "config.json"), "config.json");
+	const evalCfg = (config?.evaluator ?? {}) as Record<string, unknown>;
+	const evalOllama = (evalCfg.ollama ?? {}) as Record<string, unknown>;
+
+	const provider =
+		(envGet("AI_WHISPER_EVALUATOR_PROVIDER") ?? (evalCfg.provider as string | undefined)) === "ollama"
+			? "ollama"
+			: "anthropic";
+	const rawFallback =
+		envGet("AI_WHISPER_EVALUATOR_FALLBACK") ?? (evalCfg.fallback as string | undefined);
+	const fallback =
+		rawFallback === "anthropic" || rawFallback === "ollama" ? rawFallback : null;
+
+	const apiKey =
+		envGet("ANTHROPIC_API_KEY") ?? (auth?.ANTHROPIC_API_KEY as string | undefined) ?? null;
+
+	return {
+		provider,
+		fallback,
+		anthropic: {
+			apiKey: apiKey && apiKey.length > 0 ? apiKey : null,
+			model: (evalCfg.anthropicModel as string | undefined) ?? null,
+		},
+		ollama: {
+			host: envGet("AI_WHISPER_EVALUATOR_OLLAMA_HOST") ?? (evalOllama.host as string | undefined) ?? null,
+			model: envGet("AI_WHISPER_EVALUATOR_OLLAMA_MODEL") ?? (evalOllama.model as string | undefined) ?? null,
+		},
+	};
+}
+
+export function computeEvaluatorStatus(
+	cfg: ResolvedEvaluatorConfig,
+	ctx: { orchestratorEnabled: boolean; loaderError: Error | null },
+): Exclude<EvaluatorStatus, "unknown"> {
+	if (ctx.loaderError) return "invalid_config";
+	if (!ctx.orchestratorEnabled) return "disabled";
+	if (cfg.provider === "anthropic" && cfg.anthropic.apiKey === null) {
+		return "missing_anthropic_key";
+	}
+	return "ready";
+}
+
+export function isEvaluatorReady(status: EvaluatorStatus): boolean {
+	// "unknown" = older daemon where status column is NULL; treat as ready so pre-migration setups aren't false-blocked.
+	return status === "ready" || status === "unknown";
+}
