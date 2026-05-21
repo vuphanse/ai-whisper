@@ -1,10 +1,12 @@
 import Database from "better-sqlite3";
 import { existsSync } from "node:fs";
+import { getBrokerDaemonByCollab } from "@ai-whisper/broker";
 import {
 	resolveCollab,
 	CollabResolverError,
 } from "../../runtime/collab-resolver.js";
 import { getSharedSqlitePath } from "../../runtime/state-root.js";
+import { isEvaluatorReady, type EvaluatorStatus } from "../../runtime/evaluator-config.js";
 
 export function runCollabStatus(input: {
 	cwd: string;
@@ -38,6 +40,8 @@ export function runCollabStatus(input: {
 					bindingState: b?.binding_state ?? null,
 				};
 			});
+			const daemonRow = getBrokerDaemonByCollab(db, r.collabId);
+			const evaluatorStatus = (daemonRow?.evaluatorStatus ?? "unknown") as EvaluatorStatus;
 			return JSON.stringify({
 				collabId: r.collabId,
 				workspaceRoot: r.workspaceRoot,
@@ -45,6 +49,7 @@ export function runCollabStatus(input: {
 				daemon: r.daemon ?? null,
 				agents,
 				recovery: { state: r.recovery.state },
+				evaluator: { ready: isEvaluatorReady(evaluatorStatus), status: evaluatorStatus },
 			});
 		}
 
