@@ -4,7 +4,9 @@ import {
 	getWorkflowDefinition,
 	derivePlanPath,
 	renderTemplate,
+	ralphRunDir,
 } from "./workflow-registry.js";
+import { ensureRalphWorkspace } from "./ralph-setup.js";
 
 type WorkflowStatus = "running" | "halted" | "done" | "canceled";
 type WorkflowRecordLike = {
@@ -154,6 +156,19 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 			}
 		}
 
+		// Set up ralph workspace (idempotent) for looping phases; halt on fs failure.
+		let ralphDir = "";
+		if (phase.repeatUntilComplete) {
+			try {
+				ralphDir = ensureRalphWorkspace(collab.workspaceRoot, workflowId);
+			} catch (err) {
+				broker.control.haltWorkflow({ workflowId, reason: `ralph setup failed: ${String(err)}`, now });
+				return;
+			}
+		} else {
+			ralphDir = ralphRunDir(collab.workspaceRoot, workflowId);
+		}
+
 		// Render kickoff text
 		const ctx = workflow.workflowContext as { commitRange?: string };
 		let planPath = workflow.specPath; // safe fallback
@@ -166,6 +181,7 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 			specPath: workflow.specPath,
 			planPath,
 			commitRange: ctx.commitRange ?? "HEAD",
+			ralphDir,
 		});
 
 		try {

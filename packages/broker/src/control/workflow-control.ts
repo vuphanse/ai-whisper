@@ -39,6 +39,8 @@ import {
 	listWorkflowTypes,
 	renderTemplate,
 	derivePlanPath,
+	ralphRunDir,
+	RALPH_GOAL_COMPLETE_MARKER,
 	type PhaseConfig,
 	type WorkflowDefinition,
 } from "../runtime/workflow-registry.js";
@@ -337,8 +339,16 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		workflow: WorkflowRecord;
 		phase: PhaseConfig;
 	}): string {
-		const ctx = input.workflow.workflowContext as { commitRange?: string };
-		const tmpl = input.phase.stepTemplates.review ?? "Review the deliverable.";
+		const ctx = input.workflow.workflowContext as { commitRange?: string; ralphCompletionClaim?: boolean };
+		const useAcceptance =
+			input.phase.repeatUntilComplete === true &&
+			ctx.ralphCompletionClaim === true &&
+			input.phase.acceptanceReviewTemplate !== undefined;
+		const tmpl = useAcceptance
+			? input.phase.acceptanceReviewTemplate!
+			: (input.phase.stepTemplates.review ?? "Review the deliverable.");
+		const collab = getCollab(db, input.workflow.collabId);
+		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
 		return renderTemplate(tmpl, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -346,6 +356,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.createdAt,
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
+			ralphDir,
 		});
 	}
 
@@ -410,6 +421,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				? getAgentForRole(input.workflow, "reviewer")
 				: getAgentForRole(input.workflow, "implementer");
 		const ctx = input.workflow.workflowContext as { commitRange?: string };
+		const collab = getCollab(db, input.workflow.collabId);
+		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
 		const kickoffText = renderTemplate(phase.kickoffTemplate, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -417,6 +430,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.createdAt,
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
+			ralphDir,
 		});
 		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -637,7 +651,82 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					}
 				}
 
-				if (!nextPhase) {
+				if (phase.repeatUntilComplete) {
+					// Ralph single looping phase: a review-step approve does NOT mark
+					// the workflow done the way SDD's final-phase approve does. The
+					// completion claim (persisted on the `delivered` verdict from the
+					// implementer's GOAL-COMPLETE marker) decides loop-vs-complete.
+					// Each arm only sets state + `action` and FALLS THROUGH to the
+					// shared emission block — never `return` (that would commit DB
+					// state but skip terminal-event emission).
+					const rctx = workflow.workflowContext as {
+						ralphCompletionClaim?: boolean;
+						ralphIteration?: number;
+					};
+					if (rctx.ralphCompletionClaim === true) {
+						setWorkflowStatus(db, {
+							workflowId: workflow.workflowId,
+							status: "done",
+							haltReason: null,
+							now: input.now,
+						});
+						upsertRelayTurnState(db, {
+							collabId: workflow.collabId,
+							turnOwner: "none",
+							waitingAgent: null,
+							unresolvedHandoffId: null,
+							handoffState: "idle",
+							updatedAt: input.now,
+							orchestratorEnabled: true,
+							currentRound: chain.currentRound,
+							maxRounds: chain.maxRounds,
+							chainStatus: "done",
+						});
+						action = "workflow-done";
+					} else {
+						const iteration = (rctx.ralphIteration ?? 0) + 1;
+						// Cap is exclusive: iterations 1..maxIterations-1 loop; reaching maxIterations halts.
+						if (iteration >= phase.maxIterations!) {
+							setWorkflowStatus(db, {
+								workflowId: workflow.workflowId,
+								status: "halted",
+								haltReason: `ralph loop hit maxIterations cap (${phase.maxIterations}) without completion`,
+								now: input.now,
+							});
+							upsertRelayTurnState(db, {
+								collabId: workflow.collabId,
+								turnOwner: "none",
+								waitingAgent: null,
+								unresolvedHandoffId: null,
+								handoffState: "idle",
+								updatedAt: input.now,
+								orchestratorEnabled: true,
+								currentRound: chain.currentRound,
+								maxRounds: chain.maxRounds,
+								chainStatus: "escalated",
+							});
+							action = "workflow-halted";
+						} else {
+							updateWorkflowContext(db, {
+								workflowId: workflow.workflowId,
+								patch: { ralphIteration: iteration },
+								now: input.now,
+							});
+							// currentPhaseIndex is never incremented → re-kicks the
+							// SAME phase with a fresh chain/run/implement handoff.
+							const kickoff = kickoffNextPhaseInternal({
+								workflow: getWorkflowById(db, workflow.workflowId)!,
+								definition,
+								workspaceHeadSha: input.workspaceHeadSha,
+								now: input.now,
+							});
+							nextHandoffId = kickoff.handoffId;
+							nextPhaseRunId = kickoff.phaseRunId;
+							pendingEmissions.push(...kickoff.emissions);
+							action = "phase-advanced";
+						}
+					}
+				} else if (!nextPhase) {
 					setWorkflowStatus(db, {
 						workflowId: workflow.workflowId,
 						status: "done",
@@ -726,6 +815,29 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					}
 				}
 
+				// Ralph looping phase: recompute the completion claim from the
+				// EXACT marker in the implementer handback and persist it to
+				// workflowContext (Task 7 reads the persisted flag to decide
+				// loop-vs-complete). The local patched copy only feeds this
+				// handoff's review-prompt selection (acceptance-gate vs per-item).
+				let reviewWorkflow = workflow;
+				if (phase.repeatUntilComplete) {
+					const handback = handoff.handbackText ?? "";
+					const claim = handback.includes(RALPH_GOAL_COMPLETE_MARKER);
+					updateWorkflowContext(db, {
+						workflowId: workflow.workflowId,
+						patch: { ralphCompletionClaim: claim },
+						now: input.now,
+					});
+					reviewWorkflow = {
+						...workflow,
+						workflowContext: {
+							...workflow.workflowContext,
+							ralphCompletionClaim: claim,
+						},
+					};
+				}
+
 				nextHandoffId = createContinuationHandoff({
 					workflow,
 					chain,
@@ -733,7 +845,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					nextStep: "review",
 					sender,
 					target,
-					requestText: renderReviewRequestText({ workflow, phase }),
+					// reviewWorkflow patches only the in-memory context for prompt selection; chain/prev state is the DB record
+					requestText: renderReviewRequestText({ workflow: reviewWorkflow, phase }),
 					incrementRound: true,
 					now: input.now,
 				});

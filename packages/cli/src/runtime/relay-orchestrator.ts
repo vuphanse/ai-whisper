@@ -1,3 +1,4 @@
+import { getWorkflowDefinition } from "@ai-whisper/broker";
 import type {
 	EvaluatorCall,
 	EvaluatorInput,
@@ -6,6 +7,17 @@ import type {
 	WorkflowEvaluatorInput,
 	WorkflowEvaluatorVerdict,
 } from "./relay-orchestrator-evaluator.ts";
+
+export function resolveEvaluatorPromptKey(input: {
+	workflowType: string;
+	phaseName: string | null;
+	handoffStep: "review" | "fix" | "implement" | "execute";
+}): "review-loop" | "execution-gate" | "ralph-loop" {
+	const def = getWorkflowDefinition(input.workflowType);
+	const phase = def?.phases.find((p) => p.name === input.phaseName);
+	if (phase?.evaluatorPromptKey) return phase.evaluatorPromptKey;
+	return input.handoffStep === "execute" ? "execution-gate" : "review-loop";
+}
 
 type BrokerLike = {
 	control: {
@@ -87,6 +99,7 @@ type BrokerLike = {
 			requestText: string;
 			rootRequestText: string | null;
 		} | null;
+		getWorkflow: (id: string) => { workflowType: string } | null | undefined;
 	};
 };
 
@@ -162,8 +175,12 @@ export function createRelayOrchestrator(input: {
 				const handoffStep: HandoffStep = VALID_STEPS.includes(rawStep as HandoffStep)
 					? (rawStep as HandoffStep)
 					: "review";
-				const evaluatorPromptKey: "review-loop" | "execution-gate" =
-					handoffStep === "execute" ? "execution-gate" : "review-loop";
+				const wf = input.broker.control.getWorkflow(meta.workflowId);
+				const evaluatorPromptKey = resolveEvaluatorPromptKey({
+					workflowType: wf?.workflowType ?? "",
+					phaseName: meta.phaseName,
+					handoffStep,
+				});
 
 				const wfPayload: WorkflowEvaluatorInput = {
 					...buildEvaluatorInput(claimed),
