@@ -49,7 +49,7 @@ export type RelayOrchestratorVerdict =
 	| { verdict: "escalate"; confidence: number; reason: string };
 
 export type WorkflowEvaluatorInput = EvaluatorInput & {
-	evaluatorPromptKey: "review-loop" | "execution-gate";
+	evaluatorPromptKey: "review-loop" | "ralph-loop" | "execution-gate";
 	workflowId: string;
 	phaseRunId: string;
 	phaseName: string;
@@ -309,7 +309,7 @@ const executionBranch: Branch<WorkflowEvaluatorVerdict> = {
 	parse: makeParser(executionVerdictSchema),
 };
 
-function selectBranch(payload: EvaluatorAnyInput): Branch<EvaluatorAnyVerdict> {
+export function selectBranch(payload: EvaluatorAnyInput): Branch<EvaluatorAnyVerdict> {
 	if ("evaluatorPromptKey" in payload) {
 		if (payload.evaluatorPromptKey === "execution-gate") return executionBranch;
 		// review-loop: dispatch by handoffStep
