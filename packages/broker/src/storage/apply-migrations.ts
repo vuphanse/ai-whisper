@@ -5,7 +5,7 @@ import type Database from "better-sqlite3";
 // ALTERs), so a persisted DB at an older user_version safely re-runs it and
 // picks up the additions. Forgetting to bump means a persisted DB never gets
 // the new schema (it only worked for freshly-created DBs).
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const initMigrationSql = `
 CREATE TABLE IF NOT EXISTS broker_state (
@@ -281,7 +281,8 @@ CREATE TABLE IF NOT EXISTS broker_daemon (
   pid                INTEGER,
   pid_start_time     TEXT,
   started_at         TEXT NOT NULL,
-  last_heartbeat_at  TEXT NOT NULL
+  last_heartbeat_at  TEXT NOT NULL,
+  evaluator_status   TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS broker_daemon_port ON broker_daemon(port);
 
@@ -534,4 +535,11 @@ function runMigrationBody(db: Database.Database): void {
 		CREATE INDEX IF NOT EXISTS idx_relay_evaluator_diagnostics_outcome
 			ON relay_evaluator_diagnostics (outcome);
 	`);
+
+	const brokerDaemonColumns = db
+		.prepare("PRAGMA table_info(broker_daemon)")
+		.all() as Array<{ name: string }>;
+	if (!brokerDaemonColumns.some((column) => column.name === "evaluator_status")) {
+		db.exec("ALTER TABLE broker_daemon ADD COLUMN evaluator_status TEXT");
+	}
 }

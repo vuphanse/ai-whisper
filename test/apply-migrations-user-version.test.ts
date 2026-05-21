@@ -59,4 +59,39 @@ describe("apply-migrations: PRAGMA user_version", () => {
 			CURRENT_SCHEMA_VERSION,
 		);
 	});
+
+	it("fresh DB has evaluator_status column in broker_daemon", () => {
+		const db = freshDb();
+		applyMigrations(db);
+		const cols = (
+			db.prepare("PRAGMA table_info(broker_daemon)").all() as Array<{ name: string }>
+		).map((c) => c.name);
+		expect(cols).toContain("evaluator_status");
+	});
+
+	it("upgrade from v3: broker_daemon without evaluator_status gains the column", () => {
+		const db = freshDb();
+		applyMigrations(db);
+		// Simulate a v3 DB that lacked the column: drop it and roll back user_version.
+		db.exec("ALTER TABLE broker_daemon DROP COLUMN evaluator_status");
+		db.pragma("user_version = 3");
+
+		applyMigrations(db);
+
+		const cols = (
+			db.prepare("PRAGMA table_info(broker_daemon)").all() as Array<{ name: string }>
+		).map((c) => c.name);
+		expect(cols).toContain("evaluator_status");
+		expect(db.pragma("user_version", { simple: true })).toBe(CURRENT_SCHEMA_VERSION);
+	});
+
+	it("calling applyMigrations twice on a fresh DB is a no-op (idempotent)", () => {
+		const db = freshDb();
+		applyMigrations(db);
+		expect(() => applyMigrations(db)).not.toThrow();
+		const cols = (
+			db.prepare("PRAGMA table_info(broker_daemon)").all() as Array<{ name: string }>
+		).map((c) => c.name);
+		expect(cols).toContain("evaluator_status");
+	});
 });

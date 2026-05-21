@@ -12,6 +12,7 @@ import {
 	deleteBrokerDaemonByCollab,
 	listStaleBrokerDaemons,
 	listAllBrokerDaemons,
+	setBrokerDaemonEvaluatorStatus,
 } from "../packages/broker/src/storage/repositories/broker-daemon-repository.ts";
 
 function freshDb() {
@@ -128,6 +129,48 @@ describe("broker-daemon-repository", () => {
 			lastHeartbeatAt: "2026-05-15T00:00:00Z",
 		});
 		expect(listAllBrokerDaemons(db)).toHaveLength(2);
+	});
+
+	it("evaluatorStatus is null on fresh insert", () => {
+		const db = freshDb();
+		insertBrokerDaemon(db, {
+			collabId: "c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		const row = getBrokerDaemonByCollab(db, "c1");
+		expect(row?.evaluatorStatus).toBeNull();
+	});
+
+	it("setBrokerDaemonEvaluatorStatus writes and reads back", () => {
+		const db = freshDb();
+		insertBrokerDaemon(db, {
+			collabId: "c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		setBrokerDaemonEvaluatorStatus(db, { collabId: "c1", status: "missing_anthropic_key" });
+		const row = getBrokerDaemonByCollab(db, "c1");
+		expect(row?.evaluatorStatus).toBe("missing_anthropic_key");
+	});
+
+	it("setBrokerDaemonEvaluatorStatus can update to different status values", () => {
+		const db = freshDb();
+		insertBrokerDaemon(db, {
+			collabId: "c1",
+			host: "127.0.0.1",
+			port: 4500,
+			startedAt: "2026-05-15T00:00:00Z",
+			lastHeartbeatAt: "2026-05-15T00:00:00Z",
+		});
+		for (const status of ["ready", "missing_anthropic_key", "invalid_config", "disabled"] as const) {
+			setBrokerDaemonEvaluatorStatus(db, { collabId: "c1", status });
+			expect(getBrokerDaemonByCollab(db, "c1")?.evaluatorStatus).toBe(status);
+		}
 	});
 
 	it("rejects two daemons on the same port", () => {

@@ -76,6 +76,7 @@ export {
 	deleteBrokerDaemonByCollab,
 	listStaleBrokerDaemons,
 	listAllBrokerDaemons,
+	setBrokerDaemonEvaluatorStatus,
 	type BrokerDaemonRecord,
 } from "./storage/repositories/broker-daemon-repository.js";
 export {
