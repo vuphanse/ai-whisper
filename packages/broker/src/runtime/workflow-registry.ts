@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 export type HandoffStep = "review" | "fix" | "implement" | "execute";
 
 export type ArtifactKind = "spec" | "plan" | "commit-range";
@@ -166,6 +168,10 @@ const REGISTRY: Record<string, WorkflowDefinition> = {
 	[SPEC_DRIVEN_DEVELOPMENT.type]: SPEC_DRIVEN_DEVELOPMENT,
 	[RALPH_LOOP.type]: RALPH_LOOP,
 };
+
+export function ralphRunDir(workspaceRoot: string, workflowId: string): string {
+	return join(workspaceRoot, ".ai-whisper", "ralph", workflowId);
+}
 
 export function getWorkflowDefinition(
 	type: string,

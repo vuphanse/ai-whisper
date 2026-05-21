@@ -39,6 +39,7 @@ import {
 	listWorkflowTypes,
 	renderTemplate,
 	derivePlanPath,
+	ralphRunDir,
 	type PhaseConfig,
 	type WorkflowDefinition,
 } from "../runtime/workflow-registry.js";
@@ -337,8 +338,16 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		workflow: WorkflowRecord;
 		phase: PhaseConfig;
 	}): string {
-		const ctx = input.workflow.workflowContext as { commitRange?: string };
-		const tmpl = input.phase.stepTemplates.review ?? "Review the deliverable.";
+		const ctx = input.workflow.workflowContext as { commitRange?: string; ralphCompletionClaim?: boolean };
+		const useAcceptance =
+			input.phase.repeatUntilComplete === true &&
+			ctx.ralphCompletionClaim === true &&
+			input.phase.acceptanceReviewTemplate !== undefined;
+		const tmpl = useAcceptance
+			? input.phase.acceptanceReviewTemplate!
+			: (input.phase.stepTemplates.review ?? "Review the deliverable.");
+		const collab = getCollab(db, input.workflow.collabId);
+		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
 		return renderTemplate(tmpl, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -346,6 +355,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.createdAt,
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
+			ralphDir,
 		});
 	}
 
@@ -410,6 +420,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				? getAgentForRole(input.workflow, "reviewer")
 				: getAgentForRole(input.workflow, "implementer");
 		const ctx = input.workflow.workflowContext as { commitRange?: string };
+		const collab = getCollab(db, input.workflow.collabId);
+		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
 		const kickoffText = renderTemplate(phase.kickoffTemplate, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -417,6 +429,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.createdAt,
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
+			ralphDir,
 		});
 		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
