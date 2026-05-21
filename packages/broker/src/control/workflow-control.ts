@@ -40,6 +40,7 @@ import {
 	renderTemplate,
 	derivePlanPath,
 	ralphRunDir,
+	RALPH_GOAL_COMPLETE_MARKER,
 	type PhaseConfig,
 	type WorkflowDefinition,
 } from "../runtime/workflow-registry.js";
@@ -739,6 +740,29 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					}
 				}
 
+				// Ralph looping phase: recompute the completion claim from the
+				// EXACT marker in the implementer handback and persist it to
+				// workflowContext (Task 7 reads the persisted flag to decide
+				// loop-vs-complete). The local patched copy only feeds this
+				// handoff's review-prompt selection (acceptance-gate vs per-item).
+				let reviewWorkflow = workflow;
+				if (phase.repeatUntilComplete) {
+					const handback = handoff.handbackText ?? "";
+					const claim = handback.includes(RALPH_GOAL_COMPLETE_MARKER);
+					updateWorkflowContext(db, {
+						workflowId: workflow.workflowId,
+						patch: { ralphCompletionClaim: claim },
+						now: input.now,
+					});
+					reviewWorkflow = {
+						...workflow,
+						workflowContext: {
+							...workflow.workflowContext,
+							ralphCompletionClaim: claim,
+						},
+					};
+				}
+
 				nextHandoffId = createContinuationHandoff({
 					workflow,
 					chain,
@@ -746,7 +770,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					nextStep: "review",
 					sender,
 					target,
-					requestText: renderReviewRequestText({ workflow, phase }),
+					// reviewWorkflow patches only the in-memory context for prompt selection; chain/prev state is the DB record
+					requestText: renderReviewRequestText({ workflow: reviewWorkflow, phase }),
 					incrementRound: true,
 					now: input.now,
 				});
