@@ -24,6 +24,16 @@ import {
 import { waitForBrokerReady } from "../../runtime/wait-for-broker-ready.js";
 import { runCollabStart } from "./start.js";
 
+function defaultIsPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		// ESRCH = no such process (dead). EPERM = exists but not signalable (alive).
+		return (err as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
 export function recordMountedSession(input: {
 	cwd: string;
 	agentType: "codex" | "claude";
@@ -78,6 +88,11 @@ export async function runCollabMount(input: {
 	 * Used in tests to simulate a parallel mount winning the create race.
 	 */
 	runStartFn?: typeof runCollabStart;
+	/**
+	 * Test seam: override the pid liveness check used when deciding whether a
+	 * "bound" binding has a live owner. Defaults to defaultIsPidAlive.
+	 */
+	isPidAlive?: (pid: number) => boolean;
 }) {
 	// Ensure the shared SQLite file exists with all tables before any
 	// resolve attempt. Without this, the initial resolveCollab in a
@@ -202,8 +217,26 @@ export async function runCollabMount(input: {
 			.listSessionBindings(resolved.collabId)
 			.find((binding) => binding.agentType === input.target);
 		if (current?.bindingState === "bound") {
-			throw new Error(
-				`${input.target === "codex" ? "Codex" : "Claude"} is already bound. Stop the existing mount tab and run \`whisper collab mount\` again.`,
+			const isAlive = input.isPidAlive ?? defaultIsPidAlive;
+			const liveOwner = broker.control
+				.listSessionAttachments(resolved.collabId)
+				.some(
+					(a) =>
+						a.agentType === input.target &&
+						a.pid !== null &&
+						isAlive(a.pid),
+				);
+			if (liveOwner) {
+				throw new Error(
+					`${input.target === "codex" ? "Codex" : "Claude"} is already bound to a live session. Stop the existing mount tab and run \`whisper collab mount\` again.`,
+				);
+			}
+			// No live owner — the previous mount session is gone but left the
+			// binding "bound" (teardown marks degraded + deletes the attachment
+			// but never unbinds; a crash skips teardown entirely). Reclaim it:
+			// issueAttachClaim below overwrites bound → pending_attach → bound.
+			console.error(
+				`Reclaiming stale ${input.target} binding (previous mount session is gone).`,
 			);
 		}
 
