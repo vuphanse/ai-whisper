@@ -56,7 +56,7 @@ Required for readiness:
 
 If the JSON has `{ "error": "no_collab_for_cwd", ... }`:
 
-> No collab found in this workspace. Run `whisper collab mount codex -- --full-auto` in one terminal and `whisper collab mount claude -- --dangerously-skip-permissions` in another, then re-run this skill.
+> No collab found in this workspace. Run `whisper collab mount codex` in one terminal and `whisper collab mount claude` in another, then re-run this skill.
 
 If `recovery.state === "recovery_required"`:
 
@@ -68,9 +68,9 @@ If `recovery.state === "recovered"`:
 
 If one agent's `bindingState` is anything but `"bound"`:
 
-> <Agent> is not mounted (current bindingState: `<state>`). Run `whisper collab mount <agent> -- <perm-flag>` in a separate terminal, then re-run this skill.
+> <Agent> is not mounted (current bindingState: `<state>`). Run `whisper collab mount <agent>` in a separate terminal, then re-run this skill.
 
-(Use `--full-auto` for codex and `--dangerously-skip-permissions` for claude as the permission-flag examples in the remediation.)
+(Do NOT append permission flags — mount already spawns the agent in full-permission mode; passing `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` again can crash the agent on a duplicate-argument error.)
 
 ### 3. Kick off the workflow
 

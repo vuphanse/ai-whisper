@@ -67,6 +67,8 @@ whisper collab mount claude -- --dangerously-skip-permissions
 
 This unblocks autonomous workflow execution, which requires full-permission mode on both agents and cannot be enabled retroactively once the agent is up.
 
+> **Correction (2026-05-21, smoke testing):** the premise above is wrong. Mount's interactive-session spawn ALREADY injects full-permission flags by default — codex with `--dangerously-bypass-approvals-and-sandbox`, claude with `--dangerously-skip-permissions` (see `getInteractiveSessionExecArgsForTarget` in `packages/cli/src/runtime/providers.ts`). So passing those flags via `-- <args>` is redundant and can CRASH the agent on a duplicate-argument error (codex rejects a duplicated bypass flag; `--yolo` is an alias that string-dedup can't catch). The passthrough mechanism stays as a general escape hatch for OTHER flags (e.g. `-- --model gpt-5-codex`), but the documented daily flow is just `mount claude` / `mount codex` with NO permission flags. README + the SDD skill's remediation messages were corrected accordingly. Idempotent dedup was considered and rejected (aliases + repeatable value-flags need per-agent flag semantics we don't want to own).
+
 `mount <agent>` with no `--` continues to work — same default args as today.
 
 ### 1.3 Drop the relay-monitor gate from `mount`

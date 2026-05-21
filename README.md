@@ -383,13 +383,15 @@ Two terminals, one command each:
 
 ```bash
 # Terminal A (claude's home):
-whisper collab mount claude -- --dangerously-skip-permissions
+whisper collab mount claude
 
 # Terminal B (codex's home):
-whisper collab mount codex -- --full-auto
+whisper collab mount codex
 ```
 
 The first `mount` creates the collab + spins up the broker daemon for the workspace. The second discovers the existing collab and binds the other agent. No `collab start`, no `relay-monitor`, no separate kickoff terminal.
+
+Mounted agents already run in full-permission mode — the relay drives them unattended, so `mount` spawns codex with `--dangerously-bypass-approvals-and-sandbox` and claude with `--dangerously-skip-permissions` automatically. **Do not pass those flags yourself** — they're already on, and passing them again can crash the agent on a duplicate-argument error. The `-- <args>` passthrough exists for *other* flags (e.g. model selection): `whisper collab mount codex -- --model gpt-5-codex`.
 
 To run a workflow (e.g., spec-driven-development), brainstorm a spec with the agents and then invoke the bundled skill from chat:
 
