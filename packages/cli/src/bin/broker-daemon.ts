@@ -4,7 +4,6 @@
  * Reads config from environment variables, opens the broker,
  * starts the HTTP listener, and stays alive.
  */
-import { loadDotEnv } from "../runtime/load-dot-env.js";
 import { createBrokerRuntime } from "@ai-whisper/broker";
 import { createRelayOrchestrator } from "../runtime/relay-orchestrator.js";
 import {
@@ -13,9 +12,11 @@ import {
 } from "../runtime/relay-orchestrator-evaluator.js";
 import { buildEvaluatorObserverCallback } from "../runtime/evaluator-observer.js";
 import { writeOwnPidToBrokerDaemon } from "../runtime/process-start-time.js";
+import {
+	loadEvaluatorConfig,
+	type ResolvedEvaluatorConfig,
+} from "../runtime/evaluator-config.js";
 import { execFile } from "node:child_process";
-
-loadDotEnv();
 
 const sqlitePath = process.env.AI_WHISPER_BROKER_SQLITE!;
 const host = process.env.AI_WHISPER_BROKER_HOST ?? "127.0.0.1";
@@ -33,35 +34,44 @@ if (collabId) {
 
 await broker.start();
 
-function buildProviderConfig(provider: "anthropic" | "ollama"): EvaluatorProviderConfig {
-	if (provider === "anthropic") {
-		return { provider: "anthropic", apiKey: process.env.ANTHROPIC_API_KEY! };
+let resolved: ResolvedEvaluatorConfig | undefined;
+let loaderError: Error | null = null;
+try {
+	resolved = loadEvaluatorConfig();
+} catch (err) {
+	loaderError = err instanceof Error ? err : new Error(String(err));
+}
+
+if (loaderError) {
+	console.error(`evaluator config failed to load: ${loaderError.message}`);
+}
+
+// Returns null when the kind can't be safely constructed (anthropic without a
+// key) — never passes "" / undefined into new Anthropic(...). Guards BOTH
+// primary and fallback, so provider=ollama + fallback=anthropic + no key omits
+// the anthropic fallback rather than building one with an empty key.
+function providerConfigFrom(kind: "anthropic" | "ollama"): EvaluatorProviderConfig | null {
+	if (kind === "anthropic") {
+		if (!resolved || resolved.anthropic.apiKey === null) return null;
+		return { provider: "anthropic", apiKey: resolved.anthropic.apiKey };
 	}
 	return {
 		provider: "ollama",
-		...(process.env.AI_WHISPER_EVALUATOR_OLLAMA_HOST !== undefined
-			? { host: process.env.AI_WHISPER_EVALUATOR_OLLAMA_HOST }
-			: {}),
-		...(process.env.AI_WHISPER_EVALUATOR_OLLAMA_MODEL !== undefined
-			? { model: process.env.AI_WHISPER_EVALUATOR_OLLAMA_MODEL }
-			: {}),
+		...(resolved?.ollama.host ? { host: resolved.ollama.host } : {}),
+		...(resolved?.ollama.model ? { model: resolved.ollama.model } : {}),
 	};
 }
 
 const collab = broker.control.getCollab(collabId);
 
 const evaluator = (() => {
-	if (!collab?.orchestratorEnabled) return null;
-	const rawProvider = process.env.AI_WHISPER_EVALUATOR_PROVIDER ?? "anthropic";
-	const primary = buildProviderConfig(rawProvider === "ollama" ? "ollama" : "anthropic");
-	const rawFallback = process.env.AI_WHISPER_EVALUATOR_FALLBACK;
-	const fallback =
-		rawFallback === "anthropic" || rawFallback === "ollama"
-			? buildProviderConfig(rawFallback)
-			: undefined;
+	if (loaderError || !collab?.orchestratorEnabled || !resolved) return null;
+	const primary = providerConfigFrom(resolved.provider);
+	if (!primary) return null; // e.g. anthropic primary with no key — not configured
+	const fallback = resolved.fallback ? providerConfigFrom(resolved.fallback) : null;
 	return createRelayOrchestratorEvaluator({
 		primary,
-		...(fallback !== undefined ? { fallback } : {}),
+		...(fallback ? { fallback } : {}),
 		onCall: buildEvaluatorObserverCallback({ broker }),
 	});
 })();

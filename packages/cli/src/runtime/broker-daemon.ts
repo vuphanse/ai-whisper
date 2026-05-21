@@ -3,6 +3,13 @@ import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Captured at module-eval time. ES modules finish evaluating all imports before
+// whisper.ts's body executes loadDotEnv(), so this snapshot predates any
+// workspace-.env pollution of process.env. The spawned daemon thus inherits the
+// real shell env (PATH, HOME, a genuinely-exported ANTHROPIC_API_KEY) but NOT
+// workspace-.env additions → evaluator config is workdir-independent.
+const PRISTINE_PROCESS_ENV: NodeJS.ProcessEnv = { ...process.env };
+
 export async function assessBrokerDaemon(input: {
 	host: string;
 	port: number;
@@ -81,7 +88,7 @@ export function buildBrokerDaemonEnv(
 	collabId: string,
 ): NodeJS.ProcessEnv {
 	return {
-		...process.env,
+		...PRISTINE_PROCESS_ENV,
 		AI_WHISPER_BROKER_SQLITE: sqlitePath,
 		AI_WHISPER_BROKER_HOST: host,
 		AI_WHISPER_BROKER_PORT: String(port),
