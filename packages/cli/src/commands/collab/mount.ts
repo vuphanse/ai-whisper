@@ -130,10 +130,19 @@ export async function runCollabMount(input: {
 		try {
 			return tryResolve();
 		} catch (err) {
+			// Auto-create a fresh collab when the workspace has none
+			// (NoCollabFoundForCwd) OR when its only collab was already stopped
+			// (CollabAlreadyStopped — e.g. after `whisper collab stop`; without
+			// this the user could never re-mount in a workspace they'd stopped).
+			// lookupByCwd prefers an active collab, so the new one wins on
+			// re-resolve and the stopped row is harmlessly ignored.
+			// NoLiveDaemonForCollab + WorkspaceUnreadable must still propagate:
+			// the first is a recover scenario, the second a real fs error.
 			if (
 				!(
 					err instanceof CollabResolverError &&
-					err.kind === "NoCollabFoundForCwd"
+					(err.kind === "NoCollabFoundForCwd" ||
+						err.kind === "CollabAlreadyStopped")
 				)
 			) {
 				throw err;

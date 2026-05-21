@@ -85,6 +85,61 @@ describe("runCollabMount auto-create", () => {
 		expect(fakeRuntime.start).toHaveBeenCalledTimes(1);
 	});
 
+	it("re-mounts after the workspace's collab was stopped (auto-creates a fresh active collab)", async () => {
+		// Regression: `whisper collab stop` marks the collab status='stopped'.
+		// resolveCollab then throws CollabAlreadyStopped (not NoCollabFoundForCwd),
+		// which the auto-create branch must ALSO tolerate — otherwise the user
+		// can never re-mount in a workspace they once stopped.
+		const stateRoot = tempStateRoot();
+		process.env.AI_WHISPER_STATE_ROOT = stateRoot;
+		const workspaceRoot = join(stateRoot, "ws-stopped");
+		mkdirSync(workspaceRoot, { recursive: true });
+
+		const fakeRuntime = { start: vi.fn(async () => undefined) };
+		const mountArgs = {
+			workspaceRoot,
+			now: new Date().toISOString(),
+			resolveCurrentTty: () => "/dev/null",
+			createRuntime: () => fakeRuntime as never,
+			assessBroker: async () =>
+				({ pidAlive: true, httpReachable: true, ok: true }) as never,
+			runStartFn: stubbedRunStart,
+		};
+
+		// First mount: auto-creates collab #1.
+		await runCollabMount({ ...mountArgs, target: "codex" });
+		const db1 = openDatabase(getSharedSqlitePath());
+		const firstId = (
+			db1
+				.prepare("SELECT collab_id FROM collab WHERE status = 'active' LIMIT 1")
+				.get() as { collab_id: string }
+		).collab_id;
+		// Simulate `collab stop`: flip the only collab to stopped.
+		db1.prepare("UPDATE collab SET status = 'stopped' WHERE collab_id = ?").run(firstId);
+		db1.close();
+
+		// Second mount in the same workspace must NOT throw CollabAlreadyStopped —
+		// it auto-creates a fresh active collab.
+		await expect(
+			runCollabMount({ ...mountArgs, target: "codex" }),
+		).resolves.toBeUndefined();
+
+		const db2 = openDatabase(getSharedSqlitePath());
+		const activeCount = (
+			db2
+				.prepare("SELECT COUNT(*) AS c FROM collab WHERE status = 'active'")
+				.get() as { c: number }
+		).c;
+		const newActiveId = (
+			db2
+				.prepare("SELECT collab_id FROM collab WHERE status = 'active' LIMIT 1")
+				.get() as { collab_id: string }
+		).collab_id;
+		db2.close();
+		expect(activeCount).toBe(1); // exactly one fresh active collab
+		expect(newActiveId).not.toBe(firstId); // a NEW collab, not the stopped one
+	});
+
 	it("uses the existing collab when one already exists for cwd (no duplicate created)", async () => {
 		const stateRoot = tempStateRoot();
 		process.env.AI_WHISPER_STATE_ROOT = stateRoot;
