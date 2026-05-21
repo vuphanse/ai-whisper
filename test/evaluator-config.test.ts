@@ -6,6 +6,7 @@ import {
 	loadEvaluatorConfig,
 	computeEvaluatorStatus,
 	isEvaluatorReady,
+	isEvaluatorPreflightBlocked,
 } from "../packages/cli/src/runtime/evaluator-config.ts";
 
 function tmpRoot(): string {
@@ -153,5 +154,23 @@ describe("isEvaluatorReady", () => {
 	});
 	it("disabled → false", () => {
 		expect(isEvaluatorReady("disabled")).toBe(false);
+	});
+});
+
+describe("isEvaluatorPreflightBlocked", () => {
+	it("missing_anthropic_key → true", () => {
+		expect(isEvaluatorPreflightBlocked("missing_anthropic_key")).toBe(true);
+	});
+	it("invalid_config → true", () => {
+		expect(isEvaluatorPreflightBlocked("invalid_config")).toBe(true);
+	});
+	it("ready → false", () => {
+		expect(isEvaluatorPreflightBlocked("ready")).toBe(false);
+	});
+	it("unknown → false", () => {
+		expect(isEvaluatorPreflightBlocked("unknown")).toBe(false);
+	});
+	it("disabled → false", () => {
+		expect(isEvaluatorPreflightBlocked("disabled")).toBe(false);
 	});
 });

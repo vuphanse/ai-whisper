@@ -138,3 +138,10 @@ export function isEvaluatorReady(status: EvaluatorStatus): boolean {
 	// "unknown" = older daemon where status column is NULL; treat as ready so pre-migration setups aren't false-blocked.
 	return status === "ready" || status === "unknown";
 }
+
+// Statuses that must block workflow start with an actionable remediation.
+// (disabled/unknown/ready all PROCEED — disabled is governed by createWorkflow's
+// own orchestrator check.) Centralized so the literal set lives in one place.
+export function isEvaluatorPreflightBlocked(status: EvaluatorStatus): boolean {
+	return status === "missing_anthropic_key" || status === "invalid_config";
+}
