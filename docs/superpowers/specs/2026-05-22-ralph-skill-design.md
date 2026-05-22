@@ -91,27 +91,38 @@ Steps:
 4. **Report and exit.** Print exactly:
    > Workflow `<workflowId>` started. Track progress with `whisper collab dashboard`.
 
-   Then stop. Do NOT poll `whisper workflow inspect`; do NOT narrate. The same
-   idle-detection rationale as SDD applies: continuous output from the calling
-   agent blocks the broker's idle detection and stalls the first handoff.
+   This one line is the **only** runtime output the skill emits after kickoff.
+   Then stop. Do NOT poll `whisper workflow inspect`; do NOT narrate; do NOT print
+   the orientation text below. The same idle-detection rationale as SDD applies:
+   continuous output from the calling agent blocks the broker's idle detection and
+   stalls the first handoff.
 
-5. **What ralph does (short orientation block).** One paragraph: ralph loops
-   chunk-by-chunk against the goal, each chunk reviewed; when the implementer
-   claims the whole goal is done, an acceptance review gates completion.
-   `PROGRESS.md` and `LEARNINGS.md` under `.ai-whisper/ralph/<workflowId>/` are its
-   durable memory; per-item auto-commits land the work. The dashboard is the
-   inspection surface.
-
-6. **Resume / cancel.** Same as SDD: `whisper workflow resume <id>` /
+5. **Resume / cancel.** Same as SDD: `whisper workflow resume <id>` /
    `whisper workflow cancel <id>`, fire-and-forget (one line, exit).
+
+**What ralph does (static SKILL.md documentation — NEVER printed at runtime).**
+This orientation paragraph lives in the body of `SKILL.md` as reference prose for
+the invoking agent; it is documentation, not a runtime step, and must NOT be
+emitted after kickoff (that would violate the exactly-one-line report/exit
+contract in step 4 — line 91 vs the orientation block). Content: ralph loops
+chunk-by-chunk against the goal, each chunk reviewed; when the implementer claims
+the whole goal is done, an acceptance review gates completion. `PROGRESS.md` and
+`LEARNINGS.md` under `.ai-whisper/ralph/<workflowId>/` are its durable memory;
+per-item auto-commits land the work. The dashboard is the inspection surface.
+
+(Likewise, the goal-file/per-chunk-procedure framing in step 1 is part of the
+skill's static guidance and pre-kickoff goal-path resolution — never post-kickoff
+narration.)
 
 ### Differences from ai-whisper-sdd (exhaustive)
 
 1. Frontmatter `name`/`description` (ralph trigger phrases).
 2. "Goal file / checklist" framing instead of "spec file".
 3. `--type=ralph-loop` instead of `--type=spec-driven-development`.
-4. The short "what ralph does" orientation block (SDD has no equivalent; helps the
-   invoking agent set user expectations about the looping behavior).
+4. The short "what ralph does" orientation block — **static SKILL.md
+   documentation only** (SDD has no equivalent). It helps the invoking agent
+   understand the looping behavior; it is NOT a runtime step and is never printed
+   after kickoff (runtime output after kickoff is exactly the one line in step 4).
 
 Everything else — the readiness gate, the fire-and-forget rationale, the
 report-and-exit line, resume/cancel — is identical.
@@ -144,7 +155,10 @@ covered by review.
 1. `packages/cli/skills/ai-whisper-ralph/SKILL.md` exists with the four documented
    differences and otherwise mirrors `ai-whisper-sdd`.
 2. The skill kicks off with `--type=ralph-loop` and the resolved absolute goal
-   path; reports exactly one line; instructs no polling.
+   path; the **only** runtime output after kickoff is exactly one line; instructs
+   no polling. The "what ralph does" orientation block is static SKILL.md
+   documentation and is NOT emitted at runtime (line 91 report/exit contract vs
+   the orientation block).
 3. The readiness gate matches `ai-whisper-sdd` (same checks, same remediation
    messages).
 4. `whisper skill install` installs `ai-whisper-ralph` into both
