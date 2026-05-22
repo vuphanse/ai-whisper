@@ -193,13 +193,17 @@ const REVIEW_JSON_SCHEMA = {
 	required: ["verdict", "confidence", "reason"],
 } as const;
 
-/** Split a reviewer handback into its decision body and its Non-blocking risks block. */
+/** Split a reviewer handback into its decision body and its Non-blocking risks block.
+ * Splits on the LAST occurrence of the header — a reviewer may quote the phrase earlier
+ * in the body; only the trailing section is structural. */
 export function separateReviewSections(handbackText: string): { body: string; risks: string } {
-	const marker = /^\s*Non-blocking risks:\s*$/im;
-	const m = handbackText.match(marker);
-	if (!m || m.index === undefined) return { body: handbackText.trim(), risks: "" };
-	const body = handbackText.slice(0, m.index).trim();
-	const risksRaw = handbackText.slice(m.index + m[0].length).trim();
+	const marker = /^\s*Non-blocking risks:\s*$/gim;
+	const matches = [...handbackText.matchAll(marker)];
+	if (matches.length === 0) return { body: handbackText.trim(), risks: "" };
+	const lastMatch = matches[matches.length - 1]!;
+	const splitIndex = lastMatch.index!;
+	const body = handbackText.slice(0, splitIndex).trim();
+	const risksRaw = handbackText.slice(splitIndex + lastMatch[0].length).trim();
 	const risks = /^-?\s*none\.?$/i.test(risksRaw) ? "" : risksRaw;
 	return { body, risks };
 }
@@ -574,8 +578,8 @@ export function createRelayOrchestratorEvaluator(input: {
 						? "delivered"
 						: "execution";
 
-		// For the review branch only: strip the Non-blocking risks block from handbackText
-		// before serialization so the classifier sees only the verdict body.
+		// reviewBranch is a module singleton; identity comparison is intentional. Strip the
+		// Non-blocking risks block only for review classification so it is never misread as findings.
 		const effectivePayload: EvaluatorAnyInput =
 			branch === reviewBranch && "handbackText" in call.payload
 				? {

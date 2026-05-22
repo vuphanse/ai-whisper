@@ -659,6 +659,35 @@ describe("createRelayOrchestratorEvaluator — latencyMs boundary", () => {
 	});
 });
 
+describe("createRelayOrchestratorEvaluator — non-review branches not stripped", () => {
+	it("implement handoff with a Non-blocking risks section is sent to provider unstripped", async () => {
+		const handback = [
+			"Implemented the feature.",
+			"",
+			"Non-blocking risks:",
+			"- concurrent writes may cause issues",
+		].join("\n");
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "delivered", confidence: 0.9, reason: "done" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+		});
+
+		await evaluate({
+			payload: makeWorkflowPayload({ handoffStep: "implement", handbackText: handback }),
+			context: makeContext(),
+		});
+
+		const callArg = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			messages: Array<{ role: string; content: string }>;
+		};
+		// messages[1] is the user/payload message — must NOT be stripped for non-review branches
+		const userContent = callArg.messages[1]?.content ?? "";
+		expect(userContent).toContain("concurrent writes");
+	});
+});
+
 describe("review classification strips the risks block before the provider call", () => {
 	it("sends the stripped body to the classifier payload (not the risks)", async () => {
 		const handback = [

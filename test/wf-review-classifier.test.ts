@@ -28,8 +28,24 @@ describe("separateReviewSections", () => {
 		expect(risks).toBe("");
 	});
 	it("treats 'Non-blocking risks: None.' as no risks content in body", () => {
-		const { body } = separateReviewSections("Approved.\n\nNon-blocking risks:\n- None.");
+		const { body, risks } = separateReviewSections("Approved.\n\nNon-blocking risks:\n- None.");
 		expect(body).not.toMatch(/Non-blocking risks/);
+		expect(risks).toBe("");
+	});
+	it("splits on the LAST Non-blocking risks header when the phrase appears earlier", () => {
+		const text = [
+			"Review matrix:",
+			"| note: see Non-blocking risks: below |",
+			"",
+			"Approved.",
+			"",
+			"Non-blocking risks:",
+			"- real risk here",
+		].join("\n");
+		const { body, risks } = separateReviewSections(text);
+		expect(risks).toContain("real risk here");
+		expect(risks).not.toContain("see Non-blocking risks: below");
+		expect(body).toContain("Approved.");
 	});
 });
 
