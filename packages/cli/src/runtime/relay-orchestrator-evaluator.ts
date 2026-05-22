@@ -259,11 +259,11 @@ Respond with a JSON object:
   "reason": "short explanation"
 }
 
-Rules — route on the EXACT markers, never on fuzzy natural-language cues:
-- "delivered": handbackText contains the exact substring [[RALPH:ITEM-DELIVERED]] or [[RALPH:GOAL-COMPLETE]]. The presence of the exact marker is the delivery signal; do not require any other wording.
-- "escalate": NEITHER exact marker is present (a question, refusal, empty reply, or work that omitted the required marker is all non-delivery), OR the implementer is explicitly blocked / requires clarification before proceeding.
-- Natural-language phrases like "done", "delivered", "implemented", or "fixed" WITHOUT the exact bracketed token do NOT count as delivery.
-- Match the markers as literal substrings of handbackText.`;
+Rules — route on the EXACT markers, positioned on the FINAL line, never on fuzzy natural-language cues:
+- "delivered": handbackText ENDS WITH exactly one of the markers — i.e. the marker [[RALPH:ITEM-DELIVERED]] or [[RALPH:GOAL-COMPLETE]] is the last non-empty line, with no further content after it (trailing whitespace/blank lines are fine). This is the delivery signal; do not require any other wording.
+- "escalate": the handback does NOT end with one of those exact markers. This includes: no marker at all; a marker that appears earlier but is FOLLOWED by more content (e.g. "[[RALPH:GOAL-COMPLETE]]\\nActually, I have a question…" — a question after the marker is non-delivery); a question, refusal, or empty reply; or work that omitted the required final-line marker. Also escalate when the implementer is explicitly blocked or requires clarification.
+- Natural-language phrases like "done", "delivered", "implemented", or "fixed" WITHOUT the exact bracketed token on the final line do NOT count as delivery.
+- Treat the markers as exact literal tokens; only their placement on the final line signals delivery. A marker quoted mid-text (with content after it) is not delivery.`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branch: workflow execute (execution-pass | execution-fail | escalate)

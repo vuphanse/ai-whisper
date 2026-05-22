@@ -50,13 +50,19 @@ describe("selectBranch ralph-loop", () => {
 	// Spec §5.4/§7 — ralph-loop implement/fix classification must route on the EXACT
 	// markers, not generic substantive-work detection. The ralph delivered branch's
 	// prompt names both exact tokens; the review-loop delivered prompt does not.
-	it("ralph-loop implement/fix prompt requires the exact markers", () => {
+	it("ralph-loop implement/fix prompt requires the exact markers on the FINAL line", () => {
 		for (const handoffStep of ["implement", "fix"] as const) {
 			const b = selectBranch(makeWorkflowPayload({ evaluatorPromptKey: "ralph-loop", handoffStep }));
 			expect(b.systemPrompt).toContain("[[RALPH:ITEM-DELIVERED]]");
 			expect(b.systemPrompt).toContain("[[RALPH:GOAL-COMPLETE]]");
 			// it must instruct escalation when neither marker is present
 			expect(b.systemPrompt).toMatch(/escalate/i);
+			// spec §5.4/§7: delivery requires the marker on the FINAL line / "ends with",
+			// not merely "contains" — a marker followed by more content is non-delivery.
+			expect(b.systemPrompt).toMatch(/ends with|final line|last non-empty line/i);
+			expect(b.systemPrompt).toMatch(/followed by more content|after (it|the marker)/i);
+			// the loose "contains the exact substring → delivered" framing must be gone
+			expect(b.systemPrompt).not.toMatch(/contains the exact substring \[\[RALPH/i);
 		}
 	});
 
