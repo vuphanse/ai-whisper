@@ -67,6 +67,8 @@ Non-blocking risks:
 - <quality risk that does NOT block this gate, or "None.">
 
 <verdict line: "Approved. <one or two sentences>" OR, when blocked/cannot-proceed, state you cannot proceed and why>
+
+Never reply with only a single word or a bare verdict; your full reply (matrix + verdict) must be well over 100 characters.
 --- end protocol ---`;
 
 const SDD_SPEC_REVIEW =

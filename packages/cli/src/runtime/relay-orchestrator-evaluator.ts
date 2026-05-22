@@ -201,7 +201,7 @@ export function separateReviewSections(handbackText: string): { body: string; ri
 	const matches = [...handbackText.matchAll(marker)];
 	if (matches.length === 0) return { body: handbackText.trim(), risks: "" };
 	const lastMatch = matches[matches.length - 1]!;
-	const splitIndex = lastMatch.index!;
+	const splitIndex = lastMatch.index;
 	const body = handbackText.slice(0, splitIndex).trim();
 	const risksRaw = handbackText.slice(splitIndex + lastMatch[0].length).trim();
 	const risks = /^-?\s*none\.?$/i.test(risksRaw) ? "" : risksRaw;

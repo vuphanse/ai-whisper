@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 // NOT on the broker package index).
 import {
 	WORKFLOW_REVIEW_PROTOCOL,
-	type ReviewMode,
 	renderTemplate,
 	SPEC_DRIVEN_DEVELOPMENT,
 	RALPH_LOOP,
@@ -51,15 +50,15 @@ describe("review templates embed the protocol", () => {
 		}
 	});
 	it("ralph item review and acceptance review embed the fragment", () => {
-		const ralph = RALPH_LOOP.phases[0];
+		const ralph = RALPH_LOOP.phases[0]!;
 		expect(ralph.stepTemplates.review).toContain(MARKER);
 		expect(ralph.acceptanceReviewTemplate).toContain(MARKER);
 	});
 	it("each review phase declares a reviewMode", () => {
-		expect(SPEC_DRIVEN_DEVELOPMENT.phases[0].reviewMode).toBe("phase-review");
-		expect(SPEC_DRIVEN_DEVELOPMENT.phases[1].reviewMode).toBe("phase-review");
-		expect(SPEC_DRIVEN_DEVELOPMENT.phases[3].reviewMode).toBe("acceptance-review");
-		expect(RALPH_LOOP.phases[0].reviewMode).toBe("chunk-review");
+		expect(SPEC_DRIVEN_DEVELOPMENT.phases[0]!.reviewMode).toBe("phase-review");
+		expect(SPEC_DRIVEN_DEVELOPMENT.phases[1]!.reviewMode).toBe("phase-review");
+		expect(SPEC_DRIVEN_DEVELOPMENT.phases[3]!.reviewMode).toBe("acceptance-review");
+		expect(RALPH_LOOP.phases[0]!.reviewMode).toBe("chunk-review");
 	});
 });
 
@@ -76,7 +75,7 @@ describe("reviewMode rendering", () => {
 		expect(out).not.toContain("{reviewMode}");
 	});
 	it("the rendered code-review KICKOFF (initial handoff) has no literal placeholder", () => {
-		const codeReview = SPEC_DRIVEN_DEVELOPMENT.phases[3];
+		const codeReview = SPEC_DRIVEN_DEVELOPMENT.phases[3]!;
 		const out = renderTemplate(codeReview.kickoffTemplate, {
 			specPath: "/g", planPath: "/p", commitRange: "A..B", ralphDir: "/r",
 			reviewMode: codeReview.reviewMode ?? "phase-review",

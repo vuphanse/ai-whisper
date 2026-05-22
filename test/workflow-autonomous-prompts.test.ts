@@ -6,12 +6,19 @@ import { SPEC_DRIVEN_DEVELOPMENT } from "../packages/broker/src/runtime/workflow
 // (b) constrain reviewers to block only on concrete acceptance-criteria
 // violations — otherwise the implementer defers and the reviewer nitpicks,
 // and the orchestrator correctly but uselessly escalates.
+//
+// NOTE: review steps now embed the canonical WORKFLOW_REVIEW_PROTOCOL fragment.
+// Under that protocol the reviewer suppresses style/taste entirely and blocks
+// only on concrete contract violations, but speculative/quality concerns are NO
+// LONGER gagged — they are recorded in a non-blocking risk channel (they don't
+// block, so they don't cause nitpick-escalation). NO_NITS therefore checks for
+// the style-suppression policy, not for speculative-gagging.
 
 const NO_ASK = /never ask|do not ask|without asking/i;
 const NO_HUMAN = /no human|autonomous/i;
 const APPROVE_ON_CRITERIA = /acceptance criteria/i;
-const BLOCKING_ONLY = /only .*(blocking|concrete)|concrete,? .*blocking/i;
-const NO_NITS = /do not raise|no stylistic|not? (raise )?(stylistic|scope|speculative)/i;
+const BLOCKING_ONLY = /only .*(blocking|concrete)|concrete,? .*blocking|blocking only/i;
+const NO_NITS = /do not raise|no stylistic|suppress style|do not block on style/i;
 
 describe("spec-driven-development autonomous prompt framing", () => {
 	const phases = SPEC_DRIVEN_DEVELOPMENT.phases;

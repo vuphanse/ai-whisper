@@ -47,7 +47,7 @@ describe("WorkflowDriver", () => {
 		await new Promise((r) => setImmediate(r));
 		const row = broker.db
 			.prepare(
-				`SELECT request_text FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at ASC LIMIT 1`,
+				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at ASC LIMIT 1",
 			)
 			.get(workflowId) as { request_text: string } | undefined;
 		const firstKickoffText = row?.request_text ?? "";
