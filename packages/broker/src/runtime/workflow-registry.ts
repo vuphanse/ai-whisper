@@ -55,7 +55,9 @@ Severity:
 
 Missing context: if an input REQUIRED FOR THIS MODE is absent, you are blocked — do not approve and do not file a fixable finding (the implementer cannot supply review context). Signal that you CANNOT PROCEED so the gate ESCALATES and halts.
 
-Output format:
+Never reply with only a single word or a bare verdict; your full reply (matrix + verdict) must be well over 100 characters.
+
+Output format — the verdict line MUST come before the Non-blocking risks section, which is always LAST:
 Review matrix:
 | Requirement | Evidence | Test/verification evidence | Result |
 | ... |
@@ -63,12 +65,10 @@ Review matrix:
 Findings:           (omit this block entirely if none)
 - <blocking finding tied to an exact contract item, with file/line or command evidence>
 
-Non-blocking risks:
-- <quality risk that does NOT block this gate, or "None.">
-
 <verdict line: "Approved. <one or two sentences>" OR, when blocked/cannot-proceed, state you cannot proceed and why>
 
-Never reply with only a single word or a bare verdict; your full reply (matrix + verdict) must be well over 100 characters.
+Non-blocking risks:
+- <quality risk that does NOT block this gate, or "None.">
 --- end protocol ---`;
 
 const SDD_SPEC_REVIEW =

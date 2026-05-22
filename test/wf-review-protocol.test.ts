@@ -30,6 +30,17 @@ describe("WORKFLOW_REVIEW_PROTOCOL canonical fragment", () => {
 	it("requires an adversarial pass", () => {
 		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/adversarial/i);
 	});
+	it("places the verdict before the trailing Non-blocking risks section (so the risk strip never removes the verdict)", () => {
+		// separateReviewSections strips from the LAST `Non-blocking risks:` header
+		// onward; the verdict line must therefore come BEFORE that section or a
+		// protocol-compliant approval loses its verdict before classification.
+		const verdictIdx = WORKFLOW_REVIEW_PROTOCOL.indexOf('"Approved.');
+		const lastRisksIdx = WORKFLOW_REVIEW_PROTOCOL.lastIndexOf(
+			"Non-blocking risks:",
+		);
+		expect(verdictIdx).toBeGreaterThan(-1);
+		expect(lastRisksIdx).toBeGreaterThan(verdictIdx);
+	});
 });
 
 const MARKER = "ai-whisper workflow review protocol";
