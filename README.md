@@ -387,17 +387,22 @@ To run a workflow (e.g., spec-driven-development), brainstorm a spec with the ag
 - Claude: type `/` and pick `ai-whisper-sdd`, or just say *"run SDD on \<path\>"*
 - Codex: type `$` and pick `ai-whisper-sdd`, or natural phrasing as above
 
-The skill verifies readiness, kicks off the workflow, and exits. The dashboard (`whisper collab dashboard`) is the inspection surface during the run.
+To run the ralph-loop workflow against an open-ended goal file instead, invoke `ai-whisper-ralph` the same way:
+
+- Claude: type `/` and pick `ai-whisper-ralph`, or just say *"run ralph on \<path\>"*
+- Codex: type `$` and pick `ai-whisper-ralph`, or natural phrasing as above
+
+Either skill verifies readiness, kicks off the workflow, and exits. The dashboard (`whisper collab dashboard`) is the inspection surface during the run.
 
 ## Required skills
 
-The bundled workflows (currently `spec-driven-development`; more later) rely on agent skills to verify, kick off, and report. Install them once after installing the CLI:
+The bundled workflows (`spec-driven-development` and `ralph-loop`) rely on agent skills to verify, kick off, and report. Install them once after installing the CLI:
 
 ```bash
 whisper skill install
 ```
 
-This copies `ai-whisper-sdd` (and any future bundled skills) into both `~/.claude/skills/` and `~/.codex/skills/`. Re-run with `--force` after a CLI upgrade. Use `--target=claude` or `--target=codex` to install for only one agent.
+This copies `ai-whisper-sdd` and `ai-whisper-ralph` into both `~/.claude/skills/` and `~/.codex/skills/`. Re-run with `--force` after a CLI upgrade. Use `--target=claude` or `--target=codex` to install for only one agent.
 
 Workflow *review* gates do not use a bundled skill — the review protocol is embedded directly in the orchestrator's review handoff prompt, so reviewers need nothing installed beyond the kickoff skills above.
 
