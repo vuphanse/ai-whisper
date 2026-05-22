@@ -658,3 +658,38 @@ describe("createRelayOrchestratorEvaluator — latencyMs boundary", () => {
 		expect((client.chat as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
 	});
 });
+
+describe("review classification strips the risks block before the provider call", () => {
+	it("sends the stripped body to the classifier payload (not the risks)", async () => {
+		const handback = [
+			"Review matrix:",
+			"| R | E | T | Pass |",
+			"",
+			"Approved. Every criterion met.",
+			"",
+			"Non-blocking risks:",
+			"- may break under concurrent writes",
+		].join("\n");
+		const client = makeOllamaClient(
+			JSON.stringify({ verdict: "approve", confidence: 0.9, reason: "ok" }),
+		);
+		const evaluate = createRelayOrchestratorEvaluator({
+			primary: { provider: "ollama", client },
+		});
+
+		await evaluate({
+			payload: makeWorkflowPayload({ handoffStep: "review", handbackText: handback }),
+			context: makeContext(),
+		});
+
+		const callArg = (client.chat as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			messages: Array<{ role: string; content: string }>;
+		};
+		// Assert ONLY on the user/payload message (messages[1]). messages[0] is the
+		// system prompt, which legitimately contains "Non-blocking risks" (a rule).
+		const userContent = callArg.messages[1]?.content ?? "";
+		expect(userContent).toContain("Approved.");
+		expect(userContent).not.toContain("concurrent writes");
+		expect(userContent).not.toMatch(/Non-blocking risks/);
+	});
+});
