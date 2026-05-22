@@ -69,6 +69,14 @@ Non-blocking risks:
 <verdict line: "Approved. <one or two sentences>" OR, when blocked/cannot-proceed, state you cannot proceed and why>
 --- end protocol ---`;
 
+const SDD_SPEC_REVIEW =
+	"Review the spec at {specPath}. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
+
+const SDD_CODE_REVIEW =
+	"Review commits {commitRange} against the spec's acceptance criteria, and run the project's verification/tests. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
+
 export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 	type: "spec-driven-development",
 	displayName: "Spec-Driven Development",
@@ -82,13 +90,12 @@ export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 			reviewerRole: "reviewer",
 			maxRounds: 5,
 			initialHandoffStep: "review",
-			kickoffTemplate:
-				"Review the spec at {specPath}. This is an autonomous workflow with no human in the loop. Reply 'Approved' if the spec is internally consistent and implementable against its own acceptance criteria. Return findings ONLY for concrete, blocking defects (contradictions, or violations of the spec's own acceptance criteria); do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead your reply with the verdict ('Approved' or 'Findings: ...'), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.",
+			kickoffTemplate: SDD_SPEC_REVIEW,
 			stepTemplates: {
-				review:
-					"Review the spec at {specPath}. This is an autonomous workflow with no human in the loop. Reply 'Approved' if the spec is internally consistent and implementable against its own acceptance criteria. Return findings ONLY for concrete, blocking defects (contradictions, or violations of the spec's own acceptance criteria); do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead your reply with the verdict ('Approved' or 'Findings: ...'), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.",
+				review: SDD_SPEC_REVIEW,
 				fix: "Apply the reviewer's findings to {specPath} now. This is an autonomous workflow — no human will respond. Make the edits yourself and hand back the corrected spec; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.",
 			},
+			reviewMode: "phase-review",
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "spec", pathTemplate: "{specPath}" },
 		},
@@ -104,9 +111,11 @@ export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 				implement:
 					"Using the approved spec at {specPath}, write a complete implementation plan to {planPath}, then hand back. This is an autonomous workflow — no human will respond. Do the work yourself now; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you wrote; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.",
 				review:
-					"Review the implementation plan at {planPath} against the spec's acceptance criteria. This is an autonomous workflow with no human in the loop. Reply 'Approved' if the plan would satisfy those acceptance criteria. Return findings ONLY for concrete, blocking violations of the acceptance criteria; do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead your reply with the verdict ('Approved' or 'Findings: ...'), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.",
+					"Review the implementation plan at {planPath} against the spec's acceptance criteria. This is an autonomous workflow with no human in the loop.\n\n" +
+					WORKFLOW_REVIEW_PROTOCOL,
 				fix: "Apply the reviewer's findings to {planPath} now. This is an autonomous workflow — no human will respond. Make the edits yourself and hand back the corrected plan; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.",
 			},
+			reviewMode: "phase-review",
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "plan", pathTemplate: "{planPath}" },
 		},
@@ -131,13 +140,12 @@ export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 			reviewerRole: "reviewer",
 			maxRounds: 5,
 			initialHandoffStep: "review",
-			kickoffTemplate:
-				"Review commits {commitRange} against the spec's acceptance criteria, and run the project's verification/tests. This is an autonomous workflow with no human in the loop. Reply 'Approved' if the acceptance criteria are met and verification passes. Return findings ONLY for concrete, blocking violations of the acceptance criteria; do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead your reply with the verdict ('Approved' or 'Findings: ...'), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.",
+			kickoffTemplate: SDD_CODE_REVIEW,
 			stepTemplates: {
-				review:
-					"Review commits {commitRange} against the spec's acceptance criteria, and run the project's verification/tests. This is an autonomous workflow with no human in the loop. Reply 'Approved' if the acceptance criteria are met and verification passes. Return findings ONLY for concrete, blocking violations of the acceptance criteria; do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead your reply with the verdict ('Approved' or 'Findings: ...'), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.",
+				review: SDD_CODE_REVIEW,
 				fix: "Apply the reviewer's findings to commits {commitRange} now (amend or add commits as needed). This is an autonomous workflow — no human will respond. Do the work yourself and hand back the updated commit SHAs and verification output; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.",
 			},
+			reviewMode: "acceptance-review",
 			evaluatorPromptKey: "review-loop",
 			artifactOut: { kind: "commit-range" },
 		},
@@ -167,10 +175,12 @@ Also append any GENERALIZABLE lesson from these findings (a mistake likely to re
 End your handback with a 1-2 sentence summary, then on its own final line the exact marker [[RALPH:ITEM-DELIVERED]]. Your reply must be at least two sentences, well over 100 characters.`;
 
 const RALPH_ITEM_REVIEW =
-	"Review the latest delivered chunk against the goal at {specPath}. This is an autonomous workflow with no human in the loop. Reply \"Approved\" if the chunk is a correct, complete unit of progress consistent with the goal. Return findings ONLY for concrete, blocking defects; do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead with the verdict (\"Approved\" or \"Findings: ...\"), then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.";
+	"Review the latest delivered chunk against the goal at {specPath}. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
 
 const RALPH_ACCEPTANCE_REVIEW =
-	"The implementer claims the ENTIRE goal at {specPath} is complete. This is an autonomous workflow with no human in the loop. Verify the goal's completion/acceptance criteria against the current repository state. Reply \"Approved\" if every criterion is met. Otherwise return \"Findings: ...\" naming the specific remaining gaps (these become the next items). Do not raise stylistic, scope, or speculative concerns, and do not ask questions. Lead with the verdict, then justify it; your full reply must be at least two sentences, well over 100 characters — never reply with only a single word or a bare verdict.";
+	"The implementer claims the ENTIRE goal at {specPath} is complete. Verify the goal's completion/acceptance criteria against the current repository state. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
 
 export const RALPH_LOOP: WorkflowDefinition = {
 	type: "ralph-loop",
@@ -193,6 +203,7 @@ export const RALPH_LOOP: WorkflowDefinition = {
 				review: RALPH_ITEM_REVIEW,
 			},
 			acceptanceReviewTemplate: RALPH_ACCEPTANCE_REVIEW,
+			reviewMode: "chunk-review",
 			evaluatorPromptKey: "ralph-loop",
 			repeatUntilComplete: true,
 			maxIterations: 100,
