@@ -243,6 +243,28 @@ const DELIVERED_JSON_SCHEMA = {
 	required: ["verdict", "confidence", "reason"],
 } as const;
 
+// ralph-loop implement/fix classification routes on the EXACT marker tokens
+// (spec §5.4/§7) — never on fuzzy natural-language delivery cues. A substantive
+// reply WITHOUT one of the exact markers is non-delivery → escalate.
+const RALPH_DELIVERED_SYSTEM_PROMPT = `You are a neutral judge classifying an implementer's handback inside an autonomous ralph loop.
+
+Input is a JSON object including handbackText (the implementer's response) and contextual fields. The implementer was instructed to end a substantive handback with one of two EXACT marker tokens on its own final line:
+- [[RALPH:ITEM-DELIVERED]] — a unit of work was delivered (or a fix was applied)
+- [[RALPH:GOAL-COMPLETE]] — the implementer claims the whole goal is complete
+
+Respond with a JSON object:
+{
+  "verdict": "delivered" | "escalate",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation"
+}
+
+Rules — route on the EXACT markers, never on fuzzy natural-language cues:
+- "delivered": handbackText contains the exact substring [[RALPH:ITEM-DELIVERED]] or [[RALPH:GOAL-COMPLETE]]. The presence of the exact marker is the delivery signal; do not require any other wording.
+- "escalate": NEITHER exact marker is present (a question, refusal, empty reply, or work that omitted the required marker is all non-delivery), OR the implementer is explicitly blocked / requires clarification before proceeding.
+- Natural-language phrases like "done", "delivered", "implemented", or "fixed" WITHOUT the exact bracketed token do NOT count as delivery.
+- Match the markers as literal substrings of handbackText.`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Branch: workflow execute (execution-pass | execution-fail | escalate)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,6 +341,14 @@ const deliveredBranch: Branch<WorkflowEvaluatorVerdict> = {
 	parse: makeParser(deliveredVerdictSchema),
 };
 
+// Same delivered|escalate schema as deliveredBranch, but the ralph-loop prompt
+// requires the exact handback markers (spec §5.4/§7).
+const ralphDeliveredBranch: Branch<WorkflowEvaluatorVerdict> = {
+	systemPrompt: RALPH_DELIVERED_SYSTEM_PROMPT,
+	jsonSchema: DELIVERED_JSON_SCHEMA,
+	parse: makeParser(deliveredVerdictSchema),
+};
+
 const executionBranch: Branch<WorkflowEvaluatorVerdict> = {
 	systemPrompt: EXECUTION_SYSTEM_PROMPT,
 	jsonSchema: EXECUTION_JSON_SCHEMA,
@@ -328,10 +358,12 @@ const executionBranch: Branch<WorkflowEvaluatorVerdict> = {
 export function selectBranch(payload: EvaluatorAnyInput): Branch<EvaluatorAnyVerdict> {
 	if ("evaluatorPromptKey" in payload) {
 		if (payload.evaluatorPromptKey === "execution-gate") return executionBranch;
-		// review-loop: dispatch by handoffStep
+		// review-loop AND ralph-loop: dispatch by handoffStep
 		if (payload.handoffStep === "review") return reviewBranch;
 		if (payload.handoffStep === "implement" || payload.handoffStep === "fix") {
-			return deliveredBranch;
+			// ralph-loop delivered classification routes on the exact markers (spec §5.4/§7);
+			// review-loop uses the generic delivered prompt.
+			return payload.evaluatorPromptKey === "ralph-loop" ? ralphDeliveredBranch : deliveredBranch;
 		}
 		// Unknown step inside review-loop — fall back to review schema; the
 		// orchestrator pre-validates handoffStep so this is defensive only.
@@ -573,7 +605,7 @@ export function createRelayOrchestratorEvaluator(input: {
 				? "legacy"
 				: branch === reviewBranch
 					? "review"
-					: branch === deliveredBranch
+					: branch === deliveredBranch || branch === ralphDeliveredBranch
 						? "delivered"
 						: "execution";
 

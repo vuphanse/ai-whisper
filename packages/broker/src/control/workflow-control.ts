@@ -1196,7 +1196,20 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 	}
 
 	function getHandoffWithWorkflowMeta(handoffId: string) {
-		return getHandoffWithWorkflowMetaById(db, handoffId);
+		const meta = getHandoffWithWorkflowMetaById(db, handoffId);
+		if (!meta) return null;
+		// Plumb the phase's configured evaluatorPromptKey through the handoff metadata
+		// (spec §5.3) so the orchestrator consumes the configured key rather than
+		// re-deriving it. Falls back to null for non-workflow / unconfigured phases,
+		// which the orchestrator maps to its handoffStep derivation (SDD unaffected).
+		let evaluatorPromptKey: "review-loop" | "execution-gate" | "ralph-loop" | null = null;
+		if (meta.workflowId) {
+			const wf = getWorkflowById(db, meta.workflowId);
+			const def = wf ? getWorkflowDefinition(wf.workflowType) : undefined;
+			const phase = def?.phases.find((p) => p.name === meta.phaseName);
+			evaluatorPromptKey = phase?.evaluatorPromptKey ?? null;
+		}
+		return { ...meta, evaluatorPromptKey };
 	}
 
 	function getLatestHandoffForPhaseRun(phaseRunId: string): { handoffStep: string } | null {

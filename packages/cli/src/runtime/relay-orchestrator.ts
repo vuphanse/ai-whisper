@@ -9,6 +9,20 @@ import type {
 } from "./relay-orchestrator-evaluator.ts";
 import { separateReviewSections } from "./relay-orchestrator-evaluator.js";
 
+/** Fallback evaluator-key derivation, used only when the handoff metadata carries
+ * no configured `evaluatorPromptKey` (e.g. legacy/unconfigured phases). The
+ * configured key now travels through `getHandoffWithWorkflowMeta` (spec §5.3);
+ * this preserves the pre-existing SDD behavior for the absent-metadata case. */
+export function deriveDefaultEvaluatorKey(
+	handoffStep: "review" | "fix" | "implement" | "execute",
+): "review-loop" | "execution-gate" {
+	return handoffStep === "execute" ? "execution-gate" : "review-loop";
+}
+
+/** Resolve the evaluator prompt key from the registry by workflow type + phase.
+ * Retained for direct resolution/tests; the orchestrator runtime consumes the
+ * key from handoff metadata (spec §5.3) and only falls back to
+ * {@link deriveDefaultEvaluatorKey} when that metadata key is absent. */
 export function resolveEvaluatorPromptKey(input: {
 	workflowType: string;
 	phaseName: string | null;
@@ -17,7 +31,7 @@ export function resolveEvaluatorPromptKey(input: {
 	const def = getWorkflowDefinition(input.workflowType);
 	const phase = def?.phases.find((p) => p.name === input.phaseName);
 	if (phase?.evaluatorPromptKey) return phase.evaluatorPromptKey;
-	return input.handoffStep === "execute" ? "execution-gate" : "review-loop";
+	return deriveDefaultEvaluatorKey(input.handoffStep);
 }
 
 type BrokerLike = {
@@ -99,6 +113,7 @@ type BrokerLike = {
 			targetAgent: string;
 			requestText: string;
 			rootRequestText: string | null;
+			evaluatorPromptKey: "review-loop" | "execution-gate" | "ralph-loop" | null;
 		} | null;
 		getWorkflow: (id: string) => { workflowType: string } | null | undefined;
 	};
@@ -176,12 +191,9 @@ export function createRelayOrchestrator(input: {
 				const handoffStep: HandoffStep = VALID_STEPS.includes(rawStep as HandoffStep)
 					? (rawStep as HandoffStep)
 					: "review";
-				const wf = input.broker.control.getWorkflow(meta.workflowId);
-				const evaluatorPromptKey = resolveEvaluatorPromptKey({
-					workflowType: wf?.workflowType ?? "",
-					phaseName: meta.phaseName,
-					handoffStep,
-				});
+				// Consume the configured key plumbed through the handoff metadata
+				// (spec §5.3); fall back to the handoffStep derivation only when absent.
+				const evaluatorPromptKey = meta.evaluatorPromptKey ?? deriveDefaultEvaluatorKey(handoffStep);
 
 				const wfPayload: WorkflowEvaluatorInput = {
 					...buildEvaluatorInput(claimed),

@@ -66,4 +66,26 @@ describe("ralph-loop workflow definition", () => {
 		// acceptance template covers the whole goal, not just a single chunk
 		expect(acceptanceTemplate).toContain("ENTIRE");
 	});
+
+	// Spec §11 / acceptance criterion 2 — the anti-amnesia obligations must be pinned
+	// to committed coverage so a regression dropping them from the templates fails here.
+	it("kickoff template instructs reading + re-orienting from both memory files", () => {
+		const kickoff = def!.phases[0]!.stepTemplates.implement!;
+		expect(kickoff).toContain("PROGRESS.md");
+		expect(kickoff).toContain("LEARNINGS.md");
+		// treat the files as ground truth and re-orient from them, not prior conversation
+		expect(kickoff).toMatch(/re-?orient/i);
+		expect(kickoff).toMatch(/ground truth/i);
+	});
+
+	it("kickoff template instructs maintaining PROGRESS.md each item", () => {
+		const kickoff = def!.phases[0]!.stepTemplates.implement!;
+		expect(kickoff).toMatch(/update PROGRESS\.md/i);
+	});
+
+	it("fix template instructs appending a GENERALIZABLE lesson to LEARNINGS.md", () => {
+		const fixTemplate = def!.phases[0]!.stepTemplates.fix!;
+		expect(fixTemplate).toContain("LEARNINGS.md");
+		expect(fixTemplate).toMatch(/generaliz/i);
+	});
 });
