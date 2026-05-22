@@ -120,6 +120,68 @@ describe("RelayOrchestrator — workflow-aware routing", () => {
 		expect(broker.control.getWorkflow(workflowId)?.currentPhaseIndex).toBe(1);
 	});
 
+	it("findings verdict forwards the reviewer's OWN findings (handback body, minus non-blocking risks)", async () => {
+		// Fix #2: the evaluator returns classification only (no followUpMessage); the
+		// orchestrator forwards separateReviewSections(handback).body as the fix request.
+		const broker = boot();
+		const { workflowId } = broker.control.createWorkflow({
+			collabId: "collab_c1",
+			workflowType: "spec-driven-development",
+			specPath: "docs/spec.md",
+			roleBindings: { implementer: "claude", reviewer: "codex" },
+			now: "2026-04-21T00:00:00Z",
+		});
+		const { handoffId } = broker.control.beginPhaseRun({
+			workflowId,
+			phaseIndex: 0,
+			phaseName: "spec-refining",
+			initialHandoffStep: "review",
+			kickoffText: "Review",
+			sender: "claude",
+			target: "codex",
+			maxRounds: 5,
+			now: "2026-04-21T00:01:00Z",
+		});
+		broker.control.acceptRelayHandoff({ handoffId, acceptedAt: "2026-04-21T00:01:10Z" });
+		const reviewerHandback = [
+			"Review matrix: | R | E | T | Pass |",
+			"",
+			"Findings:",
+			"- Blocking: the spec contradicts itself at line 42.",
+			"",
+			"Non-blocking risks:",
+			"- minor: naming could be clearer",
+		].join("\n");
+		broker.control.handoffBackRelay({
+			handoffId,
+			nextHandoffId: "unused_findings",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: reviewerHandback,
+			now: "2026-04-21T00:01:20Z",
+		});
+
+		const orchestrator = createRelayOrchestrator({
+			broker,
+			collabId: "collab_c1",
+			evaluate: async () => ({ verdict: "findings", confidence: 0.8, reason: "has blocking findings" }),
+			readWorkspaceHead: async () => "abcdef1234567890abcdef1234567890abcdef12",
+			pollIntervalMs: 10,
+		});
+		await orchestrator.pollOnce();
+
+		// loops within phase 0 (does not advance)
+		expect(broker.control.getWorkflow(workflowId)?.currentPhaseIndex).toBe(0);
+		// the fix handoff carries the reviewer's findings verbatim, minus the risks block
+		const fix = broker.db
+			.prepare(
+				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at DESC LIMIT 1",
+			)
+			.get(workflowId) as { request_text: string };
+		expect(fix.request_text).toContain("the spec contradicts itself at line 42");
+		expect(fix.request_text).not.toContain("naming could be clearer");
+	});
+
 	it("workflow chain: evaluator escalate → workflow halted", async () => {
 		const broker = boot();
 		const { workflowId } = broker.control.createWorkflow({

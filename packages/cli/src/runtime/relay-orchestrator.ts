@@ -7,6 +7,7 @@ import type {
 	WorkflowEvaluatorInput,
 	WorkflowEvaluatorVerdict,
 } from "./relay-orchestrator-evaluator.ts";
+import { separateReviewSections } from "./relay-orchestrator-evaluator.js";
 
 export function resolveEvaluatorPromptKey(input: {
 	workflowType: string;
@@ -251,8 +252,11 @@ export function createRelayOrchestrator(input: {
 						verdict: wfVerdict.verdict,
 						confidence: wfVerdict.confidence,
 						reason: wfVerdict.reason,
-						...(wfVerdict.verdict === "findings" && wfVerdict.followUpMessage !== undefined
-							? { followUpMessage: wfVerdict.followUpMessage }
+						// Fix #2: forward the reviewer's OWN findings (handback body, minus the
+						// non-blocking risks section) — not an evaluator reproduction. The
+						// evaluator only classifies, so its output stays small (no truncation).
+						...(wfVerdict.verdict === "findings"
+							? { followUpMessage: separateReviewSections(claimed.handbackText ?? "").body }
 							: {}),
 						...(extractedCommitShas !== undefined ? { extractedCommitShas } : {}),
 						...(workspaceHeadSha !== undefined ? { workspaceHeadSha } : {}),

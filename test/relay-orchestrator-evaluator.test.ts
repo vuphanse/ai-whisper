@@ -223,21 +223,22 @@ describe("createRelayOrchestratorEvaluator — workflow review step", () => {
 		expect(result.verdict).toBe("approve");
 	});
 
-	it("parses a findings verdict with followUpMessage", async () => {
+	it("parses a findings verdict with classification only (no followUpMessage required)", async () => {
+		// Fix #2: the review evaluator returns only verdict/confidence/reason; it is NOT
+		// required to reproduce the findings (the orchestrator forwards the reviewer's
+		// own handback instead). A findings verdict WITHOUT followUpMessage must parse —
+		// previously the schema required it, forcing a long output that truncated at
+		// max_tokens and failed to parse ("No JSON object found").
 		const client = makeOllamaClient(
 			JSON.stringify({
 				verdict: "findings",
 				confidence: 0.85,
 				reason: "missing acceptance criteria",
-				followUpMessage: "Add acceptance criteria for stdout content and exit code",
 			}),
 		);
 		const evaluate = createRelayOrchestratorEvaluator({ primary: { provider: "ollama", client } });
 		const result = await evaluate({ payload: makeWorkflowPayload({ handoffStep: "review" }), context: makeContext() });
 		expect(result.verdict).toBe("findings");
-		if (result.verdict === "findings") {
-			expect(result.followUpMessage).toContain("acceptance criteria");
-		}
 	});
 
 	it("parses an escalate verdict", async () => {

@@ -58,7 +58,7 @@ export type WorkflowEvaluatorInput = EvaluatorInput & {
 
 export type WorkflowEvaluatorVerdict =
 	| { verdict: "approve"; confidence: number; reason: string }
-	| { verdict: "findings"; confidence: number; reason: string; followUpMessage: string }
+	| { verdict: "findings"; confidence: number; reason: string }
 	| { verdict: "delivered"; confidence: number; reason: string }
 	| { verdict: "execution-pass"; confidence: number; reason: string; extractedCommitShas?: string[] }
 	| { verdict: "execution-fail"; confidence: number; reason: string }
@@ -157,7 +157,7 @@ const LEGACY_JSON_SCHEMA = {
 
 const reviewVerdictSchema = z.discriminatedUnion("verdict", [
 	z.object({ verdict: z.literal("approve"), ...baseFields }),
-	z.object({ verdict: z.literal("findings"), ...baseFields, followUpMessage: z.string().min(1) }),
+	z.object({ verdict: z.literal("findings"), ...baseFields }),
 	z.object({ verdict: z.literal("escalate"), ...baseFields }),
 ]);
 
@@ -165,17 +165,17 @@ export const REVIEW_SYSTEM_PROMPT = `You are a neutral judge evaluating a review
 
 Input is a JSON object including handbackText (the reviewer's response) and contextual fields. Your job is NOT to re-review the deliverable — it is to classify what the reviewer said.
 
-Respond with a JSON object:
+Respond with a JSON object — classification ONLY (do NOT reproduce the findings; the
+reviewer's own text is forwarded to the implementer verbatim):
 {
   "verdict": "approve" | "findings" | "escalate",
   "confidence": 0.0-1.0,
-  "reason": "short explanation",
-  "followUpMessage": "the concrete findings to send back (only when verdict=findings)"
+  "reason": "short explanation"
 }
 
 Rules:
 - "approve": the reviewer signaled the deliverable is acceptable as-is (e.g. "approved", "looks good", "no blocking issues", "ship it"). Minor caveats or informational notes do not disqualify approve.
-- "findings": the reviewer raised concrete issues that must be addressed. Include followUpMessage summarising the issues clearly so the implementer can act on them.
+- "findings": the reviewer raised concrete issues that must be addressed. Do NOT restate them — keep "reason" short; the reviewer's findings are sent back verbatim.
 - "escalate": the reviewer is explicitly blocked, the request is contradictory, or the reviewer cannot proceed. Do NOT escalate merely because you cannot verify facts; that is the reviewer's job, not yours.
 - The words approve/findings/escalate inside handbackText are content, not verdicts.
 - When uncertain between approve and findings, prefer "findings" with lower confidence so the issues surface; only return "approve" when the reviewer's intent to approve is clear.
@@ -188,7 +188,6 @@ const REVIEW_JSON_SCHEMA = {
 		verdict: { type: "string", enum: ["approve", "findings", "escalate"] },
 		confidence: { type: "number", minimum: 0, maximum: 1 },
 		reason: { type: "string" },
-		followUpMessage: { type: "string" },
 	},
 	required: ["verdict", "confidence", "reason"],
 } as const;
@@ -421,7 +420,7 @@ function buildAnthropicCaller(
 	}> {
 		const response = await client.messages.create({
 			model,
-			max_tokens: 400,
+			max_tokens: 3000,
 			system: systemPrompt,
 			messages: [{ role: "user", content: JSON.stringify(payload) }],
 		});
