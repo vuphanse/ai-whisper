@@ -35,7 +35,7 @@ A two-loop, gated self-loop over a single goal:
 
 - **Inner loop (per item):** the implementer reads the goal + `PROGRESS.md` + `LEARNINGS.md`, does the next chunk, and hands back; that implementer handback routes to the reviewer (the `delivered` hop, §6.0). The reviewer reviews; the evaluator returns `findings` (implementer fixes, appends a generalizable lesson to `LEARNINGS.md`, hands back — repeat, capped by `maxRounds`) or `approve` (item done).
 - **Outer loop (over items):** on an item `approve`, control re-kicks the **same** phase for the next item (it does **not** advance to a different phase), incrementing an iteration counter.
-- **Completion:** when the implementer determines no work remains, it hands off a **completion claim**. The reviewer runs the acceptance-criteria gate; the evaluator returns `complete` (goal met → workflow `done`) or `findings` (gaps become the next item, loop continues).
+- **Completion:** when the implementer determines no work remains, it hands off a **completion claim** (the `[[RALPH:GOAL-COMPLETE]]` marker, persisted control-side as `ralphCompletionClaim`). The reviewer runs the acceptance-criteria gate and returns an ordinary review verdict — there is **no `complete` evaluator verdict**. A reviewer `approve` **while the completion-claim flag is set** is mapped control-side to workflow `done` (goal met); `findings` means gaps remain and they become the next item (loop continues). See §6 for the full control mapping.
 
 The implementer is the only agent that edits the repo and the memory files; the reviewer only judges and reports.
 
@@ -91,7 +91,7 @@ The kickoff/step templates instruct the implementer to:
 - When `PROGRESS.md` and the repo show no remaining work, hand back ending with the exact **completion-claim marker** on its own line instead: `[[RALPH:GOAL-COMPLETE]]`.
 - During a fix step, apply the reviewer's findings, append any generalizable lesson to `LEARNINGS.md`, and hand back (ending again with `[[RALPH:ITEM-DELIVERED]]`).
 
-The two marker strings are **exact, literal tokens** (not natural-language phrases) because classification of the handback as item-delivery vs completion-claim controls whether `approve` loops or `complete` terminates (§6, §7). Templates must emit them verbatim and tests must assert the evaluator routes on them (§11); implementations must not fall back to fuzzy natural-language detection.
+The two marker strings are **exact, literal tokens** (not natural-language phrases) because classification of the handback as item-delivery vs completion-claim sets the persisted `ralphCompletionClaim` flag, which controls whether a later reviewer `approve` loops to the next item or terminates the workflow as `done` (§6, §7) — there is no `complete` evaluator verdict. Templates must emit them verbatim and tests must assert the evaluator routes on them (§11); implementations must not fall back to fuzzy natural-language detection.
 
 (The autonomous-workflow guardrails from SDD's templates apply: no human is in the loop; never ask for confirmation/permission/clarification; replies must be substantive, not a bare word.)
 
@@ -183,6 +183,7 @@ As with SDD, verdicts must lead with the outcome and justify it in at least two 
 ## 11. Testing strategy
 
 - **Unit (registry):** `ralph-loop` definition exists with a loop descriptor (`repeatUntilComplete`, `maxIterations`), the `ralph-loop` evaluator key, and the chunk-sizing kickoff text; `renderTemplate` substitutes `{ralphDir}`.
+- **Unit (template anti-amnesia obligations — guards criterion 2):** assert the kickoff/step template text contains the durable-memory instructions, since a regression dropping them would otherwise pass the registry/control/full-loop tests. Specifically: (a) the kickoff/step text instructs the implementer to **read and re-orient from `PROGRESS.md` and `LEARNINGS.md` at the start of every item** (treat as ground truth, not prior conversation); (b) it instructs the implementer to **maintain/update `PROGRESS.md`** each item; (c) the **fix-step** text instructs the implementer to **append any generalizable lesson to `LEARNINGS.md`**. These assertions pin the exact obligations of acceptance criterion 2 to committed coverage.
 - **Unit/integration (prompt-key plumbing):** the phase's configured `evaluatorPromptKey` reaches the orchestrator — assert a `ralph-loop` phase yields the `ralph-loop` key (not the `handoffStep`-derived default), and an SDD phase still yields its existing key. `selectBranch` dispatches `ralph-loop` to the delivered/review branches.
 - **Unit (marker detection + persistence):** applying `delivered` for a ralph implement/fix handback containing `[[RALPH:GOAL-COMPLETE]]` sets `workflowContext.ralphCompletionClaim`; one with `[[RALPH:ITEM-DELIVERED]]` (or no marker) leaves it unset; the acceptance-gate vs per-item review-request text is selected accordingly (exact tokens asserted).
 - **Control (`applyOrchestratorVerdict`):**
@@ -200,7 +201,7 @@ As with SDD, verdicts must lead with the outcome and justify it in at least two 
 
 1. A `ralph-loop` workflow on a multi-item goal runs item → review → (fix)\* → approve repeatedly, re-kicking the same phase per item without advancing a phase index.
 2. The implementer maintains `PROGRESS.md` and appends generalizable corrections to `LEARNINGS.md` under `<workspace>/.ai-whisper/ralph/<workflowId>/`, and re-orients from them each item.
-3. ai-whisper writes only inside `<workspace>/.ai-whisper/`, self-ignores it via `.ai-whisper/.gitignore` (`*`), and never edits the user's tracked files; the implementer auto-commits work per item, excluding the bookkeeping.
+3. **Bookkeeping writes** (broker/run-state) go **only** inside `<workspace>/.ai-whisper/`, self-ignored via `.ai-whisper/.gitignore` (`*`), never touching the user's root `.gitignore` or any other tracked file. **Separately and by design**, the implementer edits the user's source and **auto-commits those work changes per item** (the workflow's stated purpose, §4.4) — the gitignored `.ai-whisper/` bookkeeping is excluded from those commits. Intended code edits are therefore not a gate failure; only bookkeeping leaking outside `.ai-whisper/` (or into the user's tracked files / root `.gitignore`) is.
 4. The workflow terminates `done` on reviewer-confirmed completion (a review `approve` while the completion-claim flag is set — the acceptance gate), halts on inner escalation, and halts on the outer `maxIterations` cap.
 5. No schema migration is introduced; iteration/completion state lives in `workflowContext`.
 6. spec-driven-development behavior is unchanged (regression tests green).
