@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 export type HandoffStep = "review" | "fix" | "implement" | "execute";
 
+export type ReviewMode = "chunk-review" | "phase-review" | "acceptance-review";
+
 export type ArtifactKind = "spec" | "plan" | "commit-range";
 
 export const RALPH_ITEM_DELIVERED_MARKER = "[[RALPH:ITEM-DELIVERED]]";
@@ -21,6 +23,8 @@ export interface PhaseConfig {
 	maxIterations?: number;
 	/** Review-request template used when the implementer claims the goal is complete. */
 	acceptanceReviewTemplate?: string;
+	/** Review mode for this phase's normal review step. Acceptance reviews always use "acceptance-review". */
+	reviewMode?: ReviewMode;
 }
 
 export interface WorkflowDefinition {
@@ -31,6 +35,39 @@ export interface WorkflowDefinition {
 	defaultImplementer?: "claude" | "codex";
 	defaultReviewer?: "claude" | "codex";
 }
+
+export const WORKFLOW_REVIEW_PROTOCOL = `--- ai-whisper workflow review protocol ---
+You are the gatekeeper for an ai-whisper autonomous workflow review gate (reviewMode: {reviewMode}). No human is in the loop. Follow this protocol before returning a verdict.
+
+Review mode semantics:
+- chunk-review: judge ONLY the current delivered chunk against the relevant goal/procedure slice; the whole goal need not be complete.
+- phase-review: judge the current phase output against the phase contract and relevant spec/plan requirements; future phases need not be complete.
+- acceptance-review: judge the FULL deliverable against the full contract and acceptance criteria.
+
+Required procedure:
+1. Build an acceptance matrix and PRINT it. One row per requirement/criterion relevant to this gate: Requirement | Required evidence | Implementation evidence | Test/verification evidence | Pass/Fail. Do not collapse into a broad "looks good". Approval requires every row to pass.
+2. Tests are deliverables: if the contract requires a test/guard/fixture/verification, inspect the committed test itself — does it check the exact condition and the correct layer? Would the required regression still slip through while it passes? Watch exactness words (exactly, same, both, after build, no code changes, guard, must). Green output does NOT replace required committed coverage.
+3. Adversarial pass: assume the implementation is subtly incomplete; try to make each gate criterion fail. Tie every candidate blocking finding to an exact contract item; if it cannot be tied, do not report it as blocking (record it as a non-blocking risk if it is still useful quality signal).
+
+Severity:
+- Blocking ONLY if it prevents THIS gate from validly passing (criteria violation, contract contradiction, required verification failure, required test that does not test the specified condition/layer, forbidden change, or behavior that breaks the spec). Name the exact contract item for every blocking finding.
+- Do NOT block on style/naming, optional refactors, extra non-required tests, future-phase concerns, or (in chunk-review) whole-goal incompleteness. Suppress style/taste entirely.
+
+Missing context: if an input REQUIRED FOR THIS MODE is absent, you are blocked — do not approve and do not file a fixable finding (the implementer cannot supply review context). Signal that you CANNOT PROCEED so the gate ESCALATES and halts.
+
+Output format:
+Review matrix:
+| Requirement | Evidence | Test/verification evidence | Result |
+| ... |
+
+Findings:           (omit this block entirely if none)
+- <blocking finding tied to an exact contract item, with file/line or command evidence>
+
+Non-blocking risks:
+- <quality risk that does NOT block this gate, or "None.">
+
+<verdict line: "Approved. <one or two sentences>" OR, when blocked/cannot-proceed, state you cannot proceed and why>
+--- end protocol ---`;
 
 export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
 	type: "spec-driven-development",
