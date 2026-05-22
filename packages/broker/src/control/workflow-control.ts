@@ -42,6 +42,7 @@ import {
 	ralphRunDir,
 	RALPH_GOAL_COMPLETE_MARKER,
 	type PhaseConfig,
+	type ReviewMode,
 	type WorkflowDefinition,
 } from "../runtime/workflow-registry.js";
 import type {
@@ -349,6 +350,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			: (input.phase.stepTemplates.review ?? "Review the deliverable.");
 		const collab = getCollab(db, input.workflow.collabId);
 		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
+		const reviewMode: ReviewMode = useAcceptance
+			? "acceptance-review"
+			: (input.phase.reviewMode ?? "phase-review");
 		return renderTemplate(tmpl, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -357,6 +361,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
 			ralphDir,
+			reviewMode,
 		});
 	}
 
@@ -431,6 +436,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			),
 			commitRange: ctx.commitRange ?? "HEAD",
 			ralphDir,
+			reviewMode: phase.reviewMode ?? "phase-review",
 		});
 		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;

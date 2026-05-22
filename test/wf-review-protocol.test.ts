@@ -62,3 +62,26 @@ describe("review templates embed the protocol", () => {
 		expect(RALPH_LOOP.phases[0].reviewMode).toBe("chunk-review");
 	});
 });
+
+describe("reviewMode rendering", () => {
+	it("fragment still has an unrendered {reviewMode} placeholder before render", () => {
+		expect(WORKFLOW_REVIEW_PROTOCOL).toContain("{reviewMode}");
+	});
+	it("renderTemplate substitutes reviewMode", () => {
+		const out = renderTemplate(WORKFLOW_REVIEW_PROTOCOL, {
+			specPath: "/g", planPath: "/p", commitRange: "A..B", ralphDir: "/r",
+			reviewMode: "chunk-review",
+		});
+		expect(out).toContain("reviewMode: chunk-review");
+		expect(out).not.toContain("{reviewMode}");
+	});
+	it("the rendered code-review KICKOFF (initial handoff) has no literal placeholder", () => {
+		const codeReview = SPEC_DRIVEN_DEVELOPMENT.phases[3];
+		const out = renderTemplate(codeReview.kickoffTemplate, {
+			specPath: "/g", planPath: "/p", commitRange: "A..B", ralphDir: "/r",
+			reviewMode: codeReview.reviewMode ?? "phase-review",
+		});
+		expect(out).toContain("reviewMode: acceptance-review");
+		expect(out).not.toContain("{reviewMode}");
+	});
+});

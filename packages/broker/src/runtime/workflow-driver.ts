@@ -182,6 +182,7 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 			planPath,
 			commitRange: ctx.commitRange ?? "HEAD",
 			ralphDir,
+			reviewMode: phase.reviewMode ?? "phase-review",
 		});
 
 		try {

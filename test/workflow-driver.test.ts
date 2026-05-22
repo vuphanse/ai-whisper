@@ -29,6 +29,33 @@ function boot() {
 }
 
 describe("WorkflowDriver", () => {
+	it("kickoff handoff text contains rendered reviewMode (no literal placeholder)", async () => {
+		const broker = boot();
+		const driver = createWorkflowDriver({
+			broker,
+			headReader: { readHead: async () => "abc1234" },
+			sweepIntervalMs: 0,
+		});
+		driver.start();
+		const { workflowId } = broker.control.createWorkflow({
+			collabId: "collab_c1",
+			workflowType: "spec-driven-development",
+			specPath: "docs/spec.md",
+			roleBindings: { implementer: "claude", reviewer: "codex" },
+			now: "2026-04-21T00:00:00Z",
+		});
+		await new Promise((r) => setImmediate(r));
+		const row = broker.db
+			.prepare(
+				`SELECT request_text FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at ASC LIMIT 1`,
+			)
+			.get(workflowId) as { request_text: string } | undefined;
+		const firstKickoffText = row?.request_text ?? "";
+		expect(firstKickoffText).toContain("reviewMode: phase-review");
+		expect(firstKickoffText).not.toContain("{reviewMode}");
+		driver.stop();
+	});
+
 	it("on workflow.created → kickoff phase 0 via beginPhaseRun", async () => {
 		const broker = boot();
 		const driver = createWorkflowDriver({
