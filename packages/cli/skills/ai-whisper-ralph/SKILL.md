@@ -1,0 +1,136 @@
+---
+name: ai-whisper-ralph
+description: Kick off the ralph-loop workflow on a given goal file. Use when the user says things like "run ralph on <path>", "ralph loop on <path>", "kick off ralph with <path>", "/aiw-ralph <path>", "$aiw-ralph <path>", or otherwise asks to start the ralph-loop workflow on a specific goal file.
+---
+
+# ai-whisper-ralph
+
+Kick off the ai-whisper ralph-loop workflow on a specific goal file. This skill is fire-and-forget: it verifies the collab is ready, runs `whisper workflow start`, and exits. **Do NOT continue polling or narrating after kickoff** — continuous activity from the calling agent keeps it busy, which blocks the broker's idle detection and stalls the workflow. The dashboard (`whisper collab dashboard`) is the inspection surface during the run.
+
+## When to invoke
+
+Match phrases like:
+- *"run ralph on docs/GOAL.md"* / *"ralph loop on @docs/GOAL.md"*
+- *"kick off ralph with docs/GOAL.md"*
+- *"/aiw-ralph docs/GOAL.md"* (Claude picker form)
+- *"$aiw-ralph docs/GOAL.md"* (Codex picker form)
+
+If the user references a goal ambiguously (e.g., "run ralph on the goal we just discussed"), ASK them for the path ONCE before proceeding. Do not guess.
+
+## Steps
+
+### 1. Resolve the goal path
+
+The user names a path. If it begins with `@`, strip the `@`. Resolve to an absolute path. Verify it's a readable file via the Read tool. If not readable:
+
+> Goal file `<path>` is not readable. Check the path and try again.
+
+The file is an **open-ended goal / checklist** (e.g. `GOAL.md`), not a formal spec. The ralph loop reads it as ground truth and grinds toward it chunk-by-chunk. Any **per-chunk procedure or conventions** the user wants the implementer to follow (test-first, lint, commit format, definition-of-done) belong **inside this goal file** — the loop re-reads the goal on every iteration, so embedded procedure persists across context resets and is applied to every chunk. (There is no separate procedure artifact in this version.) This framing is guidance for preparing the goal file before kickoff; it is not runtime output.
+
+### 2. Verify collab readiness
+
+Run:
+
+```bash
+whisper collab status --json
+```
+
+Parse the JSON. The expected shape is:
+
+```json
+{
+  "collabId": "collab_xyz",
+  "workspaceRoot": "/path",
+  "status": "active",
+  "daemon": { "host": "127.0.0.1", "port": 4311, "pid": 12345 },
+  "agents": [
+    { "agentType": "codex",  "bindingState": "bound" | "pending_attach" | "unbound" | null },
+    { "agentType": "claude", "bindingState": "bound" | "pending_attach" | "unbound" | null }
+  ],
+  "recovery": { "state": "normal" | "recovery_required" | "recovered" },
+  "evaluator": { "ready": true | false, "status": "ready" | "missing_anthropic_key" | "invalid_config" | "disabled" | "unknown" }
+}
+```
+
+Required for readiness:
+- `daemon !== null`
+- `status === "active"`
+- `recovery.state === "normal"`
+- BOTH `agents[*].bindingState === "bound"` (for `codex` AND `claude`)
+- `evaluator.status` is NOT `"missing_anthropic_key"` or `"invalid_config"` (i.e., `ready`, `disabled`, and `unknown` all pass this gate; only the two true-misconfiguration statuses block)
+
+If the JSON has `{ "error": "no_collab_for_cwd", ... }`:
+
+> No collab found in this workspace. Run `whisper collab mount codex` in one terminal and `whisper collab mount claude` in another, then re-run this skill.
+
+If `recovery.state === "recovery_required"`:
+
+> The collab is in recovery_required state. Run `whisper collab recover`, then re-run this skill.
+
+If `recovery.state === "recovered"`:
+
+> The collab has been recovered and still needs reconnect. Run `whisper collab reconnect codex` and `whisper collab reconnect claude`, then re-run this skill.
+
+If one agent's `bindingState` is anything but `"bound"`:
+
+> <Agent> is not mounted (current bindingState: `<state>`). Run `whisper collab mount <agent>` in a separate terminal, then re-run this skill.
+
+(Do NOT append permission flags — mount already spawns the agent in full-permission mode; passing `--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox` again can crash the agent on a duplicate-argument error.)
+
+If `evaluator.status === "missing_anthropic_key"` (i.e., `evaluator.ready === false` AND status is `missing_anthropic_key`):
+
+> The evaluator has no Anthropic API key. Create `~/.ai-whisper/auth.json` with `{ "ANTHROPIC_API_KEY": "sk-ant-..." }` (chmod 600), then restart the daemon (`whisper collab stop` and re-mount, or restart the broker), and re-run this skill. See the README "Evaluator configuration" section.
+
+If `evaluator.status === "invalid_config"` (i.e., `evaluator.ready === false` AND status is `invalid_config`):
+
+> The evaluator config is malformed. Fix the JSON in `~/.ai-whisper/auth.json` or `~/.ai-whisper/config.json`, then restart the daemon and re-run this skill. See the README "Evaluator configuration" section.
+
+If `evaluator.status === "disabled"`: this means the orchestrator is intentionally off — it is NOT a misconfiguration and does NOT block this skill gate. Proceed to step 3; `workflow start` will surface the orchestrator-disabled error itself.
+
+(Note: `evaluator.ready` is `false` for `missing_anthropic_key`, `invalid_config`, AND `disabled`; it is `true` only for `ready` and `unknown`. That's why this gate keys off `status` rather than `ready` — so `disabled` does not block the skill while the two true-misconfiguration statuses do.)
+
+### 3. Kick off the workflow
+
+Run:
+
+```bash
+whisper workflow start --type=ralph-loop --spec=<resolved-absolute-path>
+```
+
+(No `--implementer` / `--reviewer` — the CLI fills ralph defaults: implementer=claude, reviewer=codex. `--spec` names the goal file.)
+
+Parse the workflowId from stdout (format: `Workflow started: <workflowId>`).
+
+### 4. Report and exit
+
+Print exactly this one line — it is the **only** runtime output the skill emits after kickoff:
+
+> Workflow `<workflowId>` started. Track progress with `whisper collab dashboard`.
+
+Then stop. Do NOT poll `whisper workflow inspect`. Do NOT narrate. Do NOT print the "What ralph does" documentation below. The workflow runs in the broker driver; your job is done.
+
+## What ralph does (static documentation — NEVER printed at runtime)
+
+This section is reference prose for the invoking agent's understanding. It is documentation, not a runtime step, and must NOT be emitted after kickoff (doing so would violate the exactly-one-line report/exit contract in step 4).
+
+Once kicked off, ralph grinds the goal **chunk-by-chunk**: each iteration the implementer reads the goal, picks the next smallest independently-verifiable chunk, delivers it, and a reviewer checks that chunk. When the implementer claims the **entire** goal is complete, an acceptance review gates completion against the goal's criteria — only then does the workflow finish. The loop's durable memory lives under `.ai-whisper/ralph/<workflowId>/`: `PROGRESS.md` (the work ledger) and `LEARNINGS.md` (generalizable lessons), which survive context resets. Each accepted chunk is auto-committed. Watch all of this on `whisper collab dashboard`; do not babysit it from chat.
+
+## Why fire-and-forget
+
+The broker's relay handoff system uses **idle detection** to know when an agent is ready to receive the next handoff. If this skill polled the workflow's status every few seconds, the calling agent (you) would emit output continuously, the broker would never see you as idle, and the workflow's first handoff couldn't be delivered to you — the workflow stalls. Kick off and exit; observation belongs to the dashboard.
+
+## Resume / cancel
+
+If the user asks to resume a halted workflow, run:
+
+```bash
+whisper workflow resume <workflowId>
+```
+
+If they ask to cancel:
+
+```bash
+whisper workflow cancel <workflowId>
+```
+
+Same fire-and-forget shape: invoke, report one line, exit.
