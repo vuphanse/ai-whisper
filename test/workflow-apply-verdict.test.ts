@@ -430,3 +430,67 @@ describe("applyOrchestratorVerdict — execution-pass commit context", () => {
 		expect(ctx?.commitRange).toBe("abc1234..bbb2222");
 	});
 });
+
+// GUARD: review round-exhaustion escalates — never silently approves or loops
+//
+// This block pins the invariant that when a review chain has consumed all
+// allowed rounds and the reviewer still returns "findings", the control layer
+// MUST escalate rather than approve or extend the chain. Any regression that
+// causes silent approval or infinite looping will break these tests.
+describe("GUARD — review round-exhaustion escalates, never silently approves", () => {
+	it("findings at maxRounds → workflow-halted (not approve, not chain-continued)", () => {
+		const { broker, workflowId, handoffId, chainId } = setup();
+		// setup() creates the chain with maxRounds=5; force it to the final round.
+		broker.db
+			.prepare("UPDATE relay_chains SET current_round = 5 WHERE chain_id = ?")
+			.run(chainId);
+
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId,
+			verdict: "findings",
+			confidence: 0.8,
+			reason: "still broken at final round",
+			now: "2026-04-21T00:15:00Z",
+		});
+
+		// Must escalate — never approve, never keep the chain going.
+		expect(result.action).toBe("workflow-halted");
+		expect(result.action).not.toBe("phase-advanced");
+		expect(result.action).not.toBe("chain-continued");
+
+		// Chain must be marked escalated with a reason that names the exhaustion.
+		const chain = broker.control.getRelayChain(chainId);
+		expect(chain?.status).toBe("escalated");
+		expect(chain?.status).not.toBe("done");
+		expect(chain?.terminalReason).toMatch(/max-rounds-reached/);
+		// Reason must encode which round hit the wall so regressions are obvious.
+		expect(chain?.terminalReason).toMatch(/5\/5/);
+
+		// Workflow itself must halt, not advance to the next phase.
+		const wf = broker.control.getWorkflow(workflowId);
+		expect(wf?.status).toBe("halted");
+		expect(wf?.status).not.toBe("active");
+	});
+
+	it("findings one round before maxRounds → chain-continued (control: normal mid-chain path still works)", () => {
+		// Verify the guard test above doesn't mis-fire: a findings verdict when
+		// there is still a round available must NOT escalate.
+		const { broker, handoffId, chainId } = setup();
+		// Round 4 out of 5: currentRound + 1 = 5, which is NOT > 5 → should continue.
+		broker.db
+			.prepare("UPDATE relay_chains SET current_round = 4 WHERE chain_id = ?")
+			.run(chainId);
+
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId,
+			verdict: "findings",
+			confidence: 0.8,
+			reason: "one more round to go",
+			followUpMessage: "fix the remaining issues",
+			now: "2026-04-21T00:14:00Z",
+		});
+
+		expect(result.action).toBe("chain-continued");
+		expect(result.action).not.toBe("workflow-halted");
+	});
+});
