@@ -399,6 +399,8 @@ whisper skill install
 
 This copies `ai-whisper-sdd` (and any future bundled skills) into both `~/.claude/skills/` and `~/.codex/skills/`. Re-run with `--force` after a CLI upgrade. Use `--target=claude` or `--target=codex` to install for only one agent.
 
+Workflow *review* gates do not use a bundled skill — the review protocol is embedded directly in the orchestrator's review handoff prompt, so reviewers need nothing installed beyond the kickoff skills above.
+
 ## Evaluator configuration (required for workflows)
 
 The bundled workflows (currently `spec-driven-development`; more later) use an LLM **evaluator** to judge each handoff. The evaluator requires credentials. Without them, the workflow bails at kickoff with a remediation message — both the SDD skill and `whisper workflow start` refuse to start rather than halting 80 seconds into a run. So this is required setup before running any workflow.
