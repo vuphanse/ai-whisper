@@ -58,6 +58,15 @@ describe("REVIEW_SYSTEM_PROMPT rules", () => {
 		expect(REVIEW_SYSTEM_PROMPT).toMatch(/cannot proceed|blocked/i);
 		expect(REVIEW_SYSTEM_PROMPT).toMatch(/escalate/i);
 	});
+	it("classifies concrete findings as 'findings' even when the reviewer also says it cannot approve/proceed", () => {
+		// Guards the over-escalation misfire: a fixable blocking defect is a
+		// finding (loop), not an escalation (halt), even if the reviewer wrote
+		// "cannot proceed with approval".
+		expect(REVIEW_SYSTEM_PROMPT).toMatch(/even if it also says/i);
+		expect(REVIEW_SYSTEM_PROMPT).toMatch(
+			/required (review )?input is missing|request is impossible/i,
+		);
+	});
 });
 
 it.skip("live: approval-plus-risks classifies as approve (run with real key)", async () => {

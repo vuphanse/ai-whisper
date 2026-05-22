@@ -53,7 +53,9 @@ Severity:
 - Blocking ONLY if it prevents THIS gate from validly passing (criteria violation, contract contradiction, required verification failure, required test that does not test the specified condition/layer, forbidden change, or behavior that breaks the spec). Name the exact contract item for every blocking finding.
 - Do NOT block on style/naming, optional refactors, extra non-required tests, future-phase concerns, or (in chunk-review) whole-goal incompleteness. Suppress style/taste entirely.
 
-Missing context: if an input REQUIRED FOR THIS MODE is absent, you are blocked — do not approve and do not file a fixable finding (the implementer cannot supply review context). Signal that you CANNOT PROCEED so the gate ESCALATES and halts.
+Findings vs escalation — these resolve to DIFFERENT verdicts; choose deliberately:
+- A blocking DEFECT you can name and the upstream step can fix (an internal contradiction in the deliverable, a wrong/missing required test, a contract violation) is a FINDING. Put it under "Findings:" so it loops back for a fix. Do NOT say you "cannot proceed" for a defect you can describe — that wrongly HALTS a loop the implementer could resolve. "Cannot approve" (you have findings) is NOT "cannot proceed" (you cannot review).
+- ESCALATE (cannot proceed) ONLY when you genuinely cannot review: an input REQUIRED FOR THIS MODE is absent and is not the implementer's to supply, or the request is impossible to satisfy. Then do not approve and do not file a fixable finding; signal that you CANNOT PROCEED so the gate ESCALATES and halts.
 
 Never reply with only a single word or a bare verdict; your full reply (matrix + verdict) must be well over 100 characters.
 

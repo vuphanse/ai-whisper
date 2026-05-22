@@ -27,6 +27,15 @@ describe("WORKFLOW_REVIEW_PROTOCOL canonical fragment", () => {
 		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/cannot proceed|blocked/i);
 		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/escalate/i);
 	});
+	it("distinguishes a fixable defect (findings) from genuinely-cannot-review (escalate)", () => {
+		// A blocking defect the upstream step can fix must be a FINDING, not an
+		// escalation; reserve escalate for missing review inputs / impossible requests.
+		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/findings vs escalation/i);
+		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/blocking defect.*is a finding/i);
+		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(
+			/"cannot approve".*not "cannot proceed"/i,
+		);
+	});
 	it("requires an adversarial pass", () => {
 		expect(WORKFLOW_REVIEW_PROTOCOL).toMatch(/adversarial/i);
 	});

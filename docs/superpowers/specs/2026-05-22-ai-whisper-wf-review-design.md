@@ -97,6 +97,19 @@ Two concrete couplings:
    that signal (explicit blocked / cannot-proceed wording) for missing required
    context, so it halts rather than loops.
 
+3. **A fixable defect is `findings`, not `escalate`.** Escalation is reserved for
+   "cannot review" (a required review *input* is missing and not the implementer's
+   to supply, or the request is impossible) — NOT for "cannot approve because the
+   deliverable has a blocking defect." A defect the upstream step can fix —
+   including an internal contradiction in the deliverable — is a `findings` verdict
+   that loops back for a fix. Both the reviewer prompt fragment and
+   `REVIEW_SYSTEM_PROMPT` must draw this line: if the reviewer lists concrete
+   fixable findings, classify `findings` even if it also says it "cannot approve /
+   cannot proceed with approval." (Smoke evidence 2026-05-22: a hardened
+   spec-refining review correctly caught a real spec contradiction but worded it
+   "cannot proceed," over-escalating a defect the implementer could have fixed in
+   the findings→fix loop.)
+
 These are the only evaluator-side changes; the evaluator is otherwise untouched.
 
 ### Review modes
