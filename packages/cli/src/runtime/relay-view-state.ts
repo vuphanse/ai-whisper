@@ -166,10 +166,33 @@ export type RelayViewSnapshot = {
 		waitingAgent: "codex" | "claude" | null;
 		handoffState: string;
 	};
-	sessions: Array<{ agentType: string; healthState: string }>;
+	// Liveness is PER-AGENT: each entry optionally carries `mountAlive`, the
+	// host's pid-liveness probe for that agent's mount process (Bug C). Absent
+	// (undefined) is treated as not-alive (conservative) — see computeLiveness.
+	sessions: Array<{ agentType: string; healthState: string; mountAlive?: boolean }>;
 	lastActivityAt: string | null;
 	handoffs: RelayHandoffLogRow[];
 };
+
+// Decoupled stuck threshold (Bug C): independent of the turn-idle threshold,
+// env-overridable, default 5 min. The execute/review steps get a larger budget
+// because a real LLM work pass legitimately produces no relay activity for
+// minutes. Unmapped steps fall back to the baseline (never shorter), so the
+// change can only relax false STUCKs, not tighten them.
+const STUCK_DEFAULT_MS = 300_000;
+const STUCK_STEP_MS = 600_000;
+
+function stuckBaseMs(): number {
+	const raw = process.env.AI_WHISPER_STUCK_THRESHOLD_MS;
+	if (raw === undefined) return STUCK_DEFAULT_MS;
+	const n = Number.parseInt(raw, 10);
+	return Number.isFinite(n) && n > 0 ? n : STUCK_DEFAULT_MS;
+}
+
+function stuckBudgetMs(step: string | null, baseMs: number): number {
+	if (step === "execute" || step === "review") return Math.max(baseMs, STUCK_STEP_MS);
+	return baseMs;
+}
 
 export type RelayViewState = {
 	wf: string;
@@ -202,7 +225,10 @@ function elapsedSince(fromIso: string | null | undefined, toIso: string): string
 	return fmtDur(b - a);
 }
 
-function computeLiveness(snap: RelayViewSnapshot): {
+// Pure liveness/stuck classifier (Bug C). Deterministic — takes plain snapshot
+// data including a PER-AGENT `mountAlive` boolean and does NO I/O. The host
+// (dashboard.ts) probes pids and feeds `mountAlive`; the builders stay pure.
+export function computeLiveness(snap: RelayViewSnapshot): {
 	stuck: boolean;
 	why: string | null;
 	liveText: string;
@@ -217,8 +243,8 @@ function computeLiveness(snap: RelayViewSnapshot): {
 			: 0;
 	const idleS = Math.floor(idleMs / 1000);
 	const thresholdMs = snap.idleThresholdMs;
-	// stuck = 2× the idle threshold, floored at 60s.
-	const stuckThresholdMs = Math.max(60_000, thresholdMs * 2);
+	// Decoupled, phase-aware budget (NOT derived from the turn-idle threshold).
+	const budget = stuckBudgetMs(snap.currentStep, stuckBaseMs());
 
 	const round = snap.chain?.currentRound ?? 1;
 	const maxRounds = snap.chain?.maxRounds ?? 1;
@@ -226,10 +252,24 @@ function computeLiveness(snap: RelayViewSnapshot): {
 	const terminal =
 		snap.workflow && snap.workflow.status !== "running" ? snap.workflow.status : null;
 
+	// Relevant agent = the one actually working the step: the turn owner, else
+	// the agent we are waiting on when owner is "none". The idle-past-budget and
+	// health→stuck decisions key off THIS agent's mountAlive/health so a dead
+	// non-active peer never forces STUCK and a dead active worker always does.
+	const activeAgent =
+		snap.turn.turnOwner !== "none" ? snap.turn.turnOwner : snap.turn.waitingAgent;
+	const activeSess =
+		activeAgent != null
+			? (snap.sessions.find((s) => s.agentType === activeAgent) ?? null)
+			: null;
+	const activeAlive = activeSess?.mountAlive ?? false; // absent → false (conservative)
+	const activeOffline = activeSess?.healthState === "offline";
+
 	// why precedence: halt_reason > chain escalated/abandoned > round-max
-	//                  > idle/provider-silent
+	//                  > idle-past-budget(+pid) > active-session offline/dead
 	let why: string | null = null;
 	let stuck = false;
+	let liveOverride: string | null = null;
 
 	if (terminal === "halted" || terminal === "canceled") {
 		stuck = true;
@@ -243,22 +283,35 @@ function computeLiveness(snap: RelayViewSnapshot): {
 	} else if (snap.chain && round >= maxRounds && maxRounds > 1) {
 		stuck = true;
 		why = `STUCK ${fmtDur(idleMs)} — round ${round}/${maxRounds} max reached → escalated`;
-	} else if (idleMs >= stuckThresholdMs) {
+	} else if (idleMs >= budget && (activeOffline || !activeAlive)) {
+		// Past the budget AND the active worker's mount is dead/absent or its
+		// session is offline → genuinely stuck.
 		stuck = true;
-		why = `STUCK ${idleS}s — no progress (idle > ${Math.floor(stuckThresholdMs / 1000)}s)`;
-	} else if (snap.sessions.some((s) => s.healthState !== "healthy")) {
+		why = `STUCK ${fmtDur(idleMs)} — no progress and mount not alive`;
+	} else if (idleMs >= budget) {
+		// Past the budget but the active worker's mount is alive (and not
+		// offline) → legitimately long-running, NOT stuck.
+		liveOverride = `long-running ${fmtDur(idleMs)} — step in progress (mount alive)`;
+	} else if (activeOffline) {
+		// Under budget but the active session is offline/dead → stuck.
 		stuck = true;
-		why = "STUCK — provider unhealthy";
+		why = "STUCK — provider offline";
 	}
 
-	// live countdown (only when not stuck)
+	// live text (only when not stuck). A long-running override (idle past budget
+	// but mount alive) supersedes the countdown so the dashboard shows the
+	// reassuring "long-running … (mount alive)" instead of a bare idle counter.
 	let liveText = `idle ${idleS}s`;
 	if (!stuck) {
-		const remainMs = Math.max(0, thresholdMs - idleMs);
-		if (snap.turn.handoffState === "accepted") {
-			liveText = `idle ${idleS}s · auto-handback in ${Math.ceil(remainMs / 1000)}s`;
-		} else if (snap.turn.handoffState === "pending") {
-			liveText = `idle ${idleS}s · auto-accept in ${Math.ceil(remainMs / 1000)}s`;
+		if (liveOverride !== null) {
+			liveText = liveOverride;
+		} else {
+			const remainMs = Math.max(0, thresholdMs - idleMs);
+			if (snap.turn.handoffState === "accepted") {
+				liveText = `idle ${idleS}s · auto-handback in ${Math.ceil(remainMs / 1000)}s`;
+			} else if (snap.turn.handoffState === "pending") {
+				liveText = `idle ${idleS}s · auto-accept in ${Math.ceil(remainMs / 1000)}s`;
+			}
 		}
 	}
 

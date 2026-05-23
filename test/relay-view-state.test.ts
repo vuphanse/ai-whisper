@@ -306,15 +306,36 @@ describe("computeLiveness via buildRelayViewState", () => {
 		expect(s.health).not.toContain("ALIVE");
 	});
 
-	it("stuck: idle beyond 2× threshold (≥60s) with no progress", () => {
+	it("stuck: idle past the (execute) budget AND the active mount is not alive", () => {
+		// baseSnapshot.currentStep = "execute" → 10-min budget. Idle 11 min and
+		// the active agent (turnOwner codex) has no live mount → STUCK (Bug C).
 		const s = buildRelayViewState({
 			...baseSnapshot,
-			idleThresholdMs: 30_000,
-			lastActivityAt: "2026-05-19T08:27:00.000Z", // idle 180s ≥ max(60, 60s)
+			now: "2026-05-19T08:30:00.000Z",
+			lastActivityAt: "2026-05-19T08:19:00.000Z", // idle 11m ≥ 10m budget
 			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "pending" },
+			sessions: [
+				{ agentType: "codex", healthState: "healthy", mountAlive: false },
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
+			],
 		});
 		expect(s.stuck).toBe(true);
-		expect(s.why).toMatch(/STUCK \d+s/);
+		expect(s.why).toMatch(/no progress and mount not alive/);
+	});
+
+	it("long-running (NOT stuck): idle past budget but the active mount is alive", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			now: "2026-05-19T08:30:00.000Z",
+			lastActivityAt: "2026-05-19T08:19:00.000Z", // idle 11m ≥ 10m budget
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "pending" },
+			sessions: [
+				{ agentType: "codex", healthState: "healthy", mountAlive: true },
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
+			],
+		});
+		expect(s.stuck).toBe(false);
+		expect(s.live).toMatch(/long-running/);
 	});
 
 	it("halt_reason wins as the why when workflow halted", () => {
@@ -326,17 +347,31 @@ describe("computeLiveness via buildRelayViewState", () => {
 		expect(s.why).toContain("max-rounds-reached");
 	});
 
-	it("stuck: provider unhealthy when a session is not healthy", () => {
+	it("stuck: active session offline (provider offline) even under budget", () => {
 		const s = buildRelayViewState({
 			...baseSnapshot,
 			lastActivityAt: "2026-05-19T08:29:55.000Z", // idle 5s — not idle-stuck
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted" },
 			sessions: [
-				{ agentType: "codex", healthState: "degraded" },
-				{ agentType: "claude", healthState: "healthy" },
+				{ agentType: "codex", healthState: "offline" }, // active agent offline
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
 			],
 		});
 		expect(s.stuck).toBe(true);
-		expect(s.why).toContain("provider unhealthy");
+		expect(s.why).toContain("provider offline");
+	});
+
+	it("NOT stuck: active session degraded-but-alive (degraded ≠ stuck)", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			lastActivityAt: "2026-05-19T08:29:55.000Z", // idle 5s
+			turn: { turnOwner: "codex", waitingAgent: "claude", handoffState: "accepted" },
+			sessions: [
+				{ agentType: "codex", healthState: "degraded", mountAlive: true },
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
+			],
+		});
+		expect(s.stuck).toBe(false);
 	});
 
 	it("empty sessions is NOT provider-stuck", () => {
