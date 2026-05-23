@@ -108,3 +108,9 @@ pnpm typecheck
 pnpm lint
 pnpm format
 ```
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are
+accepted under the [Developer Certificate of Origin](CONTRIBUTING.md) (sign off with
+`git commit -s`).
