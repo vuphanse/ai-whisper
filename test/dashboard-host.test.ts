@@ -20,6 +20,7 @@ function fakeBroker(summaries: unknown[] = []) {
 		listCaptureDiagnosticsByCollab: vi.fn(() => []),
 		listCaptureDiagnosticsByCollabAndChain: vi.fn(() => []),
 		listRunCostRows: vi.fn(() => []),
+		listWorkflowsForCollab: vi.fn(() => []),
 	};
 	return { db: {}, control };
 }

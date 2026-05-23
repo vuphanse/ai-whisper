@@ -133,6 +133,9 @@ export function createDashboardRuntime(input: {
 					workflowFilter: diagFilter,
 				});
 		const costRows = c.listRunCostRows(collabId, inspectorWorkflowId);
+		// Bug B: the full workflow run history for this collab (newest-first),
+		// surfaced in the Inspector with the currently-inspected one flagged.
+		const workflows = c.listWorkflowsForCollab(collabId);
 
 		let activeStep: string | null = null;
 		if (curRun) {
@@ -210,6 +213,8 @@ export function createDashboardRuntime(input: {
 				turnConfidence: d.turnConfidence,
 			})),
 			focusedPhaseRunId,
+			workflows,
+			selectedWorkflowId: inspectorWorkflowId,
 		});
 	}
 

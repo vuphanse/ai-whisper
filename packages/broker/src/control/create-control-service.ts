@@ -137,8 +137,10 @@ import {
 import {
 	listActiveCollabSummaries as listActiveCollabSummariesRepo,
 	listRunCostRows as listRunCostRowsRepo,
+	listWorkflowsForCollab as listWorkflowsForCollabRepo,
 	type CollabSummary,
 	type RunCostRow,
+	type WorkflowSummaryRow,
 } from "../storage/repositories/dashboard-repository.js";
 import { createWorkflowControl } from "./workflow-control.js";
 import type { BrokerEventBus } from "../runtime/broker-event-bus.js";
@@ -1083,6 +1085,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 		},
 		listRunCostRows(collabId: string, workflowId: string | null): RunCostRow[] {
 			return listRunCostRowsRepo(db, { collabId, workflowId });
+		},
+		listWorkflowsForCollab(collabId: string): WorkflowSummaryRow[] {
+			return listWorkflowsForCollabRepo(db, collabId);
 		},
 		getRelayTurnState(collabId: string, now?: string) {
 			return queryRelayTurnState(db, collabId, now);

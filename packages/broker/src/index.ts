@@ -94,4 +94,5 @@ export type {
 export type {
 	CollabSummary,
 	RunCostRow,
+	WorkflowSummaryRow,
 } from "./storage/repositories/dashboard-repository.js";

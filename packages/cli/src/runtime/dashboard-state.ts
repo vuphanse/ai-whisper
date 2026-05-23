@@ -5,7 +5,12 @@ import type {
 	RelayViewState,
 } from "./relay-view-state.js";
 import { buildRelayViewState, deriveLogLines, fmtDur } from "./relay-view-state.js";
-import type { CollabSummary, RelayHandoffLogRow, RunCostRow } from "@ai-whisper/broker";
+import type {
+	CollabSummary,
+	RelayHandoffLogRow,
+	RunCostRow,
+	WorkflowSummaryRow,
+} from "@ai-whisper/broker";
 
 export type WallPaneState = {
 	collabId: string;
@@ -55,9 +60,22 @@ export type CostSummary = {
 		durationMs: number | null;
 	}>;
 };
+export type WorkflowHistoryItem = {
+	workflowId: string;
+	workflowType: string;
+	name: string | null;
+	status: "running" | "done" | "halted" | "canceled";
+	currentPhaseIndex: number;
+	createdAt: string;
+	selected: boolean;
+};
 export type InspectorState = {
 	live: RelayViewState;
 	timeline: PhaseStat[];
+	// Bug B: full workflow run history for the inspected collab (newest-first).
+	// The `selected` flag marks which workflow the timeline/evidence currently
+	// reflect. Empty when no workflows were passed.
+	workflowHistory: WorkflowHistoryItem[];
 	evidence: {
 		phase: string | null;
 		chainId: string | null;
@@ -160,6 +178,10 @@ export function buildInspectorState(input: {
 	evaluatorDiags: Array<{ verdict: string | null; confidence: number | null; reason: string | null; outcome: string }>;
 	captureDiags: Array<{ captureStatus: string; turnConfidence: string }>;
 	focusedPhaseRunId: string | null;
+	// Bug B (optional, additive): the collab's full workflow run history and
+	// which workflow is currently selected/inspected. Absent → empty history.
+	workflows?: WorkflowSummaryRow[];
+	selectedWorkflowId?: string | null;
 }): InspectorState {
 	const live = buildRelayViewState(input.snapshot);
 
@@ -283,7 +305,17 @@ export function buildInspectorState(input: {
 		likelyCause,
 	};
 
-	return { live, timeline, evidence, cost };
+	const workflowHistory: WorkflowHistoryItem[] = (input.workflows ?? []).map((w) => ({
+		workflowId: w.workflowId,
+		workflowType: w.workflowType,
+		name: w.name,
+		status: w.status,
+		currentPhaseIndex: w.currentPhaseIndex,
+		createdAt: w.createdAt,
+		selected: input.selectedWorkflowId != null && w.workflowId === input.selectedWorkflowId,
+	}));
+
+	return { live, timeline, evidence, cost, workflowHistory };
 }
 
 export function buildWallState(input: {

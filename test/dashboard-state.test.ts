@@ -219,6 +219,55 @@ describe("buildInspectorState — timeline + cost", () => {
 	});
 });
 
+describe("buildInspectorState — workflow history (Bug B)", () => {
+	const phaseRuns: PhaseRunRef[] = [
+		{ phaseRunId: "pr1", phaseIndex: 0, phaseName: "spec-refining", startedAt: "2026-05-20T00:00:00.000Z", endedAt: "2026-05-20T00:03:00.000Z", outcome: "done" },
+		{ phaseRunId: "pr2", phaseIndex: 1, phaseName: "plan-writing", startedAt: "2026-05-20T00:03:00.000Z", endedAt: null, outcome: null },
+	];
+	const workflows = [
+		{ workflowId: "wf_new", workflowType: "spec-driven-development", name: "third", status: "running" as const, currentPhaseIndex: 0, createdAt: "2026-05-20T02:00:00.000Z" },
+		{ workflowId: "wf_old", workflowType: "spec-driven-development", name: "first", status: "done" as const, currentPhaseIndex: 2, createdAt: "2026-05-20T00:00:00.000Z" },
+	];
+
+	it("exposes a workflow-history list (newest-first) with the active one flagged selected", () => {
+		const s = buildInspectorState({
+			snapshot: liveSnap, phaseRuns, phaseMaxRounds: { 0: 5, 1: 5 }, costRows: [],
+			workflowCreatedAt: "2026-05-20T00:00:00.000Z", chainId: "ch1",
+			evidenceHandoffs: [], evaluatorDiags: [], captureDiags: [], focusedPhaseRunId: "pr2",
+			workflows, selectedWorkflowId: "wf_new",
+		});
+		expect(s.workflowHistory.map((w) => w.workflowId)).toEqual(["wf_new", "wf_old"]);
+		expect(s.workflowHistory.map((w) => w.selected)).toEqual([true, false]);
+		expect(s.workflowHistory[0]).toMatchObject({ workflowId: "wf_new", status: "running", currentPhaseIndex: 0, name: "third" });
+	});
+
+	it("selecting a non-active workflow yields its timeline + flags it selected", () => {
+		// Host feeds the SELECTED past workflow's phaseRuns; the timeline builder
+		// uses them directly. Here we select wf_old and pass its single phase run.
+		const pastPhaseRuns: PhaseRunRef[] = [
+			{ phaseRunId: "pr_old", phaseIndex: 0, phaseName: "spec-refining", startedAt: "2026-05-20T00:00:00.000Z", endedAt: "2026-05-20T00:02:00.000Z", outcome: "done" },
+		];
+		const s = buildInspectorState({
+			snapshot: { ...liveSnap, phaseRuns: pastPhaseRuns, currentPhaseRunId: "pr_old" }, phaseRuns: pastPhaseRuns, phaseMaxRounds: { 0: 5 }, costRows: [],
+			workflowCreatedAt: "2026-05-20T00:00:00.000Z", chainId: null,
+			evidenceHandoffs: [], evaluatorDiags: [], captureDiags: [], focusedPhaseRunId: "pr_old",
+			workflows, selectedWorkflowId: "wf_old",
+		});
+		expect(s.timeline.map((t) => t.phaseName)).toEqual(["spec-refining"]);
+		expect(s.timeline[0]).toMatchObject({ durationMs: 120000, outcome: "done" });
+		expect(s.workflowHistory.find((w) => w.selected)?.workflowId).toBe("wf_old");
+	});
+
+	it("defaults workflowHistory to [] when no workflows passed", () => {
+		const s = buildInspectorState({
+			snapshot: liveSnap, phaseRuns, phaseMaxRounds: { 0: 5, 1: 5 }, costRows: [],
+			workflowCreatedAt: null, chainId: null,
+			evidenceHandoffs: [], evaluatorDiags: [], captureDiags: [], focusedPhaseRunId: null,
+		});
+		expect(s.workflowHistory).toEqual([]);
+	});
+});
+
 describe("buildInspectorState — evidence", () => {
 	const handoffs: RelayHandoffLogRow[] = [
 		{ handoffId: "h1", createdAt: "2026-05-20T00:01:00.000Z", collabId: "c", senderAgent: "codex", targetAgent: "claude", status: "handed_back", captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "implement", workflowId: "wf", phaseRunId: "pr2", handbackText: "wrote plan", evaluatorVerdict: "delivered", evaluatorConfidence: 0.61, evaluatorReason: "test plan TBD", lastActivityAt: "2026-05-20T00:01:00.000Z" },

@@ -98,6 +98,10 @@ function inspState(): InspectorState {
 		],
 		evidence: { phase: "plan-writing", chainId: "ch_7f3", items: [{ round: 5, step: "review", sender: "claude", target: "codex", verdict: "findings", confidence: 0.43, reasonExcerpt: "criterion 5 unmet", captureStatus: "ok" }], diagnostics: [{ kind: "evaluator", text: "verdict findings conf 0.43 · ok · criterion 5 unmet" }], likelyCause: "5/5 rounds, confidence declining → under-specified input" },
 		cost: { totalMs: 892000, estInputTokens: 51000, estOutputTokens: 32000, perPhase: [{ phaseRunId: "pr1", phaseName: "spec-refining", estInTokens: 6000, estOutTokens: 3000, durationMs: 192000 }, { phaseRunId: "pr2", phaseName: "plan-writing", estInTokens: 45000, estOutTokens: 29000, durationMs: 700000 }] },
+		workflowHistory: [
+			{ workflowId: "wf_cur", workflowType: "spec-driven-development", name: "oauth", status: "halted", currentPhaseIndex: 1, createdAt: "2026-05-20T01:00:00.000Z", selected: true },
+			{ workflowId: "wf_prev", workflowType: "spec-driven-development", name: "login", status: "done", currentPhaseIndex: 3, createdAt: "2026-05-19T09:00:00.000Z", selected: false },
+		],
 	};
 }
 
