@@ -9,6 +9,30 @@ export type ArtifactKind = "spec" | "plan" | "commit-range";
 export const RALPH_ITEM_DELIVERED_MARKER = "[[RALPH:ITEM-DELIVERED]]";
 export const RALPH_GOAL_COMPLETE_MARKER = "[[RALPH:GOAL-COMPLETE]]";
 
+/**
+ * The ralph marker on the handback's final non-empty line, or null when neither
+ * marker is the final line. Matches the evaluator contract (spec §5.4/§7): the
+ * marker must be on its own final line — a marker quoted earlier with other
+ * content after it does NOT count. Used as the authoritative, deterministic
+ * completion signal so it never disagrees with the evaluator's routing.
+ */
+export function ralphFinalLineMarker(
+	handback: string,
+): typeof RALPH_GOAL_COMPLETE_MARKER | typeof RALPH_ITEM_DELIVERED_MARKER | null {
+	const lines = handback.split(/\r?\n/);
+	let lastNonEmpty = "";
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const trimmed = lines[i]!.trim();
+		if (trimmed.length > 0) {
+			lastNonEmpty = trimmed;
+			break;
+		}
+	}
+	if (lastNonEmpty === RALPH_GOAL_COMPLETE_MARKER) return RALPH_GOAL_COMPLETE_MARKER;
+	if (lastNonEmpty === RALPH_ITEM_DELIVERED_MARKER) return RALPH_ITEM_DELIVERED_MARKER;
+	return null;
+}
+
 export interface PhaseConfig {
 	name: string;
 	implementerRole: "implementer";

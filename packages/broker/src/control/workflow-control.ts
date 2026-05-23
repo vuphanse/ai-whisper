@@ -41,6 +41,7 @@ import {
 	derivePlanPath,
 	ralphRunDir,
 	RALPH_GOAL_COMPLETE_MARKER,
+	ralphFinalLineMarker,
 	type PhaseConfig,
 	type ReviewMode,
 	type WorkflowDefinition,
@@ -856,7 +857,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				let reviewWorkflow = workflow;
 				if (phase.repeatUntilComplete) {
 					const handback = handoff.handbackText ?? "";
-					const claim = handback.includes(RALPH_GOAL_COMPLETE_MARKER);
+					// Derive the claim from the FINAL non-empty line (spec §5.4/§7),
+					// matching the evaluator's routing — a handback that merely quotes
+					// the goal marker earlier but ends with the item marker is NOT a
+					// completion claim, so it must not trigger the acceptance gate.
+					const claim = ralphFinalLineMarker(handback) === RALPH_GOAL_COMPLETE_MARKER;
 					updateWorkflowContext(db, {
 						workflowId: workflow.workflowId,
 						patch: { ralphCompletionClaim: claim },

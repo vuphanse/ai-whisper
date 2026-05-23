@@ -243,6 +243,42 @@ describe("applyOrchestratorVerdict — ralph delivered persists ralphCompletionC
 			await broker.stop();
 		}
 	});
+
+	// Spec §5.4/§7 — the claim is derived from the FINAL non-empty line, not a bare
+	// substring. A normal item handback may quote [[RALPH:GOAL-COMPLETE]] earlier
+	// (e.g. describing the loop) yet end with [[RALPH:ITEM-DELIVERED]]: claim must
+	// be false and the per-item review prompt (not the acceptance gate) must render.
+	it("goal marker quoted earlier + item marker on final line → claim false, per-item review", async () => {
+		const broker = makeRalphBroker();
+		try {
+			seedRalphCollab(broker);
+			const { workflowId, handoffId } = startRalphWorkflow(broker);
+			setHandback(
+				broker,
+				handoffId,
+				"Noted that the loop ends only when I emit [[RALPH:GOAL-COMPLETE]], but work remains.\n[[RALPH:ITEM-DELIVERED]]",
+			);
+
+			broker.control.applyOrchestratorVerdict({
+				handoffId,
+				verdict: "delivered",
+				confidence: 0.9,
+				reason: "implementer delivered an item (goal marker only quoted)",
+				now: new Date().toISOString(),
+			});
+
+			const wf = broker.control.getWorkflow(workflowId);
+			expect(
+				(wf?.workflowContext as { ralphCompletionClaim?: boolean })
+					.ralphCompletionClaim,
+			).toBeFalsy();
+			const reviewText = latestReviewRequest(broker, workflowId);
+			expect(reviewText).not.toContain("ENTIRE");
+			expect(reviewText).toContain("latest delivered chunk");
+		} finally {
+			await broker.stop();
+		}
+	});
 });
 
 describe("applyOrchestratorVerdict — ralph review approve mechanics", () => {

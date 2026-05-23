@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	getWorkflowDefinition,
 	renderTemplate,
+	ralphFinalLineMarker,
 	RALPH_ITEM_DELIVERED_MARKER,
 	RALPH_GOAL_COMPLETE_MARKER,
 } from "../packages/broker/src/runtime/workflow-registry.ts";
@@ -87,5 +88,37 @@ describe("ralph-loop workflow definition", () => {
 		const fixTemplate = def!.phases[0]!.stepTemplates.fix!;
 		expect(fixTemplate).toContain("LEARNINGS.md");
 		expect(fixTemplate).toMatch(/generaliz/i);
+	});
+});
+
+// Spec §5.4/§7 — completion is signaled by the marker on the FINAL non-empty line,
+// not by a substring anywhere in the handback. This deterministic helper is the
+// authoritative completion signal and must agree with the evaluator's routing.
+describe("ralphFinalLineMarker", () => {
+	it("returns GOAL-COMPLETE when it is the final non-empty line", () => {
+		expect(ralphFinalLineMarker(`done.\n${RALPH_GOAL_COMPLETE_MARKER}`)).toBe(RALPH_GOAL_COMPLETE_MARKER);
+		// trailing blank lines / whitespace are tolerated
+		expect(ralphFinalLineMarker(`done.\n  ${RALPH_GOAL_COMPLETE_MARKER}  \n\n`)).toBe(
+			RALPH_GOAL_COMPLETE_MARKER,
+		);
+	});
+
+	it("returns ITEM-DELIVERED when it is the final non-empty line", () => {
+		expect(ralphFinalLineMarker(`chunk done.\n${RALPH_ITEM_DELIVERED_MARKER}`)).toBe(
+			RALPH_ITEM_DELIVERED_MARKER,
+		);
+	});
+
+	it("goal marker quoted earlier + item marker final line → ITEM-DELIVERED (not goal)", () => {
+		const handback = `The loop ends when I emit ${RALPH_GOAL_COMPLETE_MARKER}, but work remains.\n${RALPH_ITEM_DELIVERED_MARKER}`;
+		expect(ralphFinalLineMarker(handback)).toBe(RALPH_ITEM_DELIVERED_MARKER);
+	});
+
+	it("goal marker not on the final line (content after it) → null", () => {
+		expect(ralphFinalLineMarker(`${RALPH_GOAL_COMPLETE_MARKER}\nActually, I have a question…`)).toBeNull();
+	});
+
+	it("no marker → null", () => {
+		expect(ralphFinalLineMarker("just some prose with no marker")).toBeNull();
 	});
 });
