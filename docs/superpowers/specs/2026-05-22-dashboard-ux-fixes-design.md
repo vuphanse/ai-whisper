@@ -173,6 +173,14 @@ Unit tests (pure builders — deterministic):
   rendered `●`, not `●(dead)`. A `degraded` bound session renders as degraded, not
   dead. `reapSupersededSessions` deletes non-kept rows for the `(collab, agent)` and
   leaves the kept one (repo test against a temp DB).
+  - **Read-path fallback (criterion 3):** when **no binding** exists for the agent
+    (`activeSessionId` is null), the read path selects the row with the greatest
+    `registered_at`, not the oldest — seed ≥2 unbound rows with distinct
+    `registered_at` and assert the latest wins.
+  - **Reap-failure isolation (criterion 2):** stub/force `reapSupersededSessions`
+    to **throw**, then assert that both the re-mount path and the stop/teardown path
+    still complete successfully (the call is best-effort, wrapped so the error is
+    swallowed/logged) — mount/stop must not surface the reaping error.
 - **Bug B:** `listWorkflowsForCollab` returns all workflows newest-first for a collab
   seeded with ≥2 workflows; `dashboard-state` produces a history list of that length;
   selecting a non-active workflow yields its timeline.
@@ -182,6 +190,17 @@ Unit tests (pure builders — deterministic):
     step budget → not stuck (phase-aware).
   - idle over budget AND `mountAlive=true` → "long-running", `stuck=false`.
   - idle over budget AND `mountAlive=false` → `stuck=true`.
+  - **degraded-but-alive (criterion 6):** idle over budget, a bound session that is
+    `degraded` (not `offline`/dead), AND `mountAlive=true` → NOT stuck
+    (the `sessions.some(non-healthy)` branch must trigger only on `offline`/dead,
+    so a degraded-but-live mount stays "long-running").
+  - **offline/dead still stuck:** idle over budget with an `offline`/dead session →
+    `stuck=true` even when `mountAlive` is unknown.
+  - **higher-precedence regression (criterion 6):** when a higher-precedence stuck
+    reason applies (workflow `halt`, chain escalation, or round-max reached), the
+    result reports that reason as stuck **regardless** of `mountAlive=true` — i.e.
+    the live-pid softening only affects the idle-past-budget branch, never the
+    halt/chain/round-max branches.
   - env override of `AI_WHISPER_STUCK_THRESHOLD_MS` changes the boundary.
 
 Host-level: a focused test (or documented manual check) that the pid probe maps a
