@@ -33,16 +33,13 @@ describe("README public contract", () => {
 		expect(readme).toMatch(/deliverable/i);
 	});
 
-	it("includes a visual-proof section with an inline-playable video embed", () => {
+	it("includes a visual-proof section: poster image linking to the demo on GitHub", () => {
 		expect(readme).toMatch(/## Visual proof/);
-		// A <video> tag (GitHub renders this inline) pointing at the committed demo,
-		// using an absolute raw URL — a relative-path mp4 only resolves to the raw
-		// blob (download), not a player.
-		expect(readme).toMatch(/<video\b[^>]*\bsrc=/);
-		expect(readme).toContain("/raw/master/docs/assets/workflow-demo.mp4");
-		expect(readme).toContain("/raw/master/docs/assets/workflow-demo-poster.png");
-		// Fallback link for renderers that strip <video>.
-		expect(readme).toMatch(/<a href="[^"]*docs\/assets\/workflow-demo\.mp4">/);
+		// Poster image (relative path — images render inline on GitHub) linking to the
+		// blob page (which plays the mp4). NOT a relative/raw mp4 link (downloads), and
+		// NOT a <video> tag (GitHub strips <video> whose src is a raw repo URL).
+		expect(readme).toMatch(/\[!\[[^\]]*\]\(docs\/assets\/workflow-demo-poster\.png\)\]\(https:\/\/github\.com\/[^)]*\/blob\/[^)]*\/docs\/assets\/workflow-demo\.mp4\)/);
+		expect(readme).not.toMatch(/<video\b/);
 		// The fabricate-nothing placeholder must be gone now that a real asset exists.
 		expect(readme).not.toMatch(/TODO: add a real terminal screenshot or GIF/);
 	});
