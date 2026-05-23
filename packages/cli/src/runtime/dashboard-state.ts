@@ -398,11 +398,19 @@ export function buildWallState(input: {
 							: ""
 					}`;
 		const events = rv.logLines.filter((l) => l.kind === "event");
+		// Three liveness states on the Wall (Bug A/C): STUCK (⚠ why), long-running
+		// (idle past budget but mount alive — surfaced so a legitimately long step
+		// is not confused with a dead pane), else the normal health/dot line.
+		const healthLine = rv.stuck && rv.why
+			? `⚠ ${rv.why}`
+			: rv.live.startsWith("long-running")
+				? `${rv.health}  · ${rv.live}`
+				: rv.health;
 		return {
 			collabId: s.collabId,
 			workflowId: s.workflowId,
 			header,
-			healthLine: rv.stuck && rv.why ? `⚠ ${rv.why}` : rv.health,
+			healthLine,
 			stuck: rv.stuck,
 			logTail: events.slice(-2),
 		};

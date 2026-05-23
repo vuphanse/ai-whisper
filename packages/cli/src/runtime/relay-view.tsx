@@ -92,7 +92,9 @@ export function RelayView(props: {
 				{s.stuck && s.why ? (
 					<Row label="⚠ why" color={STUCK_COLOR}>{s.why}</Row>
 				) : (
-					<Row label="live" color="yellow">{s.live}</Row>
+					/* long-running (idle past budget, mount alive) is a distinct,
+					   reassuring state — green — vs the yellow normal countdown. */
+					<Row label="live" color={s.live.startsWith("long-running") ? "green" : "yellow"}>{s.live}</Row>
 				)}
 				<Row label="last">{s.last}</Row>
 			</Box>
