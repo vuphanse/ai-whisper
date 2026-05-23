@@ -33,12 +33,12 @@ describe("README public contract", () => {
 		expect(readme).toMatch(/deliverable/i);
 	});
 
-	it("includes a visual-proof section: poster image linking to the demo on GitHub", () => {
+	it("includes a visual-proof section: poster image linking to the hosted demo page", () => {
 		expect(readme).toMatch(/## Visual proof/);
 		// Poster image (relative path — images render inline on GitHub) linking to the
-		// blob page (which plays the mp4). NOT a relative/raw mp4 link (downloads), and
-		// NOT a <video> tag (GitHub strips <video> whose src is a raw repo URL).
-		expect(readme).toMatch(/\[!\[[^\]]*\]\(docs\/assets\/workflow-demo-poster\.png\)\]\(https:\/\/github\.com\/[^)]*\/blob\/[^)]*\/docs\/assets\/workflow-demo\.mp4\)/);
+		// ai-creed project page, where the demo video autoplays. The mp4 itself is hosted
+		// on ai-creed, not committed here. NOT a <video> tag (GitHub strips those).
+		expect(readme).toMatch(/\[!\[[^\]]*\]\(docs\/assets\/workflow-demo-poster\.png\)\]\(https:\/\/ai-creed\.dev\/projects\/ai-whisper\/?\)/);
 		expect(readme).not.toMatch(/<video\b/);
 		// The fabricate-nothing placeholder must be gone now that a real asset exists.
 		expect(readme).not.toMatch(/TODO: add a real terminal screenshot or GIF/);
@@ -82,7 +82,6 @@ describe("docs and assets routed from the README exist", () => {
 		"docs/evaluator-configuration.md",
 		"docs/legacy-attach.md",
 		"docs/assets/workflow-demo-poster.png",
-		"docs/assets/workflow-demo.mp4",
 	])("%s is present", (rel) => {
 		expect(existsSync(resolve(root, rel))).toBe(true);
 	});

@@ -31,9 +31,9 @@ From there ai-whisper runs the workflow autonomously:
 
 A real `spec-driven-development` run: Claude (left) and Codex (middle) work in their own mounted
 sessions while the dashboard (right) tracks the baton handoffs and per-phase verdicts (~20s).
-Click the still to play the clip on GitHub.
+Click the still to watch it play on the project page.
 
-[![ai-whisper running a spec-driven-development workflow across two mounted agent sessions and the dashboard](docs/assets/workflow-demo-poster.png)](https://github.com/vuphanse/ai-whisper/blob/master/docs/assets/workflow-demo.mp4)
+[![ai-whisper running a spec-driven-development workflow across two mounted agent sessions and the dashboard](docs/assets/workflow-demo-poster.png)](https://ai-creed.dev/projects/ai-whisper/)
 
 ## Who this is for
 
