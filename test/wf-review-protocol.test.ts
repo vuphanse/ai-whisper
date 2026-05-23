@@ -104,3 +104,16 @@ describe("reviewMode rendering", () => {
 		expect(out).not.toContain("{reviewMode}");
 	});
 });
+
+describe("code-review prompt resolves HEAD live (not pinned to a frozen tip)", () => {
+	const codeReview = SPEC_DRIVEN_DEVELOPMENT.phases.find((p) => p.name === "code-review")!;
+
+	it("review template tells the reviewer to resolve HEAD live and include commits added this round", () => {
+		const review = codeReview.stepTemplates.review!;
+		expect(review).toContain("{commitRange}");
+		// must instruct live HEAD resolution + inclusion of newly-added commits,
+		// so a stale upper bound can't make the reviewer review an older checkout
+		expect(review).toMatch(/current\s+(repository|repo|HEAD)/i);
+		expect(review).toMatch(/added during this review|do not pin|include any commits/i);
+	});
+});

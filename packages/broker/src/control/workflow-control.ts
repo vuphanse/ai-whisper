@@ -59,6 +59,23 @@ export interface WorkflowControlDeps {
 const SHA_REGEX = /^[0-9a-f]{7,40}$/;
 
 /**
+ * The commit range a reviewer is pointed at. The upper bound is the literal,
+ * LIVE `HEAD` — never a frozen head SHA — so commits added during a code-review
+ * fix round are always in scope when the reviewer resolves the range against the
+ * current repo. Anchored to the real pre-work base (`baseBeforeExecution`).
+ * Falls back to `"HEAD"` when no base is known (e.g. no execution yet).
+ *
+ * This deliberately ignores any stored `commitRange` snapshot: a frozen head went
+ * stale across review rounds and made the reviewer check out an old commit.
+ */
+export function liveReviewCommitRange(ctx: {
+	baseBeforeExecution?: string;
+	commitRange?: string;
+}): string {
+	return ctx.baseBeforeExecution ? `${ctx.baseBeforeExecution}..HEAD` : "HEAD";
+}
+
+/**
  * Resolve the {planPath} a workflow's plan-writing phase should target.
  *
  * Prefers the `-design.md` → `docs/superpowers/plans/<date>-<slug>.md`
@@ -341,7 +358,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		workflow: WorkflowRecord;
 		phase: PhaseConfig;
 	}): string {
-		const ctx = input.workflow.workflowContext as { commitRange?: string; ralphCompletionClaim?: boolean };
+		const ctx = input.workflow.workflowContext as {
+			commitRange?: string;
+			baseBeforeExecution?: string;
+			ralphCompletionClaim?: boolean;
+		};
 		const useAcceptance =
 			input.phase.repeatUntilComplete === true &&
 			ctx.ralphCompletionClaim === true &&
@@ -360,7 +381,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.specPath,
 				input.workflow.createdAt,
 			),
-			commitRange: ctx.commitRange ?? "HEAD",
+			commitRange: liveReviewCommitRange(ctx),
 			ralphDir,
 			reviewMode,
 		});
@@ -426,7 +447,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			phase.initialHandoffStep === "review"
 				? getAgentForRole(input.workflow, "reviewer")
 				: getAgentForRole(input.workflow, "implementer");
-		const ctx = input.workflow.workflowContext as { commitRange?: string };
+		const ctx = input.workflow.workflowContext as { commitRange?: string; baseBeforeExecution?: string };
 		const collab = getCollab(db, input.workflow.collabId);
 		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
 		const kickoffText = renderTemplate(phase.kickoffTemplate, {
@@ -435,7 +456,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				input.workflow.specPath,
 				input.workflow.createdAt,
 			),
-			commitRange: ctx.commitRange ?? "HEAD",
+			commitRange: liveReviewCommitRange(ctx),
 			ralphDir,
 			reviewMode: phase.reviewMode ?? "phase-review",
 		});
@@ -783,7 +804,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					// update PROGRESS.md, and end with the item marker — the
 					// anti-amnesia requirement), rendered with ralphDir, then append
 					// the reviewer findings. The generic prompt below lacks all of that.
-					const ctx = workflow.workflowContext as { commitRange?: string };
+					const ctx = workflow.workflowContext as { commitRange?: string; baseBeforeExecution?: string };
 					const collab = getCollab(db, workflow.collabId);
 					const ralphDir = collab
 						? ralphRunDir(collab.workspaceRoot, workflow.workflowId)
@@ -794,7 +815,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 							workflow.specPath,
 							workflow.createdAt,
 						),
-						commitRange: ctx.commitRange ?? "HEAD",
+						commitRange: liveReviewCommitRange(ctx),
 						ralphDir,
 					});
 					fixRequestText = `${fixTmpl}\n\nReviewer findings:\n${findingsText}`;

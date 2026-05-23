@@ -102,7 +102,7 @@ const SDD_SPEC_REVIEW =
 	WORKFLOW_REVIEW_PROTOCOL;
 
 const SDD_CODE_REVIEW =
-	"Review commits {commitRange} against the spec's acceptance criteria, and run the project's verification/tests. This is an autonomous workflow with no human in the loop.\n\n" +
+	"Review the implementer's changes for this phase — the commits in {commitRange}. The upper bound is a LIVE `HEAD`: resolve it against the current repository at review time and INCLUDE any commits added during this review round (e.g. fixes for your prior findings); do not pin the review to an earlier tip. Verify against the spec's acceptance criteria and run the project's verification/tests. This is an autonomous workflow with no human in the loop.\n\n" +
 	WORKFLOW_REVIEW_PROTOCOL;
 
 export const SPEC_DRIVEN_DEVELOPMENT: WorkflowDefinition = {
