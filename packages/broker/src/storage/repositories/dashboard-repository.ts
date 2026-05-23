@@ -22,6 +22,15 @@ export type CollabSummary = {
 	lastActivityAt: string;
 };
 
+export type WorkflowSummaryRow = {
+	workflowId: string;
+	workflowType: string;
+	name: string | null;
+	status: "running" | "done" | "halted" | "canceled";
+	currentPhaseIndex: number;
+	createdAt: string;
+};
+
 export type RunCostRow = {
 	phaseRunId: string | null;
 	createdAt: string;
@@ -212,6 +221,40 @@ export function listActiveCollabSummaries(
 		});
 	}
 	return out;
+}
+
+// Bug B: enumerate the FULL workflow run history for a collab, newest-first.
+// The Wall summary lookup (above) intentionally stays `LIMIT 1` (active/latest);
+// this separate query feeds the Inspector workflow-history list. Purely
+// additive — no schema change.
+export function listWorkflowsForCollab(
+	db: Database.Database,
+	collabId: string,
+): WorkflowSummaryRow[] {
+	const rows = db
+		.prepare(
+			`SELECT workflow_id AS workflowId, workflow_type AS workflowType,
+			        name, status, current_phase_index AS currentPhaseIndex,
+			        created_at AS createdAt
+			   FROM workflows WHERE collab_id = ?
+			  ORDER BY created_at DESC, rowid DESC`,
+		)
+		.all(collabId) as Array<{
+		workflowId: string;
+		workflowType: string;
+		name: string | null;
+		status: "running" | "done" | "halted" | "canceled";
+		currentPhaseIndex: number;
+		createdAt: string;
+	}>;
+	return rows.map((r) => ({
+		workflowId: r.workflowId,
+		workflowType: r.workflowType,
+		name: r.name,
+		status: r.status,
+		currentPhaseIndex: r.currentPhaseIndex,
+		createdAt: r.createdAt,
+	}));
 }
 
 // Inspector "Cost" detail. Returns CHARACTER COUNTS + timestamps only —
