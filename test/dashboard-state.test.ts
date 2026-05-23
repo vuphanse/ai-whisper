@@ -92,6 +92,63 @@ describe("buildWallState", () => {
 		const w = buildWallState({ summaries: [], now: "2026-05-20T00:00:00.000Z", idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots: {} });
 		expect(w).toMatchObject({ panes: [], page: 0, pageCount: 0, totalRuns: 0, selected: 0 });
 	});
+
+	// Bug C / Task 8b: the Wall path must feed the active step into the liveness
+	// snapshot so the phase-aware budget applies on the Wall too (the pane still
+	// renders P/R only). An execute step idle over the 5-min baseline but under
+	// the 10-min budget, with the active agent alive, must read NOT stuck.
+	it("Wall uses the phase-aware budget: execute step idle 6m with a DEAD active mount → not stuck (10m budget, baseline would have STUCK)", () => {
+		const now = "2026-05-20T00:06:00.000Z";
+		// Active mount DEAD: if the Wall used the 5-min baseline (currentStep null)
+		// this would be STUCK at 6m. The 10-min execute budget keeps it not-stuck,
+		// proving the active step is fed into the liveness snapshot.
+		const s = sum({
+			collabId: "c1", workflowType: "spec-driven-development", phaseIndex: 1,
+			currentRound: 1, maxRounds: 1, chainStatus: "active",
+			turn: { owner: "codex", waiting: "claude", handoffState: "accepted" },
+			sessions: [
+				{ agentType: "codex", healthState: "healthy", mountAlive: false },
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
+			],
+			lastActivityAt: "2026-05-20T00:00:00.000Z", // idle 6m
+		});
+		const snapshots = {
+			c1: {
+				handoffs: [
+					{ handoffId: "h1", createdAt: "2026-05-20T00:00:00.000Z", collabId: "c1", senderAgent: "codex", targetAgent: "claude", status: "handed_back", captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "execute", workflowId: "wf", phaseRunId: "pr1", handbackText: "x", evaluatorVerdict: "ok", evaluatorConfidence: 0.9, evaluatorReason: "n", lastActivityAt: "2026-05-20T00:00:00.000Z" },
+				] as RelayHandoffLogRow[],
+				phaseRuns: [{ phaseRunId: "pr1", phaseIndex: 1, phaseName: "plan-execution", startedAt: "2026-05-20T00:00:00.000Z", endedAt: null, outcome: null }] as PhaseRunRef[],
+				totalPhases: 4,
+			},
+		};
+		const w = buildWallState({ summaries: [s], now, idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots });
+		expect(w.panes[0]!.stuck).toBe(false);
+	});
+
+	it("Wall control: non-execute step idle past baseline with dead active mount → stuck (baseline applies)", () => {
+		const now = "2026-05-20T00:06:00.000Z";
+		const s = sum({
+			collabId: "c2", workflowType: "spec-driven-development", phaseIndex: 1,
+			currentRound: 1, maxRounds: 1, chainStatus: "active",
+			turn: { owner: "codex", waiting: "claude", handoffState: "accepted" },
+			sessions: [
+				{ agentType: "codex", healthState: "healthy", mountAlive: false },
+				{ agentType: "claude", healthState: "healthy", mountAlive: true },
+			],
+			lastActivityAt: "2026-05-20T00:00:00.000Z", // idle 6m ≥ 5m baseline
+		});
+		const snapshots = {
+			c2: {
+				handoffs: [
+					{ handoffId: "h1", createdAt: "2026-05-20T00:00:00.000Z", collabId: "c2", senderAgent: "codex", targetAgent: "claude", status: "handed_back", captureStatus: "ok", chainId: "ch1", roundNumber: 1, handoffStep: "ack", workflowId: "wf", phaseRunId: "pr1", handbackText: "x", evaluatorVerdict: "ok", evaluatorConfidence: 0.9, evaluatorReason: "n", lastActivityAt: "2026-05-20T00:00:00.000Z" },
+				] as RelayHandoffLogRow[],
+				phaseRuns: [{ phaseRunId: "pr1", phaseIndex: 1, phaseName: "plan-writing", startedAt: "2026-05-20T00:00:00.000Z", endedAt: null, outcome: null }] as PhaseRunRef[],
+				totalPhases: 4,
+			},
+		};
+		const w = buildWallState({ summaries: [s], now, idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots });
+		expect(w.panes[0]!.stuck).toBe(true);
+	});
 });
 
 describe("selectWallPage", () => {

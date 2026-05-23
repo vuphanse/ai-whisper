@@ -342,6 +342,20 @@ export function buildWallState(input: {
 			phaseRuns: [],
 			totalPhases: 0,
 		};
+		// Bug C / Task 8b: feed the active step into the liveness snapshot so the
+		// phase-aware budget (execute/review → larger) applies on the Wall too.
+		// The Wall PANE still renders P/R only (header below); this only affects
+		// the budget computeLiveness uses. Derive the step from the latest handoff
+		// of the current phase run, mirroring the Inspector host logic.
+		let wallStep: string | null = null;
+		if (s.currentPhaseRunId) {
+			for (let i = snap.handoffs.length - 1; i >= 0; i--) {
+				if (snap.handoffs[i]!.phaseRunId === s.currentPhaseRunId) {
+					wallStep = snap.handoffs[i]!.handoffStep;
+					break;
+				}
+			}
+		}
 		const rv = buildRelayViewState({
 			now: input.now,
 			idleThresholdMs: input.idleThresholdMs,
@@ -358,7 +372,7 @@ export function buildWallState(input: {
 					: null,
 			phaseRuns: snap.phaseRuns,
 			currentPhaseRunId: s.currentPhaseRunId,
-			currentStep: null, // wall pane (density B) renders P/R only, not Step
+			currentStep: wallStep, // budget input only; the pane still renders P/R
 			totalPhases: snap.totalPhases,
 			chain:
 				s.currentRound != null && s.maxRounds != null && s.chainStatus

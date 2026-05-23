@@ -18,7 +18,10 @@ export type CollabSummary = {
 		waiting: "codex" | "claude" | null;
 		handoffState: string;
 	};
-	sessions: Array<{ agentType: string; healthState: string }>;
+	// Per-agent liveness (Bug C): `mountAlive` is filled in by the dashboard
+	// host's pid probe, not by this repo query (it stays absent here). Threaded
+	// so the Wall path can feed it into computeLiveness.
+	sessions: Array<{ agentType: string; healthState: string; mountAlive?: boolean }>;
 	lastActivityAt: string;
 };
 
