@@ -76,6 +76,9 @@ export function createDashboardRuntime(input: {
 	dashboardId: string;
 	stdout: NodeJS.WritableStream;
 	pollIntervalMs?: number;
+	/** Recycle (unmount+remount) the ink instance every N actual renders to
+	 * hard-bound ink's per-rerender memory retention. Test seam; default 750. */
+	__recycleEveryRenders?: number;
 }) {
 	let stopping = false;
 	let started = false;
@@ -96,6 +99,16 @@ export function createDashboardRuntime(input: {
 	const cols = (input.stdout as { columns?: number }).columns ?? 120;
 	const rows = (input.stdout as { rows?: number }).rows ?? 40;
 	const windowMs = resolveDashboardWindowMs();
+	// Memory-leak controls. ink.rerender() retains ~KB per call (ink 7.0.3), so
+	// the 250ms poll OOM'd overnight. (1) skip ink.rerender when the rendered
+	// frame is byte-identical to the last (no visual change → no leak); and
+	// (3) periodically unmount+remount the ink instance to reclaim its retained
+	// state, hard-bounding memory even when frames keep changing.
+	let pendingSig = "";
+	let lastSig: string | null = null;
+	let renderCount = 0;
+	let recycles = 0;
+	const recycleEvery = Math.max(1, input.__recycleEveryRenders ?? 750);
 
 	function toPhaseRuns(
 		raw: Array<{
@@ -269,6 +282,15 @@ export function createDashboardRuntime(input: {
 		if (mode === "inspector" && inspectorCollabId) {
 			const st = inspectorState();
 			if (st) {
+				pendingSig = `i:${JSON.stringify({
+					st,
+					section: inspectorSection,
+					viewport,
+					label: inspectorLabel,
+					type: inspectorType,
+					cols,
+					rows,
+				})}`;
 				return createElement(Inspector, {
 					state: st,
 					section: inspectorSection,
@@ -339,22 +361,38 @@ export function createDashboardRuntime(input: {
 		wallPage = wallState.page;
 		wallSelected = wallState.selected;
 		lastPaneCollabIds = wallState.panes.map((p) => p.collabId);
+		pendingSig = `w:${JSON.stringify({ wallState, cols, rows })}`;
 		return createElement(Wall, { state: wallState, cols, rows });
 	}
 
-	const ink = render(
+	const inkOptions = {
+		stdout: input.stdout as NodeJS.WriteStream,
+		exitOnCtrlC: false,
+	};
+	let ink = render(
 		createElement(DashboardApp, { node: node(), onKey: handleKey }),
-		{
-			stdout: input.stdout as NodeJS.WriteStream,
-			exitOnCtrlC: false,
-		},
+		inkOptions,
 	);
+	lastSig = pendingSig; // the initial frame is now on screen
+	renderCount = 1;
 
 	function rerender() {
 		try {
-			ink.rerender(
-				createElement(DashboardApp, { node: node(), onKey: handleKey }),
-			);
+			const el = node(); // also recomputes pendingSig
+			// Fix 1: identical frame → skip ink.rerender entirely (it leaks per call).
+			if (pendingSig === lastSig) return;
+			lastSig = pendingSig;
+			renderCount += 1;
+			const full = createElement(DashboardApp, { node: el, onKey: handleKey });
+			// Fix 3: every Nth real render, recycle the ink instance instead of
+			// rerendering, so ink's accumulated per-rerender retention is released.
+			if (renderCount % recycleEvery === 0) {
+				ink.unmount();
+				ink = render(full, inkOptions);
+				recycles += 1;
+			} else {
+				ink.rerender(full);
+			}
 		} catch (err) {
 			// Surface rerender failures through pollHealth instead of swallowing
 			// them — a silent catch here masked an Inspector section-change bug
@@ -450,7 +488,9 @@ export function createDashboardRuntime(input: {
 						consecutivePollErrors += 1;
 						lastPollError = err instanceof Error ? err.message : String(err);
 					}
-					await new Promise((r) => setTimeout(r, input.pollIntervalMs ?? 250));
+					// Fix 2: 1s default (was 250ms) — a monitoring dashboard does not
+					// need 4 repaints/sec, and it cuts the rerender (leak) rate 4x.
+					await new Promise((r) => setTimeout(r, input.pollIntervalMs ?? 1000));
 				}
 				ink.unmount();
 				loopResolve();
@@ -473,5 +513,7 @@ export function createDashboardRuntime(input: {
 			consecutiveErrors: consecutivePollErrors,
 			lastError: lastPollError,
 		}),
+		__renderCount: () => renderCount,
+		__recycles: () => recycles,
 	};
 }

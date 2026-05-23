@@ -315,4 +315,55 @@ describe("dashboard host", () => {
 		expect((capManCall![2] as { workflowFilter?: unknown }).workflowFilter).toEqual({ manualOnly: true });
 		await m.stop();
 	});
+
+	// Memory-leak guards (ink.rerender leaks ~KB/call; the 250ms poll OOM'd
+	// overnight). Fix 1: skip rerender on an unchanged frame. Fix 3: recycle the
+	// ink instance every N renders to hard-bound retained memory.
+	it("leak fix 1: skips ink rerender when the frame is unchanged", async () => {
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		// Empty dashboard → a static frame (no per-pane ticking idle/elapsed timers).
+		const m = createDashboardRuntime({
+			broker: fakeBroker([]) as never,
+			dashboardId: "d1",
+			stdout: stdout as unknown as NodeJS.WritableStream,
+			pollIntervalMs: 10,
+		}) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { key?: string }): void; __renderCount(): number;
+		};
+		m.start();
+		const c1 = m.__renderCount();
+		for (let i = 0; i < 20; i++) m.__handleKey({ key: "x" }); // no-op key → rerender(), identical frame
+		expect(m.__renderCount()).toBe(c1); // unchanged frame → ZERO extra ink rerenders
+		await m.stop();
+	});
+
+	it("leak fix 3: recycles the ink instance every N renders and keeps rendering", async () => {
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		let buf = "";
+		stdout.on("data", (c) => (buf += String(c)));
+		let n = 0;
+		const broker = fakeBroker([]);
+		// each frame is DISTINCT (label changes) → every poll actually renders
+		broker.control.listActiveCollabSummaries = vi.fn(() => [S({ label: `oauth-${n++}` })]) as never;
+		const m = createDashboardRuntime({
+			broker: broker as never,
+			dashboardId: "d1",
+			stdout: stdout as unknown as NodeJS.WritableStream,
+			pollIntervalMs: 10,
+			__recycleEveryRenders: 3,
+		} as never) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { key?: string }): void; __recycles(): number;
+		};
+		m.start();
+		for (let i = 0; i < 12; i++) m.__handleKey({ key: "x" }); // 12 distinct frames → renders
+		expect(m.__recycles()).toBeGreaterThan(0); // recycled at least once
+		expect(buf).toContain("oauth-"); // still rendering after a recycle
+		await m.stop();
+	});
 });
