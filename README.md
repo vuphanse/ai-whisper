@@ -29,10 +29,11 @@ From there ai-whisper runs the workflow autonomously:
 
 ## Visual proof
 
-> **TODO: add a real terminal screenshot or GIF here.** No asset exists yet — do not fabricate one.
-> It should show two mounted sessions (Claude + Codex) side by side with a workflow running:
-> the implementer working in one pane, the baton handing off, and the reviewer's verdict
-> advancing the round in `whisper collab dashboard`.
+A real `spec-driven-development` run: Claude (left) and Codex (middle) work in their own mounted
+sessions while the dashboard (right) tracks the baton handoffs and per-phase verdicts. Click to
+play the full ~20s clip.
+
+[![ai-whisper running a spec-driven-development workflow across two mounted agent sessions and the dashboard](docs/assets/workflow-demo-poster.png)](docs/assets/workflow-demo.mp4)
 
 ## Who this is for
 

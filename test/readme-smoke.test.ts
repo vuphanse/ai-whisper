@@ -33,11 +33,14 @@ describe("README public contract", () => {
 		expect(readme).toMatch(/deliverable/i);
 	});
 
-	it("includes a visual-proof section that is an honest placeholder, not a fabricated asset", () => {
+	it("includes a visual-proof section with the real poster -> video embed", () => {
 		expect(readme).toMatch(/## Visual proof/);
-		expect(readme).toMatch(/TODO: add a real terminal screenshot or GIF/);
-		// No image embeds should be fabricated.
-		expect(readme).not.toMatch(/!\[[^\]]*\]\([^)]+\.(png|gif|jpe?g|webp|svg)\)/i);
+		// Clickable poster image linking to the demo video.
+		expect(readme).toContain("docs/assets/workflow-demo-poster.png");
+		expect(readme).toContain("docs/assets/workflow-demo.mp4");
+		expect(readme).toMatch(/\[!\[[^\]]*\]\(docs\/assets\/workflow-demo-poster\.png\)\]\(docs\/assets\/workflow-demo\.mp4\)/);
+		// The fabricate-nothing placeholder must be gone now that a real asset exists.
+		expect(readme).not.toMatch(/TODO: add a real terminal screenshot or GIF/);
 	});
 
 	it("states who the project is for and who it is not for", () => {
@@ -71,13 +74,17 @@ describe("README public contract", () => {
 	});
 });
 
-describe("docs routed from the README exist", () => {
-	it.each(["docs/concepts.md", "docs/relay-handoff-flows.md", "docs/evaluator-configuration.md", "docs/legacy-attach.md"])(
-		"%s is present",
-		(rel) => {
-			expect(existsSync(resolve(root, rel))).toBe(true);
-		},
-	);
+describe("docs and assets routed from the README exist", () => {
+	it.each([
+		"docs/concepts.md",
+		"docs/relay-handoff-flows.md",
+		"docs/evaluator-configuration.md",
+		"docs/legacy-attach.md",
+		"docs/assets/workflow-demo-poster.png",
+		"docs/assets/workflow-demo.mp4",
+	])("%s is present", (rel) => {
+		expect(existsSync(resolve(root, rel))).toBe(true);
+	});
 });
 
 describe("concepts doc contract", () => {
