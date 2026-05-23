@@ -1,26 +1,104 @@
 # ai-whisper
 
-Local collaboration bridge for paired AI agent sessions.
+ai-whisper turns two coding agents — Claude and Codex — into a terminal-native pair that hand work back and forth under a single baton, so one agent implements while the other reviews, and a structured workflow drives the loop to a finished, reviewed deliverable without a human babysitting every round.
 
-## Current Scope
+## Magic moment
 
-This repository is being built in incremental phases. Phase 7 is complete and delivers recovery, operator monitoring, terminal-first mounted sessions, and the relay orchestrator on top of the Phase 6 in-session relay: `whisper collab` startup and lifecycle commands, real Codex and Claude providers, broker-backed turn routing, active-thread-aware relay semantics, concise inline acknowledgement and reply summaries, mounted baton-handoff workflow, and LLM-based post-handback orchestration. Multi-phase autonomous workflows (e.g. `spec-driven-development`) run on top of the same relay. Earlier `attach` and `adopt` flows (Phase 7A / 7D) have been shelved; see [`docs/legacy-attach.md`](docs/legacy-attach.md).
+Mount each agent in its own terminal. Each `mount` claims the current shell, launches the real provider CLI, and binds it to the collab:
 
-For the full handoff lifecycle reference — manual chats, autonomous workflows, capture classification, hotkeys, and per-step verdicts — see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md).
+```bash
+# terminal 1
+whisper collab mount claude
+# terminal 2
+whisper collab mount codex
+```
 
-When running from this repo checkout, build first with `pnpm build` and invoke the CLI as `node packages/cli/dist/bin/whisper.js ...`. The `whisper ...` examples below assume a packaged or globally installed CLI.
+Then, from inside either agent's session, kick off a structured workflow against a spec — just ask in plain language:
 
-## Requirements
+```text
+Run spec-driven-development using docs/spec.md
+```
 
-Interactive sessions (mounted and live-session surfaces) require `node-pty`, which is a native dependency. Local installs need a working native build toolchain available to `pnpm install` so the PTY binding can compile or load correctly.
+From there ai-whisper runs the workflow autonomously:
 
-## Runtime State
+- **Implementer / reviewer assignment** — one agent is the implementer, the other the reviewer (for `spec-driven-development` the default is implementer = Claude, reviewer = Codex). The baton passes between them; only one owns the turn at a time.
+- **Autonomous execution** — the implementer does each step in its real session and hands the result back. An LLM evaluator judges whether the deliverable meets the request.
+- **Review loops** — when work isn't good enough yet, the reviewer's findings are composed into a follow-up handoff and the implementer iterates. The loop repeats until the work is approved or the round budget is exhausted.
+- **Resumability** — workflow and chain state is durable. If the broker restarts or you stop for the day, you recover and reconnect rather than starting over.
+- **Deliverables** — you get committed code plus a review trail (per-step verdicts, round counts), inspectable at any time with `whisper collab dashboard`.
 
-All collab runtime state lives in a single shared SQLite database at `~/.ai-whisper/state.db`. Nothing is written into the workspace, so a collab never pollutes the project's git state. Override the root directory with `AI_WHISPER_STATE_ROOT` (the database is then `$AI_WHISPER_STATE_ROOT/state.db`).
+## Visual proof
 
-Because the store is shared rather than per-workspace, multiple collabs run concurrently — one per workspace or git worktree, each keyed by a hash of the canonical workspace path. Lifecycle and inspection commands resolve the collab for the current directory automatically; pass `--collab <id>` to target a specific one explicitly. `whisper collab start` allocates a broker port automatically; use `--port <port>` to pin one.
+> **TODO: add a real terminal screenshot or GIF here.** No asset exists yet — do not fabricate one.
+> It should show two mounted sessions (Claude + Codex) side by side with a workflow running:
+> the implementer working in one pane, the baton handing off, and the reviewer's verdict
+> advancing the round in `whisper collab dashboard`.
 
-## Workspace Commands
+## Who this is for
+
+ai-whisper is for engineers who already lean on coding agents and want more structure around them:
+
+- you already use coding agents heavily and want two of them to check each other.
+- you work terminal-first and want the agents to live in real terminal sessions, not a web UI.
+- you want multi-agent review — a second model gating the first model's output.
+- you run long, structured workflows (spec → plan → implement → review) rather than one-off prompts.
+
+It is **not** for:
+
+- one-shot "vibe coding" where you just want a quick answer.
+- invisible background automation you never watch.
+- people new to coding agents looking for a guided, hand-holding experience.
+
+## Quickstart
+
+From a repo checkout:
+
+```bash
+pnpm install
+pnpm build
+```
+
+Install the bundled agent skills once (they let the agents verify, kick off, and report on workflows):
+
+```bash
+whisper skill install
+```
+
+Workflows require an LLM evaluator with credentials — set this up before running one. See [Evaluator configuration](docs/evaluator-configuration.md).
+
+Then mount both agents and run a workflow:
+
+```bash
+# terminal 1
+whisper collab mount claude
+# terminal 2
+whisper collab mount codex
+```
+
+The first `mount` creates the collab and starts the broker daemon for the workspace; the second binds the other agent. From either session, start a workflow against a spec or goal file (`spec-driven-development` for a spec, `ralph-loop` for an open-ended goal). Watch it run with:
+
+```bash
+whisper collab dashboard
+```
+
+> Running from a repo checkout instead of a packaged install? Build first (`pnpm build`) and invoke the CLI as `node packages/cli/dist/bin/whisper.js ...` wherever these examples say `whisper ...`.
+
+## Core concepts
+
+ai-whisper is **not a swarm**. The agents never type at once — work moves by a single baton, one owner at a time. Mounted sessions are *real* Claude and Codex sessions in your terminal, and those sessions are the source of truth. Autonomy is supervised: every handoff, verdict, and round is inspectable, and runs are resumable rather than fire-and-forget. Work is organized as structured workflows — explicit loops and state transitions, not a free-form chat.
+
+Claude and Codex are supported today; the architecture is provider-agnostic by design, so other coding-agent CLIs can be added behind the same relay.
+
+For the full mental model, read [Concepts](docs/concepts.md).
+
+## Learn more
+
+- [Concepts](docs/concepts.md) — the mental model: baton handoff, real mounted sessions, supervised autonomy, workflow-first execution.
+- [Relay & handoff flows](docs/relay-handoff-flows.md) — the complete handoff state machine, capture-status table, hotkey reference, per-step verdicts, and troubleshooting.
+- [Evaluator configuration](docs/evaluator-configuration.md) — required credentials and options for the LLM evaluator that gates workflows.
+- [Legacy attach mode](docs/legacy-attach.md) — the shelved `attach` / `adopt` flows, kept for historical reference.
+
+## Workspace commands
 
 ```bash
 pnpm install
@@ -29,523 +107,3 @@ pnpm typecheck
 pnpm lint
 pnpm format
 ```
-
-## Package Layout
-
-- `packages/shared` - shared schemas for broker, provider, and companion contracts
-- `packages/broker` - broker runtime, collaboration engine, and companion registration support
-- `packages/companion-core` - generic companion runtime, provider registry, and mock provider
-- `packages/cli` - `whisper` command surface with collab lifecycle and tell commands
-- `packages/adapter-codex` - Codex provider
-- `packages/adapter-claude` - Claude provider
-
-## Typical Workflow
-
-```bash
-whisper collab start
-```
-
-By default, `collab start` prefers `tmux` and attaches your current terminal into the collab session with split panes when `tmux` is available. Use `--no-tmux` to launch separate terminal windows instead. Use `--no-launch` when you only want the broker and plan to `mount` providers manually.
-
-Then inside a live session:
-
-```text
-@@codex review this plan
-@@claude[new] implement the agreed changes
-```
-
-And for a brand-new thread that needs explicit artifacts:
-
-```bash
-whisper collab tell --target codex --action review_plan --artifact docs/plan.md "review this plan"
-```
-
-Other lifecycle commands:
-
-```bash
-whisper collab status
-whisper collab stop
-```
-
-### Recovery workflow (Phase 7B)
-
-If the current workspace collab still exists but the broker is gone or unusable:
-
-```bash
-whisper collab recover
-whisper collab reconnect codex
-whisper collab reconnect claude
-```
-
-Recovery restores durable collab state pessimistically. Previously bound roles come back degraded and must be reconnected explicitly. Run `whisper collab reconnect <role>` from the iTerm tab you want to mount as that role. Recovery also returns the broker idle; interrupted queued work does not resume automatically.
-
-### Operator monitoring workflow (Phase 7C1)
-
-Use the quick snapshot first:
-
-```bash
-whisper collab status
-```
-
-Inspect the active thread in more detail:
-
-```bash
-whisper collab inspect
-```
-
-Use live monitoring when a collab is active:
-
-```bash
-whisper collab inspect --watch
-```
-
-`inspect` is read-only. It shows the active thread, recent work items, recent replies, and recent failed or `recovery_blocked` activity with truncated previews by default.
-
-Use `--captures` to surface recent auto-handback capture diagnostics for the active collab; pass a chain id (e.g. `--captures chain_abc`) to filter, or `--captures all` for the full history. Combine with `--watch` to tail.
-
-Use `--verdicts` to surface recent evaluator (LLM verdict) diagnostics for the active collab; pass a chain id (e.g. `--verdicts chain_abc`) to filter, or `--verdicts all` for the full history. Combine with `--watch` to tail. `--verdicts` and `--captures` are mutually exclusive.
-
-### Terminal-first mounted sessions (Phase 7E)
-
-The preferred workflow for inline `@@` relay support. `whisper collab mount` claims the current iTerm shell as the managed session surface and launches the provider automatically:
-
-1. `whisper collab start --no-launch`
-2. in one iTerm tab, run `whisper collab mount codex`
-3. in a second iTerm tab, run `whisper collab mount claude`
-4. from the Codex tab, type `@@claude <instruction>` to relay to Claude with inline acknowledgement and reply
-
-Mounted sessions keep `ai-whisper` as the terminal owner, so the live-session relay parser can intercept `@@...` input. Recovery and reconnect default to the mounted path when the previous binding was mounted.
-
-#### Baton handoff workflow
-
-Use mounted sessions when you want the visible Codex and Claude tabs to be the real workflow actors.
-
-Example real use case:
-
-- Claude reviews plan and decides Codex should implement next step
-- Claude sends handoff from visible Claude tab
-- Claude waits while Codex owns turn
-- Codex does work in visible Codex tab
-- Codex hands result back to Claude
-- Claude reviews result, amends request if needed, or sends next handoff
-
-Recommended startup:
-
-```bash
-whisper collab start --no-launch
-```
-
-Then in two normal iTerm tabs:
-
-```bash
-whisper collab mount codex
-whisper collab mount claude
-```
-
-Send work from current owner:
-
-```text
-@@codex implement phase 7e handback flow
-@@claude review mounted relay acceptance UX
-```
-
-What happens next:
-
-- ownership flips immediately to target provider
-- sender becomes waiting side and normal typing is blocked
-- owner sees local handoff card inside mounted tab
-- only one unresolved handoff is allowed at a time
-
-Owner controls inside mounted tab:
-
-- `a` accepts handoff immediately and injects original request into visible session
-- `e` opens local editor first so owner can amend request before accepting
-- `d` declines handoff and releases sender
-- `space` defers handoff but keeps sender waiting
-
-After accept, owner works normally in visible provider session. When ready to return turn:
-
-- press `h` when mounted runtime shows `Ready to hand back`
-- press `Ctrl+H` to force handback immediately if the readiness hint does not appear
-- runtime tries to capture latest visible response
-- if copied response looks right, press `Enter` to confirm handback
-- if capture is empty or not usable, local composer opens so owner can write handback text manually
-
-Practical guidance:
-
-- think of relay as strict baton pass, not two active sessions typing at once
-- send compact, explicit tasks so owner can accept quickly or amend locally
-- use handback to return result summary or next-step request to other side
-- if handoff stays deferred, sender remains blocked until owner declines, cancels, or hands turn back
-
-> The earlier `whisper collab attach`, `whisper collab rebind`, and `--adopt-current-tty` flows (Phase 7A and Phase 7D) have been shelved. See [`docs/legacy-attach.md`](docs/legacy-attach.md) for the historical design.
-
-### Relay Orchestrator (Phase 7F)
-
-The relay orchestrator is an opt-in daemon that automates the post-handback judgment loop. After an agent hands back a deliverable, the orchestrator evaluates whether the work satisfies the original request — without requiring human intervention for each round.
-
-> See [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md) for the complete handoff state machine, capture-status table, hotkey reference, per-step verdicts, and troubleshooting guide.
-
-#### How it works
-
-1. Agent hands back work → handoff status becomes `handed_back`
-2. Orchestrator polls and atomically claims the handoff
-3. LLM evaluator judges the deliverable against the original request
-4. Verdict determines next action:
-   - **done** — deliverable satisfies request; chain resolves, turn returns to sender
-   - **loop** — further iteration needed; orchestrator creates a new handoff with agents swapped and a composed follow-up message, incrementing the round number
-   - **escalate** — ambiguous or failed evaluation; chain marked escalated, human operator takes over
-
-The orchestrator preserves a stable `chainId` across all rounds, tracks `roundNumber`, and keeps the `rootRequestText` so each evaluation has full context. When `roundNumber` reaches `maxRounds`, the orchestrator forces escalation without calling the LLM.
-
-If the agent response was not reliably captured (PTY failure, timeout), the orchestrator skips the LLM and re-issues the same request unchanged. Verdicts with `confidence < 0.5` are automatically escalated regardless of verdict type.
-
-#### Automated handoff cycle in mounted sessions
-
-Mounted sessions drive the orchestrated loop without operator keypresses. Two idle-triggered behaviours fire based on `AI_WHISPER_IDLE_THRESHOLD_MS` (default 30 s):
-
-**Auto-accept** — when a pending handoff arrives and the provider has been idle for the threshold, the mounted runtime injects the request text into the active provider session as if the operator had pressed `a`. The provider starts working immediately.
-
-**Auto-handback** — when the provider finishes and goes idle again for the threshold, the mounted runtime triggers `/copy` to capture the response from the provider's clipboard, then hands it back automatically. No `h` keypress needed.
-
-The threshold must be longer than the LLM's typical response-start latency. If auto-handback fires before the provider has produced any output, the capture is empty and the orchestrator re-issues the request unchanged (see [Capture status](#capture-status)).
-
-To disable auto-accept or auto-handback on a specific mount, set the threshold very high (`AI_WHISPER_IDLE_THRESHOLD_MS=999999`) so the automation never fires; the operator can then accept and hand back manually with `a` and `h` as usual.
-
-#### Complete end-to-end walkthrough
-
-Startup (three panes recommended):
-
-```bash
-# pane 1 — operator monitor
-whisper collab relay-monitor
-
-# pane 2 — codex tab
-whisper collab mount codex
-
-# pane 3 — claude tab
-whisper collab mount claude
-```
-
-Initiate the chain from codex:
-
-```text
-@@claude implement the logging helper described in docs/spec.md
-```
-
-What you see in the relay-monitor pane as the cycle runs:
-
-```
-08:46:03  [codex] → [claude]:
-  implement the logging helper described in docs/spec.md
-08:46:03  [ai-whisper] Handed turn to claude.
-
-● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: pending - Chain: active (round 1/3)
-
-  (claude's idle threshold passes — auto-accept fires)
-
-● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: accepted - Chain: active (round 1/3)
-
-  (claude works, goes idle — auto-handback fires, clipboard captured, orchestrator evaluates)
-
-● codex online - ● claude online - Turn owner: codex - Chain: active (round 1/3)
-
-  (haiku returns verdict=done)
-
-● codex online - ● claude online - Turn owner: codex - Chain: done (round 1/3)
-```
-
-If haiku returns `loop`, the monitor shows a new round starting:
-
-```
-● codex online - ● claude online - Turn owner: claude - Waiting: codex - Handoff: pending - Chain: active (round 2/3)
-```
-
-The composed follow-up message (combining original request + claude's partial result + haiku's guidance) is injected into the new handoff. Codex's waiting gate re-blocks and the cycle repeats.
-
-#### Reading chain state
-
-Use `whisper collab inspect` at any point:
-
-```
-Collab: collab_20260418084548371
-Recovery: normal
-Broker: ok
-Roles:
-  - codex: bound (healthy) [mounted] tty=/dev/ttys001
-  - claude: bound (healthy) [mounted] tty=/dev/ttys015
-Turn owner: codex
-Waiting: none
-Handoff state: idle
-Last capture: ok
-Orchestrator: yes
-Chain status: done
-Round: 1/3
-Active Thread: none
-```
-
-Key fields when orchestrator is enabled:
-
-| Field | Meaning |
-|-------|---------|
-| `Orchestrator: yes` | Broker daemon has the evaluator running for this collab |
-| `Chain status: active` | A round is in progress or handoff is pending orchestrator claim |
-| `Chain status: done` | Haiku returned `done`; chain resolved; no further action needed |
-| `Chain status: escalated` | Orchestrator could not resolve; human operator must intervene |
-| `Round: N/M` | Current round number / `maxRounds` ceiling |
-| `Last capture: ok` | Most recent handback was captured reliably and sent to LLM |
-| `Last capture: no_response_captured` | Provider produced nothing; request will be re-issued |
-
-#### Capture status
-
-Before calling the LLM, the orchestrator checks whether the provider's response was reliably captured from the PTY or clipboard. The capture status is set during auto-handback and stored on the handoff record:
-
-| Status | What happened | Orchestrator action |
-|--------|--------------|---------------------|
-| `ok` | Clipboard change detected and content is ≥ 100 chars, or PTY similarity confirms the clipboard matches the visible turn | Sends captured text to LLM evaluator |
-| `no_response_captured_confidently` | Clipboard changed but content is too short or does not match PTY output (possible stale clipboard) | Skips LLM; re-issues original request unchanged (increments round) |
-| `no_response_captured` | Provider produced no clipboard content and PTY captured nothing | Skips LLM; re-issues original request unchanged (increments round) |
-
-Forced re-issues count toward `maxRounds`. If the provider consistently fails to produce capturable output (e.g. verbose tool-trace output that confuses the similarity check), the chain will exhaust its rounds and escalate.
-
-#### When the chain escalates
-
-`Chain status: escalated` means the orchestrator stopped the automated loop. This happens when:
-
-- `maxRounds` was reached before haiku returned `done`
-- Haiku returned `verdict=escalate` (agent reported being blocked or contradictory request)
-- Haiku returned any verdict with `confidence < 0.5`
-- The LLM evaluator threw an error on both the primary attempt and retry
-
-When escalation occurs:
-- Turn ownership returns to the **original sender** (the agent who sent the first `@@` in the chain)
-- Both agents are unblocked; no pending handoff remains
-- The relay-monitor pane shows `Chain: escalated (round N/M)`
-
-**Operator recovery steps:**
-
-1. Run `whisper collab inspect` to see which round it escalated on and the reason (stored as the chain status detail in the broker)
-2. Open the relay-monitor log to review what each round attempted
-3. Decide whether to:
-   - Fix the request and resend: from the sender's mounted tab, type `@@<target> <revised request>` — this starts a fresh chain
-   - Check the target provider's state manually: switch to the target's tab, review what it produced, and copy the relevant output yourself before sending the next handoff
-   - Increase `maxRounds` in `.env` if the task legitimately needs more iterations
-
-There is no automatic resume from escalation. The operator must initiate the next action.
-
-#### API cost
-
-Each `done` or `escalate` verdict calls the LLM evaluator once (plus one retry on network/rate-limit error). A `loop` verdict also calls once. Forced re-issues due to capture failure call the LLM zero times.
-
-With `maxRounds=3` and haiku as the evaluator, a chain that loops twice and resolves on round 3 costs three haiku calls. Chains that exhaust all rounds via forced re-issues (capture always fails) cost zero LLM calls but may still escalate.
-
-#### Evaluator providers
-
-The evaluator supports two providers, configurable as primary or fallback:
-
-- **Anthropic** — uses `claude-haiku-4-5-20251001` via the Anthropic API
-- **Ollama** — local models (e.g. `qwen2.5:7b-instruct`)
-
-On network or rate-limit errors, the evaluator retries once with the fallback provider if configured. Validation errors do not trigger fallback.
-
-#### Configuration
-
-The orchestrator and idle-handoff knobs below are read from the daemon's environment. The **evaluator** itself (provider, API key, models) is configured persistently in `~/.ai-whisper/` — see [Evaluator configuration (required for workflows)](#evaluator-configuration-required-for-workflows) for the recommended setup. The `AI_WHISPER_EVALUATOR_*` / `ANTHROPIC_API_KEY` env vars still work as the highest-precedence override, but they are no longer the primary way to configure the evaluator.
-
-```bash
-# Orchestrator is on by default. Set to "0" before `whisper collab start` to disable.
-AI_WHISPER_RELAY_ORCHESTRATOR_ENABLED=1
-
-# Max rounds before forced escalation (default: 3)
-AI_WHISPER_RELAY_ORCHESTRATOR_MAX_ROUNDS=3
-
-# Idle threshold controlling auto-accept and auto-handback in mounted sessions
-# Must exceed the LLM's response-start latency (default: 30000 ms)
-AI_WHISPER_IDLE_THRESHOLD_MS=30000
-```
-
-When orchestrator is disabled (default), the collab uses the traditional manual relay workflow and no LLM calls are made by the broker daemon.
-
-## Daily flow (no-launch)
-
-Two terminals, one command each:
-
-```bash
-# Terminal A (claude's home):
-whisper collab mount claude
-
-# Terminal B (codex's home):
-whisper collab mount codex
-```
-
-The first `mount` creates the collab + spins up the broker daemon for the workspace. The second discovers the existing collab and binds the other agent. No `collab start`, no `relay-monitor`, no separate kickoff terminal.
-
-Mounted agents already run in full-permission mode — the relay drives them unattended, so `mount` spawns codex with `--dangerously-bypass-approvals-and-sandbox` and claude with `--dangerously-skip-permissions` automatically. **Do not pass those flags yourself** — they're already on, and passing them again can crash the agent on a duplicate-argument error. The `-- <args>` passthrough exists for *other* flags (e.g. model selection): `whisper collab mount codex -- --model gpt-5-codex`.
-
-To run a workflow (e.g., spec-driven-development), brainstorm a spec with the agents and then invoke the bundled skill from chat:
-
-- Claude: type `/` and pick `ai-whisper-sdd`, or just say *"run SDD on \<path\>"*
-- Codex: type `$` and pick `ai-whisper-sdd`, or natural phrasing as above
-
-To run the ralph-loop workflow against an open-ended goal file instead, invoke `ai-whisper-ralph` the same way:
-
-- Claude: type `/` and pick `ai-whisper-ralph`, or just say *"run ralph on \<path\>"*
-- Codex: type `$` and pick `ai-whisper-ralph`, or natural phrasing as above
-
-Either skill verifies readiness, kicks off the workflow, and exits. The dashboard (`whisper collab dashboard`) is the inspection surface during the run.
-
-## Required skills
-
-The bundled workflows (`spec-driven-development` and `ralph-loop`) rely on agent skills to verify, kick off, and report. Install them once after installing the CLI:
-
-```bash
-whisper skill install
-```
-
-This copies `ai-whisper-sdd` and `ai-whisper-ralph` into both `~/.claude/skills/` and `~/.codex/skills/`. Re-run with `--force` after a CLI upgrade. Use `--target=claude` or `--target=codex` to install for only one agent.
-
-Workflow *review* gates do not use a bundled skill — the review protocol is embedded directly in the orchestrator's review handoff prompt, so reviewers need nothing installed beyond the kickoff skills above.
-
-## Evaluator configuration (required for workflows)
-
-The bundled workflows (currently `spec-driven-development`; more later) use an LLM **evaluator** to judge each handoff. The evaluator requires credentials. Without them, the workflow bails at kickoff with a remediation message — both the SDD skill and `whisper workflow start` refuse to start rather than halting 80 seconds into a run. So this is required setup before running any workflow.
-
-Configuration lives in `~/.ai-whisper/` (the same root as `state.db`), so it is set once and is independent of which shell spawned the daemon.
-
-### Quick setup (Anthropic)
-
-Create `~/.ai-whisper/auth.json` with your API key, then lock it down:
-
-```bash
-mkdir -p ~/.ai-whisper
-cat > ~/.ai-whisper/auth.json <<'JSON'
-{ "ANTHROPIC_API_KEY": "sk-ant-..." }
-JSON
-chmod 600 ~/.ai-whisper/auth.json
-```
-
-That is enough to run the workflows with the default Anthropic provider.
-
-### Optional settings (`config.json`)
-
-Non-secret evaluator settings go in `~/.ai-whisper/config.json`. All fields are optional and fall back to built-in defaults:
-
-```json
-{
-  "evaluator": {
-    "provider": "anthropic",
-    "fallback": "ollama",
-    "anthropicModel": "claude-sonnet-4-6",
-    "ollama": { "host": "http://localhost:11434", "model": "qwen2.5:7b-instruct" }
-  }
-}
-```
-
-- `provider` — `"anthropic"` (default) or `"ollama"`.
-- `fallback` — provider to retry once on a network/rate-limit error; omit for none.
-- `anthropicModel` — overrides the evaluator's default Anthropic model.
-- `ollama.host` / `ollama.model` — used when the provider or fallback is `ollama`.
-
-If you choose the `ollama` provider you do not need an Anthropic key.
-
-### Optional env-style file (`.env`)
-
-For users who prefer env-style config, `~/.ai-whisper/.env` accepts the same `ANTHROPIC_API_KEY` / `AI_WHISPER_EVALUATOR_*` variables. It is loaded by the config layer, not the shell. The parser is intentionally minimal: `KEY=VALUE` lines, `#` comments, blank lines, and surrounding single/double quotes — no interpolation or escaping. For anything fancier, export a real environment variable (highest precedence).
-
-### Precedence
-
-Per resolved value, highest to lowest:
-
-1. Exported process environment variable
-2. `~/.ai-whisper/.env`
-3. `~/.ai-whisper/auth.json` (secrets) / `~/.ai-whisper/config.json` (settings)
-4. Built-in defaults
-
-Existing env-var users are unaffected — exported env vars still win.
-
-### Restart after changing config
-
-The daemon reads this configuration **once at startup**. After editing any of these files, restart the daemon for the change to take effect: `whisper collab stop`, then re-mount (or otherwise restart the broker).
-
-### Migration from a workspace `.env`
-
-The daemon no longer reads a workspace/cwd `.env`. If you previously relied on a project `.env` to feed the daemon's `ANTHROPIC_API_KEY` / `AI_WHISPER_EVALUATOR_*`, move those values into `~/.ai-whisper/auth.json`, `config.json`, or `.env`.
-
-### Verify
-
-```bash
-whisper collab status --json
-```
-
-Check the `evaluator` field — `evaluator.ready` should be `true` and `evaluator.status` should be `"ready"`. A `false` reading reports the reason in `status` (e.g. `missing_anthropic_key` or `invalid_config`) so you know what to fix.
-
-### Autonomous workflows
-
-Multi-phase pipelines that drive both agents through a structured task. Registered workflow types: `spec-driven-development` (spec-refining → plan-writing → plan-execution → code-review) and `ralph-loop` (an open-ended grind-to-completion loop — see [Ralph loop](#ralph-loop) below).
-
-Start a workflow once you have a collab running and both agents mounted:
-
-```bash
-whisper workflow start \
-  --type spec-driven-development \
-  --spec docs/path/to/spec.md \
-  --implementer claude \
-  --reviewer codex
-```
-
-What the workflow does:
-
-- **Phase 0 — spec-refining** (review-loop, maxRounds=5): reviewer reads the spec; either approves or returns findings; implementer addresses findings; loops until approve or escalate.
-- **Phase 1 — plan-writing** (review-loop, maxRounds=5): implementer writes a plan file; reviewer judges; loops until approve.
-- **Phase 2 — plan-execution** (execution-gate, maxRounds=1): implementer runs the plan and commits; orchestrator judges execution-pass / execution-fail / escalate.
-- **Phase 3 — code-review** (review-loop, maxRounds=5): reviewer reviews the commits; loops until approve or halt.
-
-While a workflow is running the manual hotkeys (`a/e/d/h/space/Ctrl+H`) are no-ops — the broker drives the chain. Operators observe via `whisper collab relay-monitor` and the SQLite tables (`workflows`, `relay_chains`, `relay_handoff`).
-
-### Ralph loop
-
-`ralph-loop` grinds an open-ended goal to completion: the implementer does the next chunk, an independent reviewer gates each chunk, and the loop repeats until the reviewer confirms the whole goal is done. It is the "ralph" technique (re-run an agent on the same goal until finished) with ai-whisper's cross-model review bar and durable orchestration added — so the output meets a bar instead of being unchecked self-loop output.
-
-```bash
-whisper workflow start --type ralph-loop --spec docs/path/to/GOAL.md
-# defaults: implementer=claude, reviewer=codex (override with --implementer/--reviewer)
-```
-
-The **goal file** (`--spec`) describes the work plus explicit completion/acceptance criteria. If you want checklist-style control, put the checklist in the goal file — the implementer copies it into `PROGRESS.md` on the first item. For open-ended goals (e.g. "convert every `.js` file to TypeScript"), the implementer derives the next chunk itself each round.
-
-Per run, the implementer keeps durable memory under `<workspace>/.ai-whisper/ralph/<workflowId>/`:
-
-- `PROGRESS.md` — the work ledger (done / remaining).
-- `LEARNINGS.md` — generalizable corrections so a re-oriented agent does not repeat a mistake.
-
-ai-whisper writes only inside `.ai-whisper/` and self-ignores it (a `.ai-whisper/.gitignore` of `*`); it never edits your root `.gitignore`. The implementer **auto-commits its work per item** (the bookkeeping under `.ai-whisper/` is never committed).
-
-The loop stops when: the reviewer confirms completion (workflow `done`); a single item can't pass review within its round budget (escalation → `halted`); or the outer iteration cap is reached (`halted`). Inspect a run with `whisper collab dashboard` (verdict history, per-item rounds, cost). Like all workflows, `ralph-loop` requires the evaluator to be configured — see [Evaluator configuration](#evaluator-configuration-required-for-workflows).
-
-Other workflow commands:
-
-```bash
-whisper workflow list
-whisper workflow inspect <workflowId>
-whisper workflow resume <workflowId>
-whisper workflow cancel <workflowId>
-whisper workflow types
-```
-
-For the per-step verdict vocabulary, halt conditions, and inspection cookbook, see [`docs/relay-handoff-flows.md`](docs/relay-handoff-flows.md#2-autonomous-workflows).
-
-## Phase Roadmap
-
-- Phase 1: foundation
-- Phase 2: shared contracts and broker skeleton
-- Phase 3: collaboration and thread engine
-- Phase 4: companion runtime and generic provider layer
-- Phase 5: CLI-first MVP
-- Phase 6: in-session relay workflow
-- Phase 7: attach, recovery, and operator tooling
-  - 7A: attach workflow — _shelved, see [`docs/legacy-attach.md`](docs/legacy-attach.md)_
-  - 7B: recovery workflow
-  - 7C1: operator monitoring
-  - 7D: adopt existing provider sessions — _shelved, see [`docs/legacy-attach.md`](docs/legacy-attach.md)_
-  - 7E: terminal-first mounted sessions
-  - 7F: relay orchestrator

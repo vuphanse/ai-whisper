@@ -90,10 +90,5 @@ describe("phase 7e mounted handoff probe script", () => {
 	});
 });
 
-describe("README mount guidance", () => {
-	it("documents mount as the inline relay path", () => {
-		const readme = readFileSync(resolve(root, "README.md"), "utf8");
-		expect(readme).toContain("whisper collab mount");
-		expect(readme).toContain("inline `@@` relay");
-	});
-});
+// README contract assertions live in test/readme-smoke.test.ts; this file covers the
+// phase-7e manual smoke scripts only.
