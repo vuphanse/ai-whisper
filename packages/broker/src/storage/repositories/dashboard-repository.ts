@@ -132,10 +132,34 @@ export function listActiveCollabSummaries(
 			| { owner: "codex" | "claude" | "none"; waiting: "codex" | "claude" | null; handoffState: string }
 			| undefined;
 
+		// Return ONE row per agent_type: prefer the session that is the agent's
+		// bound active_session_id; otherwise fall back to the row with the
+		// greatest registered_at. This stops a stale prior-mount (degraded) row
+		// from masking a freshly re-mounted, healthy bound session (Bug A). The
+		// chosen row's health is preserved as-is (degraded is NOT coerced).
+		// The ranking key sorts the bound row first (is_bound DESC), then by
+		// registered_at DESC, then rowid DESC as a deterministic tiebreak; row 1
+		// per agent_type is the pick.
 		const sessions = db
 			.prepare(
-				`SELECT agent_type AS agentType, health_state AS healthState
-				   FROM session WHERE collab_id = ? ORDER BY registered_at ASC`,
+				`SELECT agentType, healthState FROM (
+				   SELECT s.agent_type AS agentType,
+				          s.health_state AS healthState,
+				          ROW_NUMBER() OVER (
+				            PARTITION BY s.agent_type
+				            ORDER BY CASE WHEN sb.active_session_id = s.session_id
+				                          THEN 0 ELSE 1 END ASC,
+				                     s.registered_at DESC,
+				                     s.rowid DESC
+				          ) AS rn
+				     FROM session s
+				     LEFT JOIN session_binding sb
+				       ON sb.collab_id = s.collab_id
+				      AND sb.agent_type = s.agent_type
+				    WHERE s.collab_id = ?
+				 ) ranked
+				 WHERE rn = 1
+				 ORDER BY agentType ASC`,
 			)
 			.all(e.collabId) as Array<{ agentType: string; healthState: string }>;
 
