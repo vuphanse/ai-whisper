@@ -41,33 +41,24 @@ export function probeMountAlive(
 }
 
 // Build a per-agent mountAlive resolver from a collab's session attachments.
-// The MOUNTED attachment carries the provider pid recorded at mount, so it is
-// the authoritative liveness source (spec §Bug C). When several attachment
-// kinds exist for one agent (e.g. an older `owned`/`adopted` row plus the
-// `mounted` row), the `mounted` pid MUST win — otherwise a live stale owned pid
-// could mask a dead mounted worker and report "long-running" instead of STUCK.
-// Only when no `mounted` attachment exists do we fall back to the latest other
-// row. Absent attachment/pid → mountAlive=false (conservative). Probes
-// process.kill here (host), keeping the pure builders deterministic.
+// Liveness comes ONLY from the `mounted` attachment's pid — the provider process
+// recorded at mount (spec §Bug C, lines 122-138). Non-`mounted` kinds
+// (`owned`/`adopted`) are NOT a liveness source: a live stale owned pid must
+// never stand in for the mount. If there is no `mounted` row for the agent (or
+// its pid is null/absent), mountAlive is false (conservative: an absent mount pid
+// must allow STUCK, never be masked). Probes process.kill here (host), keeping
+// the pure builders deterministic.
 export function buildMountAliveByAgent(
 	attachments: Array<{ agentType: string; attachmentKind: string; pid: number | null }>,
 ): (agentType: string) => boolean {
 	const mountedPidByAgent = new Map<string, number | null>();
-	const fallbackPidByAgent = new Map<string, number | null>();
 	for (const a of attachments) {
 		if (a.attachmentKind === "mounted") {
 			mountedPidByAgent.set(a.agentType, a.pid);
-		} else {
-			// Input is ordered by attached_at ASC, so the last write keeps the latest.
-			fallbackPidByAgent.set(a.agentType, a.pid);
 		}
 	}
-	return (agentType: string) => {
-		const pid = mountedPidByAgent.has(agentType)
-			? (mountedPidByAgent.get(agentType) ?? null)
-			: (fallbackPidByAgent.get(agentType) ?? null);
-		return probeMountAlive(pid);
-	};
+	return (agentType: string) =>
+		probeMountAlive(mountedPidByAgent.get(agentType) ?? null);
 }
 
 const DEFAULT_WINDOW_MS = 1_800_000;

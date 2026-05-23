@@ -75,10 +75,20 @@ describe("buildMountAliveByAgent (host wiring)", () => {
 		expect(resolve("claude")).toBe(true);
 	});
 
-	it("falls back to the latest non-mounted attachment only when no mounted row exists", () => {
+	it("no mounted attachment → false even if a live owned/adopted pid exists (spec lines 122-138)", () => {
+		// Absent mounted pid must allow STUCK; a live non-mounted pid must NOT mask it.
 		const resolve = buildMountAliveByAgent([
-			{ agentType: "codex", attachmentKind: "owned", pid: process.pid }, // alive, only row
+			{ agentType: "codex", attachmentKind: "owned", pid: process.pid }, // alive but NOT mounted
+			{ agentType: "claude", attachmentKind: "adopted", pid: process.pid }, // alive but NOT mounted
 		]);
-		expect(resolve("codex")).toBe(true);
+		expect(resolve("codex")).toBe(false);
+		expect(resolve("claude")).toBe(false);
+	});
+
+	it("mounted row with a null pid → false (conservative)", () => {
+		const resolve = buildMountAliveByAgent([
+			{ agentType: "codex", attachmentKind: "mounted", pid: null },
+		]);
+		expect(resolve("codex")).toBe(false);
 	});
 });
