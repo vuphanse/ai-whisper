@@ -15,6 +15,7 @@ function fakeBroker(summaries: unknown[] = []) {
 		getRelayChain: vi.fn(() => null),
 		getRelayTurnState: vi.fn(() => ({ turnOwner: "none", waitingAgent: null, handoffState: "idle" })),
 		listSessions: vi.fn(() => []),
+		listSessionAttachments: vi.fn(() => []),
 		listEvaluatorDiagnosticsByCollab: vi.fn(() => []),
 		listEvaluatorDiagnosticsByCollabAndChain: vi.fn(() => []),
 		listCaptureDiagnosticsByCollab: vi.fn(() => []),

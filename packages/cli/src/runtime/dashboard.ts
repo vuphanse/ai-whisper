@@ -21,6 +21,42 @@ import {
 	type RelayViewSnapshot,
 } from "./dashboard-state.js";
 
+// Host-only pid-liveness probe (Bug C). Lives here, NOT in the pure builders,
+// so computeLiveness stays deterministic. Absent pid → false (conservative, so
+// the signal never masks a real hang). EPERM means the process exists but is
+// not signalable by us → treat as alive.
+export function probeMountAlive(
+	pid: number | null,
+	kill: (pid: number, signal: number) => void = (p, s) => {
+		process.kill(p, s);
+	},
+): boolean {
+	if (pid == null) return false;
+	try {
+		kill(pid, 0);
+		return true;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException)?.code === "EPERM";
+	}
+}
+
+// Build a per-agent mountAlive resolver from a collab's session attachments.
+// The mounted attachment carries the provider pid recorded at mount. Absent
+// attachment/pid → mountAlive=false (conservative). Probes process.kill here
+// (host), keeping the pure builders deterministic.
+export function buildMountAliveByAgent(
+	attachments: Array<{ agentType: string; pid: number | null }>,
+): (agentType: string) => boolean {
+	const pidByAgent = new Map<string, number | null>();
+	for (const a of attachments) {
+		// Prefer a non-null pid if multiple attachment kinds exist for the agent.
+		const existing = pidByAgent.get(a.agentType);
+		if (existing == null) pidByAgent.set(a.agentType, a.pid);
+	}
+	return (agentType: string) =>
+		probeMountAlive(pidByAgent.has(agentType) ? (pidByAgent.get(agentType) ?? null) : null);
+}
+
 const DEFAULT_WINDOW_MS = 1_800_000;
 function resolveDashboardWindowMs(): number {
 	const raw = process.env.AI_WHISPER_DASHBOARD_WINDOW_MS;
@@ -108,6 +144,10 @@ export function createDashboardRuntime(input: {
 		const chain = curRunChainId ? c.getRelayChain(curRunChainId) : null;
 		const turn = c.getRelayTurnState(collabId, isoNow);
 		const sessions = c.listSessions(collabId);
+		// Per-agent pid-liveness (Bug C): probe each mounted agent's recorded pid.
+		const mountAliveOf = buildMountAliveByAgent(
+			c.listSessionAttachments(collabId),
+		);
 		const def = inspectorType ? getWorkflowDefinition(inspectorType) : null;
 		const phaseMaxRounds: Record<number, number> = {};
 		if (def)
@@ -187,6 +227,7 @@ export function createDashboardRuntime(input: {
 			sessions: sessions.map((s) => ({
 				agentType: s.agentType,
 				healthState: s.healthState,
+				mountAlive: mountAliveOf(s.agentType),
 			})),
 			lastActivityAt,
 			handoffs,
@@ -270,6 +311,17 @@ export function createDashboardRuntime(input: {
 				phaseRuns: toPhaseRuns(phaseRaw),
 				totalPhases: def ? def.phases.length : 0,
 			};
+			// Per-agent pid-liveness (Bug C) for the VISIBLE pane only (bounded
+			// cost): probe each agent's recorded mount pid and attach mountAlive
+			// to that agent's sessions[] entry so the Wall's computeLiveness can
+			// distinguish a hung worker from a live long-running step.
+			const mountAliveOf = buildMountAliveByAgent(
+				c.listSessionAttachments(s.collabId),
+			);
+			s.sessions = s.sessions.map((sess) => ({
+				...sess,
+				mountAlive: mountAliveOf(sess.agentType),
+			}));
 		}
 		const wallState = buildWallState({
 			summaries,
