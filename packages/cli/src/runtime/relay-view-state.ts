@@ -283,11 +283,19 @@ export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
 
 	const turn = `${snap.turn.turnOwner} · waiting ${snap.turn.waitingAgent ?? "none"} · handoff ${snap.turn.handoffState}`;
 
+	// Three-way health glyph (Bug A): a bound, non-offline agent must NOT read
+	// as dead. healthy → "●"; degraded (alive but impaired) → "◐(degraded)";
+	// offline / missing session → "●(dead)".
 	const dots = RELAY_AGENTS
 		.map((a) => {
 			const sess = snap.sessions.find((x) => x.agentType === a);
-			const ok = sess?.healthState === "healthy";
-			return `${ok ? "●" : "●(dead)"} ${a}`;
+			const glyph =
+				sess?.healthState === "healthy"
+					? "●"
+					: sess?.healthState === "degraded"
+						? "◐(degraded)"
+						: "●(dead)";
+			return `${glyph} ${a}`;
 		})
 		.join("  ");
 

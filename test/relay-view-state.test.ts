@@ -225,6 +225,34 @@ describe("buildRelayViewState — status", () => {
 		expect(s.health).toContain("●(dead) claude");
 	});
 
+	it("health dots: healthy → ●, degraded → distinct ◐(degraded), offline → ●(dead) (Bug A)", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			sessions: [
+				{ agentType: "codex", healthState: "degraded" },
+				{ agentType: "claude", healthState: "offline" },
+			],
+		});
+		// degraded must NOT read as dead
+		expect(s.health).toContain("◐(degraded) codex");
+		expect(s.health).not.toContain("●(dead) codex");
+		// offline reads as dead
+		expect(s.health).toContain("●(dead) claude");
+	});
+
+	it("healthy session renders the alive ● glyph (not dead, not degraded)", () => {
+		const s = buildRelayViewState({
+			...baseSnapshot,
+			sessions: [
+				{ agentType: "codex", healthState: "healthy" },
+				{ agentType: "claude", healthState: "healthy" },
+			],
+		});
+		expect(s.health).toContain("● codex");
+		expect(s.health).not.toContain("●(dead) codex");
+		expect(s.health).not.toContain("◐(degraded) codex");
+	});
+
 	it("populated last handoff renders verdict/confidence/capture/reason", () => {
 		const s = buildRelayViewState({
 			...baseSnapshot,
