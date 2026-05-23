@@ -10,7 +10,11 @@ import {
 	reapSupersededSessions,
 } from "../packages/broker/src/storage/repositories/session-repository.ts";
 import type { Session } from "@ai-whisper/shared";
-import { safeReapSessions } from "../packages/cli/src/runtime/mount-session-main.ts";
+import {
+	safeReapSessions,
+	reapStaleSessionsOnMount,
+	reapStaleSessionsOnTeardown,
+} from "../packages/cli/src/runtime/mount-session-main.ts";
 
 function freshDb() {
 	const dir = mkdtempSync(join(tmpdir(), "aiw-reap-"));
@@ -103,5 +107,42 @@ describe("safeReapSessions (failure isolation, criterion 2)", () => {
 			},
 		});
 		expect(calls).toEqual([["collab_x", "claude", "session_keep"]]);
+	});
+});
+
+// Spec lines 180-183 / criterion 2: the actual mount-registration and
+// stop/teardown reap PATHS (the named functions mount-session-main calls at its
+// two call sites) must complete even when reapSupersededSessions throws.
+// `start()` is interactive and not unit-drivable, so these dedicated path
+// functions are the testable representation of those call sites.
+describe("mount/teardown reap paths under a throwing reaper (criterion 2)", () => {
+	const args = { collabId: "collab_x", agentType: "codex", keepSessionId: "session_keep" };
+	const boom = () => {
+		throw new Error("reap exploded");
+	};
+
+	it("the mount-registration path completes when the reaper throws", () => {
+		let logged = false;
+		expect(() =>
+			reapStaleSessionsOnMount({ ...args, reap: boom, logError: () => { logged = true; } }),
+		).not.toThrow();
+		expect(logged).toBe(true);
+	});
+
+	it("the stop/teardown path completes when the reaper throws", () => {
+		let logged = false;
+		expect(() =>
+			reapStaleSessionsOnTeardown({ ...args, reap: boom, logError: () => { logged = true; } }),
+		).not.toThrow();
+		expect(logged).toBe(true);
+	});
+
+	it("each path invokes the reaper with the (collab, agent, keep) tuple on success", () => {
+		const mountCalls: Array<[string, string, string]> = [];
+		const teardownCalls: Array<[string, string, string]> = [];
+		reapStaleSessionsOnMount({ ...args, reap: (c, a, k) => (mountCalls.push([c, a, k]), 1) });
+		reapStaleSessionsOnTeardown({ ...args, reap: (c, a, k) => (teardownCalls.push([c, a, k]), 1) });
+		expect(mountCalls).toEqual([["collab_x", "codex", "session_keep"]]);
+		expect(teardownCalls).toEqual([["collab_x", "codex", "session_keep"]]);
 	});
 });

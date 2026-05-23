@@ -61,6 +61,30 @@ export function safeReapSessions(input: {
 	}
 }
 
+type ReapLifecycleInput = {
+	collabId: string;
+	agentType: string;
+	keepSessionId: string;
+	reap?: (collabId: string, agentType: string, keepSessionId: string) => number;
+	logError?: (err: unknown) => void;
+};
+
+// The mount-registration reap path: after a NEW session becomes the active/bound
+// one, drop superseded rows for this (collab, agent). Named + exported so the
+// mount path's failure-isolation is unit-tested (criterion 2) — a throwing reaper
+// must never propagate out of mount. `start()` is interactive and not unit-drivable,
+// so this is the testable representation of the call site.
+export function reapStaleSessionsOnMount(input: ReapLifecycleInput): void {
+	safeReapSessions(input);
+}
+
+// The stop/teardown reap path: after the session is marked degraded, drop
+// superseded rows keeping that surviving row. A throwing reaper must never
+// propagate out of stop (criterion 2).
+export function reapStaleSessionsOnTeardown(input: ReapLifecycleInput): void {
+	safeReapSessions(input);
+}
+
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
 	ttyPath: string;
@@ -135,7 +159,7 @@ export function createMountSessionRuntime(input: {
 					// Reap any superseded session rows for this (collab, agent) on
 					// teardown, keeping the session we just degraded (the surviving
 					// active row). Best-effort; never breaks stop (criterion 2).
-					safeReapSessions({
+					reapStaleSessionsOnTeardown({
 						collabId: resolvedClaim.collabId,
 						agentType: input.target,
 						keepSessionId: resolvedClaim.sessionId,
@@ -403,7 +427,7 @@ export function createMountSessionRuntime(input: {
 				// Reap superseded session rows for this (collab, agent), keeping the
 				// just-activated session. Belt-and-suspenders with the read-path fix
 				// so the dashboard never resolves a stale prior-mount row (Bug A).
-				safeReapSessions({
+				reapStaleSessionsOnMount({
 					collabId: resolvedClaim.collabId,
 					agentType: input.target,
 					keepSessionId: resolvedClaim.sessionId,

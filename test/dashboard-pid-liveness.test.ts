@@ -40,8 +40,8 @@ describe("probeMountAlive (host pid probe, Bug C)", () => {
 describe("buildMountAliveByAgent (host wiring)", () => {
 	it("maps a live pid → true and a dead pid → false per agent; absent agent → false", () => {
 		const resolve = buildMountAliveByAgent([
-			{ agentType: "codex", pid: process.pid }, // alive
-			{ agentType: "claude", pid: 2147483647 }, // dead (ESRCH on probe)
+			{ agentType: "codex", attachmentKind: "mounted", pid: process.pid }, // alive
+			{ agentType: "claude", attachmentKind: "mounted", pid: 2147483647 }, // dead (ESRCH)
 		]);
 		expect(resolve("codex")).toBe(true);
 		expect(resolve("claude")).toBe(false);
@@ -50,7 +50,35 @@ describe("buildMountAliveByAgent (host wiring)", () => {
 	});
 
 	it("absent pid on an attachment → false (conservative)", () => {
-		const resolve = buildMountAliveByAgent([{ agentType: "codex", pid: null }]);
+		const resolve = buildMountAliveByAgent([
+			{ agentType: "codex", attachmentKind: "mounted", pid: null },
+		]);
 		expect(resolve("codex")).toBe(false);
+	});
+
+	// Criteria 6/7 — the MOUNTED attachment's pid is authoritative. A live older
+	// owned/adopted pid must NOT mask a dead mounted worker (else false long-running).
+	it("a live owned pid does NOT mask a dead mounted pid (mounted wins → false)", () => {
+		const resolve = buildMountAliveByAgent([
+			// ordered by attached_at ASC: owned first (alive), mounted later (dead)
+			{ agentType: "codex", attachmentKind: "owned", pid: process.pid }, // alive
+			{ agentType: "codex", attachmentKind: "mounted", pid: 2147483647 }, // dead
+		]);
+		expect(resolve("codex")).toBe(false); // mounted (dead) is authoritative
+	});
+
+	it("a dead owned pid does NOT force STUCK when the mounted pid is live (mounted wins → true)", () => {
+		const resolve = buildMountAliveByAgent([
+			{ agentType: "claude", attachmentKind: "adopted", pid: 2147483647 }, // dead
+			{ agentType: "claude", attachmentKind: "mounted", pid: process.pid }, // alive
+		]);
+		expect(resolve("claude")).toBe(true);
+	});
+
+	it("falls back to the latest non-mounted attachment only when no mounted row exists", () => {
+		const resolve = buildMountAliveByAgent([
+			{ agentType: "codex", attachmentKind: "owned", pid: process.pid }, // alive, only row
+		]);
+		expect(resolve("codex")).toBe(true);
 	});
 });
