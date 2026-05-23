@@ -31,6 +31,7 @@ export {
 	getSession,
 	insertSession,
 	listSessionsForCollab,
+	reapSupersededSessions,
 	updateSessionHealth,
 } from "./storage/repositories/session-repository.js";
 export {

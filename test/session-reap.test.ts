@@ -10,6 +10,7 @@ import {
 	reapSupersededSessions,
 } from "../packages/broker/src/storage/repositories/session-repository.ts";
 import type { Session } from "@ai-whisper/shared";
+import { safeReapSessions } from "../packages/cli/src/runtime/mount-session-main.ts";
 
 function freshDb() {
 	const dir = mkdtempSync(join(tmpdir(), "aiw-reap-"));
@@ -68,5 +69,39 @@ describe("reapSupersededSessions", () => {
 		insertSession(db, mkSession({ id: "session_only", collab: cA, agent: "codex" }));
 		expect(reapSupersededSessions(db, cA, "codex", "session_only")).toBe(0);
 		expect(listSessionsForCollab(db, cA)).toHaveLength(1);
+	});
+});
+
+describe("safeReapSessions (failure isolation, criterion 2)", () => {
+	it("swallows a throwing reap and returns normally (mount/teardown unaffected)", () => {
+		let logged = false;
+		expect(() =>
+			safeReapSessions({
+				collabId: "collab_x",
+				agentType: "codex",
+				keepSessionId: "session_keep",
+				reap: () => {
+					throw new Error("boom");
+				},
+				logError: () => {
+					logged = true;
+				},
+			}),
+		).not.toThrow();
+		expect(logged).toBe(true);
+	});
+
+	it("invokes the reap with the (collab, agent, keep) tuple when it succeeds", () => {
+		const calls: Array<[string, string, string]> = [];
+		safeReapSessions({
+			collabId: "collab_x",
+			agentType: "claude",
+			keepSessionId: "session_keep",
+			reap: (c, a, k) => {
+				calls.push([c, a, k]);
+				return 2;
+			},
+		});
+		expect(calls).toEqual([["collab_x", "claude", "session_keep"]]);
 	});
 });

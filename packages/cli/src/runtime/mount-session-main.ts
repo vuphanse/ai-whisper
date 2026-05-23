@@ -4,6 +4,7 @@ import {
 	openDatabase,
 	deleteSessionAttachment,
 	getRecoveryState,
+	reapSupersededSessions,
 	upsertRecoveryState,
 } from "@ai-whisper/broker";
 import { getSharedSqlitePath } from "./state-root.js";
@@ -27,6 +28,38 @@ import { createAssistantTurnCapture } from "./assistant-turn-capture.js";
 import { captureClipboardHandback } from "./clipboard-handback-capture.js";
 import { submitInjectedProviderInput } from "./provider-submit-strategy.js";
 import { createRuntimeDebugLogger } from "./runtime-debug-log.js";
+
+// Best-effort reap of superseded `session` rows for a (collab, agent), keeping
+// only the active/kept session id. Wrapped so a reaping failure is logged and
+// NEVER breaks mount registration or stop/teardown (acceptance criterion 2).
+// The `reap`/`logError` seams are injected in tests; production opens the
+// shared DB and delegates to reapSupersededSessions.
+export function safeReapSessions(input: {
+	collabId: string;
+	agentType: string;
+	keepSessionId: string;
+	reap?: (collabId: string, agentType: string, keepSessionId: string) => number;
+	logError?: (err: unknown) => void;
+}): void {
+	const reap =
+		input.reap ??
+		((collabId, agentType, keepSessionId) => {
+			const db = openDatabase(getSharedSqlitePath());
+			try {
+				return reapSupersededSessions(db, collabId, agentType, keepSessionId);
+			} finally {
+				db.close();
+			}
+		});
+	try {
+		reap(input.collabId, input.agentType, input.keepSessionId);
+	} catch (err) {
+		(input.logError ??
+			((e: unknown) => {
+				console.error("reapSupersededSessions failed (non-fatal)", e);
+			}))(err);
+	}
+}
 
 export function createMountSessionRuntime(input: {
 	target: "codex" | "claude";
@@ -99,6 +132,14 @@ export function createMountSessionRuntime(input: {
 					} catch {
 						// Best-effort; broker may already be unreachable.
 					}
+					// Reap any superseded session rows for this (collab, agent) on
+					// teardown, keeping the session we just degraded (the surviving
+					// active row). Best-effort; never breaks stop (criterion 2).
+					safeReapSessions({
+						collabId: resolvedClaim.collabId,
+						agentType: input.target,
+						keepSessionId: resolvedClaim.sessionId,
+					});
 				}
 				if (resolvedClaim) {
 					try {
@@ -358,6 +399,15 @@ export function createMountSessionRuntime(input: {
 				} catch {
 					// Best-effort; shared-DB write failures must not break mount flow.
 				}
+
+				// Reap superseded session rows for this (collab, agent), keeping the
+				// just-activated session. Belt-and-suspenders with the read-path fix
+				// so the dashboard never resolves a stale prior-mount row (Bug A).
+				safeReapSessions({
+					collabId: resolvedClaim.collabId,
+					agentType: input.target,
+					keepSessionId: resolvedClaim.sessionId,
+				});
 
 				// Clear recovery state if this was a reconnect after recovery and
 				// no other sessions remain degraded.
