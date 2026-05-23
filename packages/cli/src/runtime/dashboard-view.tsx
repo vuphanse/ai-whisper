@@ -173,6 +173,25 @@ export function Inspector(props: {
 				/>
 			) : props.section === "timeline" ? (
 				<Box flexDirection="column">
+					{s.workflowHistory.length > 0 ? (
+						<Box flexDirection="column">
+							<Text wrap="truncate" color="gray">
+								{`WORKFLOW HISTORY (${s.workflowHistory.length})`}
+							</Text>
+							{s.workflowHistory.map((w) => (
+								<Text
+									key={w.workflowId}
+									wrap="truncate"
+									bold={w.selected}
+									color={w.selected ? "white" : "gray"}
+								>
+									{`${w.selected ? "▸" : " "} ${w.workflowId.slice(0, 12)}  ${
+										w.workflowType
+									}  ${w.status}  ${w.createdAt}`}
+								</Text>
+							))}
+						</Box>
+					) : null}
 					<Text wrap="truncate" color="gray">
 						PHASE ROUNDS TIME ~TOK OUTCOME
 					</Text>
