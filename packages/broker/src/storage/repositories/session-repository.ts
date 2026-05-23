@@ -80,6 +80,26 @@ export function getSession(
 	return mapRowToSession(row);
 }
 
+// Deletes superseded `session` rows for a (collab, agent), keeping only the
+// active/kept session id. Scoped strictly to (collab_id, agent_type) so other
+// agents and other collabs are never touched. No table FK-references `session`,
+// so a plain DELETE is safe (verified against the schema). Returns the number
+// of rows deleted.
+export function reapSupersededSessions(
+	db: Database.Database,
+	collabId: string,
+	agentType: string,
+	keepSessionId: string,
+): number {
+	const res = db
+		.prepare(
+			`DELETE FROM session
+			  WHERE collab_id = ? AND agent_type = ? AND session_id <> ?`,
+		)
+		.run(collabId, agentType, keepSessionId);
+	return res.changes;
+}
+
 export function listSessionsForCollab(
 	db: Database.Database,
 	collabId: string,
