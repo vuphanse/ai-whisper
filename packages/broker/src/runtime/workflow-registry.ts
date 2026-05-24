@@ -49,6 +49,17 @@ export interface PhaseConfig {
 	acceptanceReviewTemplate?: string;
 	/** Review mode for this phase's normal review step. Acceptance reviews always use "acceptance-review". */
 	reviewMode?: ReviewMode;
+	/** When true, the driver reads workspace HEAD on entry to this phase and
+	 *  anchors it as baseBeforeExecution, even though this is not an `execute`
+	 *  phase. Lets a later review-loop phase resolve {commitRange} as base..HEAD.
+	 *  Opt-in and additive — leaves SDD/ralph (which never set it) unchanged. */
+	anchorCommitBaseOnEntry?: boolean;
+	/** When true, a findings→fix loop renders this phase's `stepTemplates.fix`
+	 *  (with the bugfix placeholders + appended reviewer findings) instead of the
+	 *  generic findings wrapper. Without it, non-ralph fix steps use the generic
+	 *  wrapper and the phase's fix template would be dead code. Opt-in and additive
+	 *  — SDD/ralph never set it, so their findings→fix behavior is unchanged. */
+	renderFixTemplateOnFindings?: boolean;
 }
 
 export interface WorkflowDefinition {
@@ -271,9 +282,118 @@ export const RALPH_LOOP: WorkflowDefinition = {
 	],
 };
 
+const BUGFIX_DIAGNOSIS_KICKOFF = `You are the implementer in an autonomous complex-bug-fixing workflow. No human is in the loop — never ask for confirmation, permission, or clarification; do the work yourself.
+
+Read the bug report at {specPath}. A human (dev or QA) already observed this bug, so you must reproduce it too — do NOT theorize from reading code paths.
+
+Write a diagnosis artifact to {diagnosisPath} (create the file) with these sections:
+1. Reproduction — an ACTUALLY OBSERVED reproduction you ran yourself. Strongly prefer a failing test (RED) failing for the right reason; commit that test in THIS phase. If the project supports e2e/real-browser (e.g. Playwright), use it. Only if no automated test can capture it, give command/log output WITH an explicit justification.
+2. Root cause — the causal chain symptom→cause, each link backed by concrete evidence (stack trace, log line, failing assertion, bisect), not assertion.
+3. Proposed fix approach — what changes and WHY that removes the root cause rather than masking the symptom.
+4. Blast radius — every area/module/contract the fix could affect.
+5. Residual risks — foreseeable risks remaining after the fix.
+
+Commit the RED reproduction test (do NOT commit {bugfixDir}; it is gitignored). End your handback with a 1-2 sentence summary; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.`;
+
+const BUGFIX_DIAGNOSIS_REVIEW =
+	"Review the diagnosis artifact at {diagnosisPath} for the bug reported at {specPath}. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_DIAGNOSIS_PROTOCOL;
+
+const BUGFIX_DIAGNOSIS_FIX =
+	"Apply the reviewer's findings to the diagnosis at {diagnosisPath} now. This is an autonomous workflow — no human will respond. Make the edits yourself (re-reproduce if needed) and hand back the corrected diagnosis; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary of what you changed; your reply must be at least two sentences, well over 100 characters — never hand back only a single word.";
+
+const BUGFIX_FIX_KICKOFF = `The diagnosis at {diagnosisPath} is APPROVED — treat it as ground truth (re-orient from it, not prior conversation). This is an autonomous workflow — no human will respond; do the work yourself.
+
+1. Implement the fix per the APPROVED approach.
+2. Turn the reproduction GREEN — the failing test now passes for the right reason; if the repro was a non-test demonstration, re-run it and show the symptom is gone.
+3. Run the project's verification/test command PLUS targeted checks across the declared blast radius, including the full suite, to catch regressions.
+4. Commit the fix and any added happy-path/edge-case coverage tests (the RED test was committed in diagnosis). Do NOT commit {bugfixDir} (gitignored).
+
+If you discover the approved cause was WRONG, do NOT silently switch to a different fix — hand back saying the cause is wrong so the diagnosis is re-opened. Hand back the commit SHAs + verification output + a 1-2 sentence summary; your reply must be at least two sentences, well over 100 characters.`;
+
+const BUGFIX_FIX_REVIEW =
+	"The implementer claims the fix for the bug at {specPath} is complete — the changes are commits {commitRange}; resolve the upper bound against LIVE HEAD and include fix-round commits. Verify against the APPROVED diagnosis at {diagnosisPath}. Independently re-run the reproduction (it must be GREEN) and the verification suite — do not trust pasted output. Confirm: the root cause is actually removed (not just relocated — anti-whack-a-mole); every declared blast-radius area is regression-free; residual risks are handled or explicitly accepted; and COVERAGE is adequate — every happy path has at least one covering test and edge cases are covered. A case that genuinely cannot be covered must be explicitly noted (not silently passed); thin coverage is a blocking finding. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
+
+const BUGFIX_FIX_FIX =
+	"Apply the reviewer's findings to commits {commitRange} now (amend or add commits). This is an autonomous workflow — no human will respond. Do the work yourself and hand back the updated commit SHAs and verification output; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary; your reply must be at least two sentences, well over 100 characters.";
+
+const BUGFIX_POSTMORTEM_KICKOFF = "Write a post-mortem report to {postmortemPath} (create the file) for the bug fixed in this run. This is an autonomous workflow — no human will respond; do the work yourself. Recap: confirmed root cause; the fix applied; reproduction→GREEN evidence; blast radius touched; coverage gaps explicitly listed (carried from the fix review); residual risks; and lessons learned. Do NOT commit {bugfixDir} (gitignored). End your handback with a 1-2 sentence summary; your reply must be at least two sentences, well over 100 characters.";
+
+const BUGFIX_POSTMORTEM_REVIEW =
+	"Review the post-mortem report at {postmortemPath}. Confirm it faithfully reflects what actually happened in this run — confirmed cause, the fix, the noted coverage gaps, and residual risks are all present and honest. This is not a rubber stamp; gloss-overs or omissions are findings. This is an autonomous workflow with no human in the loop.\n\n" +
+	WORKFLOW_REVIEW_PROTOCOL;
+
+const BUGFIX_POSTMORTEM_FIX =
+	"Apply the reviewer's findings to the post-mortem at {postmortemPath} now. This is an autonomous workflow — no human will respond. Make the edits yourself and hand back the corrected report; never ask for confirmation, permission, or clarification. End your handback with a 1-2 sentence summary; your reply must be at least two sentences, well over 100 characters.";
+
+export const COMPLEX_BUG_FIXING: WorkflowDefinition = {
+	type: "complex-bug-fixing",
+	displayName: "Complex Bug Fixing",
+	description:
+		"Reproduce → adversarially-gated diagnosis → fix & verify → post-mortem, for a reported bug whose root cause is unknown",
+	defaultImplementer: "claude" as const,
+	defaultReviewer: "codex" as const,
+	phases: [
+		{
+			name: "diagnosis",
+			implementerRole: "implementer",
+			reviewerRole: "reviewer",
+			maxRounds: 5,
+			initialHandoffStep: "implement",
+			kickoffTemplate: BUGFIX_DIAGNOSIS_KICKOFF,
+			stepTemplates: {
+				implement: BUGFIX_DIAGNOSIS_KICKOFF,
+				review: BUGFIX_DIAGNOSIS_REVIEW,
+				fix: BUGFIX_DIAGNOSIS_FIX,
+			},
+			reviewMode: "phase-review",
+			evaluatorPromptKey: "review-loop",
+			artifactOut: { kind: "spec", pathTemplate: "{diagnosisPath}" },
+			anchorCommitBaseOnEntry: true,
+			renderFixTemplateOnFindings: true,
+		},
+		{
+			name: "fix-and-verify",
+			implementerRole: "implementer",
+			reviewerRole: "reviewer",
+			maxRounds: 5,
+			initialHandoffStep: "implement",
+			kickoffTemplate: BUGFIX_FIX_KICKOFF,
+			stepTemplates: {
+				implement: BUGFIX_FIX_KICKOFF,
+				review: BUGFIX_FIX_REVIEW,
+				fix: BUGFIX_FIX_FIX,
+			},
+			reviewMode: "acceptance-review",
+			evaluatorPromptKey: "review-loop",
+			artifactOut: { kind: "commit-range" },
+			renderFixTemplateOnFindings: true,
+		},
+		{
+			name: "post-mortem",
+			implementerRole: "implementer",
+			reviewerRole: "reviewer",
+			maxRounds: 3,
+			initialHandoffStep: "implement",
+			kickoffTemplate: BUGFIX_POSTMORTEM_KICKOFF,
+			stepTemplates: {
+				implement: BUGFIX_POSTMORTEM_KICKOFF,
+				review: BUGFIX_POSTMORTEM_REVIEW,
+				fix: BUGFIX_POSTMORTEM_FIX,
+			},
+			reviewMode: "phase-review",
+			evaluatorPromptKey: "review-loop",
+			artifactOut: { kind: "spec", pathTemplate: "{postmortemPath}" },
+			renderFixTemplateOnFindings: true,
+		},
+	],
+};
+
 const REGISTRY: Record<string, WorkflowDefinition> = {
 	[SPEC_DRIVEN_DEVELOPMENT.type]: SPEC_DRIVEN_DEVELOPMENT,
 	[RALPH_LOOP.type]: RALPH_LOOP,
+	[COMPLEX_BUG_FIXING.type]: COMPLEX_BUG_FIXING,
 };
 
 export function ralphRunDir(workspaceRoot: string, workflowId: string): string {
