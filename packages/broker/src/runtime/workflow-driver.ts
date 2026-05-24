@@ -5,8 +5,10 @@ import {
 	derivePlanPath,
 	renderTemplate,
 	ralphRunDir,
+	bugfixPaths,
 } from "./workflow-registry.js";
 import { ensureRalphWorkspace } from "./ralph-setup.js";
+import { ensureBugfixWorkspace } from "./bugfix-setup.js";
 
 type WorkflowStatus = "running" | "halted" | "done" | "canceled";
 type WorkflowRecordLike = {
@@ -141,9 +143,10 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 				? (reviewerAgent)
 				: (implementerAgent);
 
-		// Read HEAD sha for execute phases
+		// Read HEAD sha for execute phases, and for phases that opt into
+		// commit-base anchoring on entry (complex-bug-fixing's diagnosis phase).
 		let executionBaseHeadSha: string | undefined;
-		if (phase.initialHandoffStep === "execute") {
+		if (phase.initialHandoffStep === "execute" || phase.anchorCommitBaseOnEntry === true) {
 			try {
 				executionBaseHeadSha = await headReader.readHead(collab.workspaceRoot);
 			} catch (err) {
@@ -169,6 +172,19 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 			ralphDir = ralphRunDir(collab.workspaceRoot, workflowId);
 		}
 
+		// Set up the gitignored bugfix run dir (idempotent) for complex-bug-fixing;
+		// halt on fs failure. For other workflow types we still compute the paths so
+		// the placeholders render (they will simply be unused by the templates).
+		if (workflow.workflowType === "complex-bug-fixing") {
+			try {
+				ensureBugfixWorkspace(collab.workspaceRoot, workflowId);
+			} catch (err) {
+				broker.control.haltWorkflow({ workflowId, reason: `bugfix setup failed: ${String(err)}`, now });
+				return;
+			}
+		}
+		const bugfix = bugfixPaths(collab.workspaceRoot, workflowId);
+
 		// Render kickoff text
 		const ctx = workflow.workflowContext as { commitRange?: string };
 		let planPath = workflow.specPath; // safe fallback
@@ -183,6 +199,9 @@ export function createWorkflowDriver(deps: WorkflowDriverDeps): WorkflowDriver {
 			commitRange: ctx.commitRange ?? "HEAD",
 			ralphDir,
 			reviewMode: phase.reviewMode ?? "phase-review",
+			bugfixDir: bugfix.bugfixDir,
+			diagnosisPath: bugfix.diagnosisPath,
+			postmortemPath: bugfix.postmortemPath,
 		});
 
 		try {
