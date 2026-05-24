@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkflowDriver } from "../packages/broker/src/runtime/workflow-driver.ts";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
-import { bugfixRunDir } from "../packages/broker/src/runtime/workflow-registry.ts";
+import {
+	bugfixRunDir,
+	getWorkflowDefinition,
+} from "../packages/broker/src/runtime/workflow-registry.ts";
+import { liveReviewCommitRange } from "../packages/broker/src/control/workflow-control.ts";
 
 type Captured = {
 	initialHandoffStep: string;
@@ -478,6 +483,80 @@ describe("complex-bug-fixing progression", () => {
 				now,
 			});
 
+			expect(result.action).toBe("workflow-halted");
+			expect(broker.control.getWorkflow(workflowId)?.status).toBe("halted");
+		} finally {
+			await broker.stop();
+		}
+	});
+});
+
+describe("commit-range anchoring (A2) and regression guard", () => {
+	it("fix-and-verify review request resolves base..HEAD from the anchored base", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			// base anchored to 'cafe1234' on diagnosis entry (as the driver does).
+			const { workflowId, handoffId } = startBugfix(broker, "cafe1234", now);
+			approvePhase(broker, workflowId, handoffId, now);
+			const fixImpl = latestForStep(broker, workflowId, "implement");
+			const fixReview = deliverToReview(broker, workflowId, fixImpl.handoffId, now);
+			expect(fixReview.requestText).toContain("cafe1234..HEAD");
+			expect(fixReview.requestText).not.toContain("..HEAD..");
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("liveReviewCommitRange: anchored base → base..HEAD (SDD execute path unchanged)", () => {
+		expect(liveReviewCommitRange({ baseBeforeExecution: "abc1234" })).toBe("abc1234..HEAD");
+	});
+
+	it("liveReviewCommitRange: no base → bare HEAD (ralph no-anchor path unchanged)", () => {
+		expect(liveReviewCommitRange({})).toBe("HEAD");
+	});
+});
+
+describe("complex-bug-fixing spec edge cases", () => {
+	it("run dir is gitignored: kickoff prompts say do-not-commit and .ai-whisper/ is ignored", () => {
+		// (a) Prompt-contract half: every phase kickoff instructs NOT to commit the run dir.
+		const def = getWorkflowDefinition("complex-bug-fixing")!;
+		for (const phase of def.phases) {
+			const kickoff = phase.stepTemplates.implement ?? phase.kickoffTemplate;
+			expect(kickoff).toMatch(/do not commit[\s\S]*\{bugfixDir\}|gitignored/i);
+		}
+		// (b) Ignore half: a real git repo whose .gitignore has ".ai-whisper/" ignores the run dir.
+		const repo = mkdtempSync(join(tmpdir(), "aiw-bugfix-git-"));
+		try {
+			execFileSync("git", ["init", "-q"], { cwd: repo });
+			writeFileSync(join(repo, ".gitignore"), ".ai-whisper/\n");
+			const target = join(bugfixRunDir(repo, "wf_x"), "diagnosis.md");
+			// exit code 0 = path is ignored; throws (non-zero) otherwise.
+			expect(() =>
+				execFileSync("git", ["check-ignore", "-q", target], { cwd: repo }),
+			).not.toThrow();
+		} finally {
+			rmSync(repo, { recursive: true, force: true });
+		}
+	});
+
+	it("non-delivery on a bugfix implement step still escalates (engine guard intact)", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+			// A one-word/non-delivering handback resolves to an escalate verdict at the
+			// implement step; the new definition must not bypass the generic halt.
+			setHandback(broker, handoffId, "ok");
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId,
+				verdict: "escalate",
+				confidence: 0.9,
+				reason: "non-delivery",
+				now,
+			});
 			expect(result.action).toBe("workflow-halted");
 			expect(broker.control.getWorkflow(workflowId)?.status).toBe("halted");
 		} finally {
