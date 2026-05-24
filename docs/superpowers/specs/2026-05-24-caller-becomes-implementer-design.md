@@ -87,7 +87,14 @@ In `create-cli.ts`, the `workflow start` action:
 ### 4. Skills + docs
 
 - `ai-whisper-sdd/SKILL.md` and `ai-whisper-ralph/SKILL.md`: replace the "CLI fills SDD/ralph defaults: implementer=claude, reviewer=codex" note with: the triggering agent becomes the implementer and the other becomes the reviewer; pass `--implementer` / `--reviewer` to override. Keep the no-flags invocation in the kickoff command.
-- `docs/workflows.md`: update the role sentence in "Running a workflow" to describe caller-becomes-implementer with explicit-flag override, replacing the current "defaults (implementer = Claude, reviewer = Codex) are filled in for you" line.
+- `README.md`: the "Magic moment" → "Implementer / reviewer assignment" bullet currently states "for `spec-driven-development` the default is implementer = Claude, reviewer = Codex". Reword it to describe caller-becomes-implementer (the agent you trigger the workflow from implements; the other reviews; override with `--implementer` / `--reviewer`). This surface is mandatory: leaving it stale satisfies the enumerated doc list while preserving a user-facing contradiction with the acceptance criterion below.
+- `docs/workflows.md` — **conditional.** This file is not present on this feature branch; it is authored on a separate, not-yet-merged docs branch (`docs/workflows-guide`) which carries its own caller-becomes-implementer wording. Update it **only if it is present in the working tree** at implementation time; if absent, it is out of scope for this branch (do **not** create or restore it here — that would fork a file owned by the docs branch). The README link to it, if any, is handled on that branch.
+
+**Stale-wording scan (scoped).** No *live, user-facing* doc may continue to assert that the implementer defaults to Claude (or the reviewer to Codex) regardless of caller. The scan is deliberately narrow:
+
+- **In scope:** `README.md`; live top-level docs `docs/*.md` (e.g. `concepts.md`, `evaluator-configuration.md`, `relay-handoff-flows.md`, and `workflows.md` when present); and bundled skills under `packages/cli/skills/`.
+- **Explicitly excluded:** `docs/superpowers/` (historical specs and plans). These are immutable design records of past work — this spec **supersedes** their role-assignment statements rather than rewriting them. Rewriting historical records is out of scope and a non-goal.
+- A grep-style check (e.g. `rg -i "implementer\s*=\s*Claude, reviewer\s*=\s*Codex"` and "default … implementer = Claude") over the in-scope paths must return no live claim of a caller-independent Claude default. The only permitted mention of the claude/codex pairing is as the documented *unknown-caller fallback* (and the workflow definitions' `defaultImplementer` / `defaultReviewer`, which remain that fallback).
 
 ## Validation
 
@@ -123,6 +130,10 @@ CLI:
 
 - `workflow start` reads `AI_WHISPER_AGENT` from the environment, passes it through, and emits the default-warning on stderr (not stdout) when caller is unknown.
 
+Docs stale-wording scan:
+
+- A grep-style assertion over the **in-scope** surfaces only — `README.md`, live top-level `docs/*.md`, and `packages/cli/skills/` — finds no live claim that the implementer defaults to Claude (or reviewer to Codex) independent of the caller; the claude/codex pairing appears only as the documented unknown-caller fallback. The assertion must **exclude** `docs/superpowers/` so it does not trip on historical specs/plans, and must tolerate `docs/workflows.md` being absent on this branch.
+
 ## Non-Goals
 
 - Per-phase role swapping within a single workflow (implementer and reviewer remain fixed for a run).
@@ -130,6 +141,8 @@ CLI:
 - Detecting the caller via the broker session binding instead of the environment variable (considered and deferred — see below).
 - Adding more than two agents, or any change to provider support.
 - Changing workflow definition defaults themselves (they remain the unknown-caller fallback).
+- Rewriting historical design records under `docs/superpowers/` (specs and plans). They document past decisions and are superseded by this spec, not edited; the stale-wording scan excludes them.
+- Creating or restoring `docs/workflows.md` on this branch. It is owned by the separate `docs/workflows-guide` branch; this branch updates it only if it happens to be present.
 
 ## Out-of-Scope Improvements (Considered, Deferred)
 
@@ -156,7 +169,7 @@ This work is done when:
 - Explicit `--implementer` / `--reviewer` flags override the detected caller; a single flag fills the opposite role; both flags naming the same agent are rejected with a clear error.
 - `whisper workflow start` run with no flags and no `AI_WHISPER_AGENT` (e.g. a plain terminal) starts with the definition default and prints a no-caller-detected warning to stderr while keeping `Workflow started: <id>` on stdout.
 - Each provider PTY is spawned with `AI_WHISPER_AGENT` set to its own agent and the inherited `AI_WHISPER_*` broker variables intact.
-- Both kickoff skills and `docs/workflows.md` describe caller-becomes-implementer with the explicit-flag override; no doc claims the implementer defaults to Claude regardless of caller.
+- Both kickoff skills and `README.md` (the "Implementer / reviewer assignment" bullet) describe caller-becomes-implementer with the explicit-flag override; `docs/workflows.md` is likewise updated **if present** on the branch (it lives on the separate `docs/workflows-guide` branch and is not created here if absent). The grep-style stale-wording scan over the in-scope surfaces only — `README.md`, live top-level `docs/*.md`, and `packages/cli/skills/`, **excluding** `docs/superpowers/` historical specs/plans — finds no doc claiming the implementer defaults to Claude (or reviewer to Codex) regardless of caller; the claude/codex pairing survives only as the documented unknown-caller fallback.
 - `pnpm test`, `pnpm typecheck`, and `pnpm lint` are green.
 
 ## Estimated Sizing
@@ -165,4 +178,4 @@ This work is done when:
 |---|---|---|---|
 | Role resolution + CLI wiring | 2 (`workflow/start.ts`, `create-cli.ts`) + tests | ~120 lines | Low |
 | Identity injection | 2 (claude + codex live-session) + tests | ~30 lines | Low |
-| Skills + docs | 3 (2 `SKILL.md`, `workflows.md`) | ~15 lines | Low |
+| Skills + docs | 3 (2 `SKILL.md`, `README.md`) on this branch + `workflows.md` only if present + scoped stale-wording scan test | ~25 lines | Low |
