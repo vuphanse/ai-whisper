@@ -51,13 +51,28 @@ function createNodePty(input: {
 	return spawn(
 		input.config.executable,
 		input.config.execArgs,
-		{
-			name: "xterm-256color",
-			cols: input.cols,
-			rows: input.rows,
-			cwd: input.cwd,
-		},
+		buildClaudePtySpawnOptions({ cols: input.cols, rows: input.rows, cwd: input.cwd }),
 	);
+}
+
+/**
+ * Build the node-pty spawn options for a mounted Claude session. Stamps
+ * `AI_WHISPER_AGENT=claude` into the child env so any `whisper` command the
+ * agent shells out to (e.g. `workflow start`) knows the triggering agent, while
+ * preserving the inherited `AI_WHISPER_*` broker variables.
+ */
+export function buildClaudePtySpawnOptions(input: {
+	cols: number;
+	rows: number;
+	cwd: string;
+	baseEnv?: NodeJS.ProcessEnv;
+}): { name: string; cols: number; rows: number; cwd: string; env: { [key: string]: string } } {
+	const env: { [key: string]: string } = {};
+	for (const [key, value] of Object.entries(input.baseEnv ?? process.env)) {
+		if (typeof value === "string") env[key] = value;
+	}
+	env.AI_WHISPER_AGENT = "claude";
+	return { name: "xterm-256color", cols: input.cols, rows: input.rows, cwd: input.cwd, env };
 }
 
 export function createClaudeLiveSession(input: {

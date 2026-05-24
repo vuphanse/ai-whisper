@@ -94,7 +94,7 @@ Run:
 whisper workflow start --type=spec-driven-development --spec=<resolved-absolute-path>
 ```
 
-(No `--implementer` / `--reviewer` — the CLI fills SDD defaults: implementer=claude, reviewer=codex.)
+(No `--implementer` / `--reviewer` needed — the agent triggering this skill becomes the implementer and the other agent the reviewer. Pass `--implementer <agent> --reviewer <agent>` only to override.)
 
 Parse the workflowId from stdout (format: `Workflow started: <workflowId>`).
 

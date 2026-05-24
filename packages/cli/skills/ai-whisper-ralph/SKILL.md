@@ -97,7 +97,7 @@ Run:
 whisper workflow start --type=ralph-loop --spec=<resolved-absolute-path>
 ```
 
-(No `--implementer` / `--reviewer` — the CLI fills ralph defaults: implementer=claude, reviewer=codex. `--spec` names the goal file.)
+(No `--implementer` / `--reviewer` needed — the agent triggering this skill becomes the implementer and the other agent the reviewer. Pass `--implementer <agent> --reviewer <agent>` only to override. `--spec` names the goal file.)
 
 Parse the workflowId from stdout (format: `Workflow started: <workflowId>`).
 

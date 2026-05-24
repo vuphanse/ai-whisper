@@ -21,7 +21,7 @@ Run spec-driven-development using docs/spec.md
 
 From there ai-whisper runs the workflow autonomously:
 
-- **Implementer / reviewer assignment** — one agent is the implementer, the other the reviewer (for `spec-driven-development` the default is implementer = Claude, reviewer = Codex). The baton passes between them; only one owns the turn at a time.
+- **Implementer / reviewer assignment** — the agent you trigger the workflow from becomes the implementer and the other agent becomes the reviewer; pass `--implementer` / `--reviewer` to choose explicitly. (Started outside a mounted session with no flags, it falls back to a default pairing and warns.) The baton passes between them; only one owns the turn at a time.
 - **Autonomous execution** — the implementer does each step in its real session and hands the result back. An LLM evaluator judges whether the deliverable meets the request.
 - **Review loops** — when work isn't good enough yet, the reviewer's findings are composed into a follow-up handoff and the implementer iterates. The loop repeats until the work is approved or the round budget is exhausted.
 - **Resumability** — workflow and chain state is durable. If the broker restarts or you stop for the day, you recover and reconnect rather than starting over.

@@ -102,6 +102,93 @@ describe("runWorkflowStart default role resolution", () => {
 		}
 	});
 
+	it("derives implementer from callerAgent when no flags are passed", async () => {
+		const broker = newBroker();
+		try {
+			seedCollab(broker);
+			const result = await runWorkflowStart({
+				broker,
+				collabId: "collab_x",
+				workflowType: "spec-driven-development",
+				specPath: "/tmp/spec.md",
+				callerAgent: "codex",
+				now: new Date().toISOString(),
+			});
+			const bindings = JSON.parse(
+				(broker.db
+					.prepare("SELECT role_bindings FROM workflows WHERE workflow_id = ?")
+					.get(result.workflowId) as { role_bindings: string }).role_bindings,
+			);
+			expect(bindings).toMatchObject({ implementer: "codex", reviewer: "claude" });
+			expect(result.roleWarning).toBeUndefined();
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("explicit flags override a present callerAgent", async () => {
+		const broker = newBroker();
+		try {
+			seedCollab(broker);
+			const result = await runWorkflowStart({
+				broker,
+				collabId: "collab_x",
+				workflowType: "spec-driven-development",
+				specPath: "/tmp/spec.md",
+				implementer: "claude",
+				callerAgent: "codex",
+				now: new Date().toISOString(),
+			});
+			const bindings = JSON.parse(
+				(broker.db
+					.prepare("SELECT role_bindings FROM workflows WHERE workflow_id = ?")
+					.get(result.workflowId) as { role_bindings: string }).role_bindings,
+			);
+			// --implementer claude → reviewer filled as codex; caller ignored.
+			expect(bindings).toMatchObject({ implementer: "claude", reviewer: "codex" });
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("rejects explicit flags naming the same agent for both roles", async () => {
+		const broker = newBroker();
+		try {
+			seedCollab(broker);
+			await expect(
+				runWorkflowStart({
+					broker,
+					collabId: "collab_x",
+					workflowType: "spec-driven-development",
+					specPath: "/tmp/spec.md",
+					implementer: "codex",
+					reviewer: "codex",
+					now: new Date().toISOString(),
+				}),
+			).rejects.toThrow(/same agent/i);
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("returns a roleWarning when defaulting on unknown caller", async () => {
+		const broker = newBroker();
+		try {
+			seedCollab(broker);
+			const result = await runWorkflowStart({
+				broker,
+				collabId: "collab_x",
+				workflowType: "spec-driven-development",
+				specPath: "/tmp/spec.md",
+				callerAgent: null,
+				now: new Date().toISOString(),
+			});
+			expect(result.roleWarning).toMatch(/no triggering agent detected/i);
+		} finally {
+			await broker.stop();
+		}
+	});
+
 	it("a workflow type without defaults errors clearly when flags are omitted", async () => {
 		const broker = newBroker();
 		try {

@@ -22,7 +22,7 @@ import {
 } from "./runtime/launcher.js";
 import { isPortFree } from "./runtime/port-utils.js";
 import { getSharedSqlitePath } from "./runtime/state-root.js";
-import { runWorkflowStart } from "./commands/workflow/start.js";
+import { parseCallerAgent, runWorkflowStart } from "./commands/workflow/start.js";
 import { runWorkflowList } from "./commands/workflow/list.js";
 import { runWorkflowInspect } from "./commands/workflow/inspect.js";
 import { runWorkflowResume } from "./commands/workflow/resume.js";
@@ -401,8 +401,12 @@ export function createCli(): Command {
 						...(opts.implementer ? { implementer: opts.implementer } : {}),
 						...(opts.reviewer ? { reviewer: opts.reviewer } : {}),
 						...(opts.name ? { name: opts.name } : {}),
+						callerAgent: parseCallerAgent(process.env.AI_WHISPER_AGENT),
 						now: new Date().toISOString(),
 					});
+					// Warning goes to stderr so stdout stays the single parseable line
+					// the kickoff skills read.
+					if (result.roleWarning) console.error(result.roleWarning);
 					console.log(`Workflow started: ${result.workflowId}`);
 				} finally {
 					await broker.stop();

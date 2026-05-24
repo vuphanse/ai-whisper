@@ -26,12 +26,16 @@ export interface WorkflowStartDeps {
 	specPath: string;
 	implementer?: "claude" | "codex";
 	reviewer?: "claude" | "codex";
+	/** The agent that triggered this run (from AI_WHISPER_AGENT); null when unknown. */
+	callerAgent?: "claude" | "codex" | null;
 	name?: string;
 	now: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function runWorkflowStart(deps: WorkflowStartDeps): Promise<{ workflowId: string }> {
+export async function runWorkflowStart(
+	deps: WorkflowStartDeps,
+): Promise<{ workflowId: string; roleWarning?: string }> {
 	// Preflight: bail early on an unconfigured evaluator so users get an
 	// actionable remediation instead of an ~80s mid-run LLM-evaluation halt.
 	const daemon = getBrokerDaemonByCollab(deps.broker.db, deps.collabId);
@@ -56,19 +60,88 @@ export async function runWorkflowStart(deps: WorkflowStartDeps): Promise<{ workf
 	}
 
 	const def = getWorkflowDefinition(deps.workflowType);
-	const implementer = deps.implementer ?? def?.defaultImplementer;
-	const reviewer = deps.reviewer ?? def?.defaultReviewer;
-	if (!implementer || !reviewer) {
-		throw new Error(
-			`Workflow type "${deps.workflowType}" has no default role bindings. Pass --implementer and --reviewer explicitly.`,
-		);
+	let resolved: ReturnType<typeof resolveRoleBindings>;
+	try {
+		resolved = resolveRoleBindings({
+			explicitImplementer: deps.implementer,
+			explicitReviewer: deps.reviewer,
+			callerAgent: deps.callerAgent ?? null,
+			def,
+		});
+	} catch (e) {
+		// Preserve the existing typed message for the no-defaults case; rethrow
+		// everything else (e.g. the same-agent guard) untouched.
+		if (e instanceof Error && /no default role bindings/.test(e.message)) {
+			throw new Error(
+				`Workflow type "${deps.workflowType}" has no default role bindings. Pass --implementer and --reviewer explicitly.`,
+			);
+		}
+		throw e;
 	}
-	return deps.broker.control.createWorkflow({
+	const { workflowId } = deps.broker.control.createWorkflow({
 		collabId: deps.collabId,
 		workflowType: deps.workflowType,
 		specPath: deps.specPath,
-		roleBindings: { implementer, reviewer },
+		roleBindings: { implementer: resolved.implementer, reviewer: resolved.reviewer },
 		...(deps.name ? { name: deps.name } : {}),
 		now: deps.now,
 	});
+	return { workflowId, ...(resolved.warning ? { roleWarning: resolved.warning } : {}) };
+}
+
+type Agent = "claude" | "codex";
+
+const otherAgent = (a: Agent): Agent => (a === "claude" ? "codex" : "claude");
+
+/**
+ * Resolve which agent implements and which reviews, by precedence:
+ *   1. explicit flags  (either present → explicit; the missing side is filled
+ *      as the opposite agent; both naming the same agent is rejected)
+ *   2. caller-derived  (the triggering agent implements; the other reviews)
+ *   3. definition default + a warning that no caller was detected
+ */
+export function resolveRoleBindings(input: {
+	explicitImplementer?: Agent | undefined;
+	explicitReviewer?: Agent | undefined;
+	callerAgent?: Agent | null | undefined;
+	def?: { defaultImplementer?: Agent; defaultReviewer?: Agent } | undefined;
+}): { implementer: Agent; reviewer: Agent; source: "explicit" | "caller" | "default"; warning?: string } {
+	const { explicitImplementer, explicitReviewer, callerAgent, def } = input;
+
+	// 1. Explicit flags.
+	if (explicitImplementer || explicitReviewer) {
+		const implementer = explicitImplementer ?? (explicitReviewer ? otherAgent(explicitReviewer) : undefined);
+		const reviewer = explicitReviewer ?? (explicitImplementer ? otherAgent(explicitImplementer) : undefined);
+		if (implementer && reviewer) {
+			if (implementer === reviewer) {
+				throw new Error("implementer and reviewer cannot be the same agent");
+			}
+			return { implementer, reviewer, source: "explicit" };
+		}
+	}
+
+	// 2. Caller-derived.
+	if (callerAgent) {
+		return { implementer: callerAgent, reviewer: otherAgent(callerAgent), source: "caller" };
+	}
+
+	// 3. Definition default + warning.
+	const implementer = def?.defaultImplementer;
+	const reviewer = def?.defaultReviewer;
+	if (!implementer || !reviewer) {
+		throw new Error("no default role bindings");
+	}
+	return {
+		implementer,
+		reviewer,
+		source: "default",
+		warning:
+			`No triggering agent detected; defaulted to implementer=${implementer} / reviewer=${reviewer}. ` +
+			"Pass --implementer / --reviewer to choose explicitly.",
+	};
+}
+
+/** Validate an `AI_WHISPER_AGENT` value; anything but the two known agents is null. */
+export function parseCallerAgent(raw: string | undefined): Agent | null {
+	return raw === "claude" || raw === "codex" ? raw : null;
 }
