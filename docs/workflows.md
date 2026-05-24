@@ -4,13 +4,15 @@ A workflow is a structured loop: a sequence of phases, each with its own role as
 
 The outcome of a run is mostly decided by two choices you make before anything starts: which workflow you pick, and what you feed it. Everything else — mounting, kickoff, watching the dashboard — is mechanics. This guide spends most of its words on those two choices.
 
-ai-whisper ships two workflows today. Both run an implementer and a reviewer that take turns — the agent you trigger the run from becomes the implementer and the other becomes the reviewer (override with `--implementer` / `--reviewer`) — and both are gated by the LLM evaluator that decides, after each handback, whether to advance, loop, or escalate.
+ai-whisper ships three workflows today. All run an implementer and a reviewer that take turns — the agent you trigger the run from becomes the implementer and the other becomes the reviewer (override with `--implementer` / `--reviewer`) — and all are gated by the LLM evaluator that decides, after each handback, whether to advance, loop, or escalate.
 
-## The two workflows at a glance
+## The three workflows at a glance
 
 **`spec-driven-development`** is a phased pipeline. It moves through spec-refining → plan-writing → plan-execution → code-review. Each phase has its own gate and loops until it is approved or it escalates, then the next phase begins. You give it a spec; it sharpens that spec into a plan and executes the plan under review. Use it when you can describe the deliverable up front.
 
 **`ralph-loop`** is a single open-ended phase. It reads a goal file as ground truth and grinds toward it chunk-by-chunk: each iteration the implementer picks the next smallest independently-verifiable chunk, delivers it, and a reviewer checks that chunk. When the implementer claims the whole goal is done, an acceptance review gates completion against the goal's criteria. Use it when the work is long-horizon or hard to fully plan in advance.
+
+**`complex-bug-fixing`** is a fixed three-phase pipeline for a reported bug whose root cause is unknown: diagnosis → fix-and-verify → post-mortem. The implementer must **reproduce the bug themselves** (a committed failing test is strongly preferred — speculation from reading code is not a valid reproduction) and write a diagnosis (root cause + proposed fix + blast radius + residual risks); an adversarial reviewer independently reproduces it and keeps the gate shut until both agree the cause is proven and the fix is net-safe. The fix phase turns the reproduction GREEN and verifies across the blast radius under an acceptance review that also checks test-coverage adequacy; the post-mortem records what happened. The diagnosis and post-mortem are self-verification artifacts for you after the run — they live in the gitignored run dir `.ai-whisper/bugfix/<workflowId>/` and are **not** committed; only the fix and the reproduction test land in the repo. Use it when a bug is reported and a correct, verified, non-regressing fix matters.
 
 Ralph keeps durable memory under `.ai-whisper/ralph/<workflowId>/`: `PROGRESS.md` (the work ledger) and `LEARNINGS.md` (generalizable lessons). On every iteration the implementer re-orients from the goal file plus these two files rather than from prior conversation, so progress survives context compaction over a long run. The implementer is instructed to commit each chunk's code changes as it delivers them; the reviewer's approval gates whether the loop advances to the next chunk, not whether the commit is made — so a chunk that draws findings may already be in history, followed by fix commits.
 
@@ -29,6 +31,12 @@ Reach for **ralph-loop** when:
 - the goal is open-ended or long-horizon — a checklist to burn down, a standard to bring a codebase up to, "keep going until all of this is true";
 - you cannot realistically plan every step in advance, but you can state what the finished state looks like;
 - the work is naturally a series of small, independently-verifiable chunks rather than one atomic deliverable.
+
+Reach for **complex-bug-fixing** when:
+
+- a bug was reported, the **root cause is unknown**, and you cannot yet describe the fix — the whole point is to investigate it;
+- a confidently-wrong fix would be expensive, so you want the cause **proven by an observed reproduction** and an adversarial reviewer guarding against symptom-patching before any code changes;
+- a correct, verified, non-regressing fix matters more than speed. (For a bug whose fix you can already specify, use SDD instead — you do not need the diagnosis gate.)
 
 **Signs you picked wrong:**
 
@@ -77,6 +85,22 @@ Avoid: a goal that is really one atomic task (use SDD), procedure kept in your h
 > For each chunk: pick one untested file, write tests first, then run `pnpm test` and `pnpm lint` — both must pass before you hand back. Commit each file's tests separately as `test(storage): cover <file>`.
 > The whole goal is done when `pnpm test --coverage` reports ≥90% for every file in that directory and no test is skipped."
 
+### Writing a bug report for complex-bug-fixing
+
+The bug report is read as the starting point for an investigation, so write it for **reproduction**, not diagnosis. The single biggest lever is how easily the implementer (and then the reviewer, independently) can make the bug happen — the faster they reproduce it, the faster the diagnosis gate converges.
+
+A good bug report:
+
+- describes the **symptom** concretely — what goes wrong, where, and how you know (the error, the wrong output, the crash);
+- gives **reproduction steps** precise enough to follow blindly — exact inputs, commands, environment, and the smallest sequence that triggers it;
+- states **expected vs actual** behavior explicitly, so "fixed" has a checkable meaning.
+
+Do **not** include your own root-cause theory as if it were settled. The workflow exists to *prove* the cause from an observed reproduction; a confident wrong guess in the report can anchor the run on the wrong premise. If you have a hunch, mark it clearly as a hunch.
+
+> **Weak:** "Login is broken sometimes, probably a token caching bug."
+>
+> **Strong:** "After ~15 minutes idle, the first request to `/api/me` returns 401 even with a valid session. Repro: log in, wait 15 min, refresh the dashboard → 401 toast; server logs show `token expired` though the session cookie is still present. Expected: the request succeeds (or transparently refreshes). Actual: 401 until a full re-login. (Hunch, unverified: the access token TTL may be shorter than the session TTL.)"
+
 ## Running a workflow
 
 The mechanics are deliberately thin. From a workspace, mount both agents in separate terminals, then start a workflow from either session:
@@ -90,9 +114,10 @@ whisper collab mount claude
 # from either session
 whisper workflow start --type=spec-driven-development --spec=/abs/path/to/spec.md
 whisper workflow start --type=ralph-loop --spec=/abs/path/to/goal.md
+whisper workflow start --type=complex-bug-fixing --spec=/abs/path/to/bug-report.md
 ```
 
-The `/aiw-sdd <path>` and `/aiw-ralph <path>` skills do the same thing with a readiness check first — they require the bundled skills to be installed once (`whisper skill install`; see the README quickstart). Roles follow the caller: the agent you start the run from is the implementer and the other agent reviews, so you do not normally pass `--implementer` / `--reviewer` — add them only to override. (Started outside a mounted session with no flags, the run falls back to the workflow type's default pairing and warns.)
+The `/aiw-sdd <path>`, `/aiw-ralph <path>`, and `/aiw-bugfix <path>` skills do the same thing with a readiness check first — they require the bundled skills to be installed once (`whisper skill install`; see the README quickstart). Roles follow the caller: the agent you start the run from is the implementer and the other agent reviews, so you do not normally pass `--implementer` / `--reviewer` — add them only to override. (Started outside a mounted session with no flags, the run falls back to the workflow type's default pairing and warns.)
 
 Then watch it run:
 
