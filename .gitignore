@@ -11,5 +11,10 @@ coverage
 *.sqlite
 .claude
 
+# Build-time copies into the publishable CLI package (sourced from repo root)
+packages/cli/README.md
+packages/cli/LICENSE
+packages/cli/NOTICE
+
 # brainstorm/visual-companion artifacts
 .superpowers/
