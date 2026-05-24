@@ -27,7 +27,7 @@ Non-secret evaluator settings go in `~/.ai-whisper/config.json`. All fields are 
   "evaluator": {
     "provider": "anthropic",
     "fallback": "ollama",
-    "anthropicModel": "claude-sonnet-4-6",
+    "anthropicModel": "claude-haiku-4-5-20251001",
     "ollama": { "host": "http://localhost:11434", "model": "qwen2.5:7b-instruct" }
   }
 }
@@ -35,7 +35,7 @@ Non-secret evaluator settings go in `~/.ai-whisper/config.json`. All fields are 
 
 - `provider` — `"anthropic"` (default) or `"ollama"`.
 - `fallback` — provider to retry once on a network/rate-limit error; omit for none.
-- `anthropicModel` — overrides the evaluator's default Anthropic model.
+- `anthropicModel` — overrides the evaluator's default Anthropic model, which is `claude-haiku-4-5-20251001`. Haiku is the default on purpose: the done/loop/escalate verdict is a lightweight judgment that doesn't need a larger model, and haiku keeps per-handoff cost low. Only override this if you have a specific reason to.
 - `ollama.host` / `ollama.model` — used when the provider or fallback is `ollama`.
 
 If you choose the `ollama` provider you do not need an Anthropic key.
