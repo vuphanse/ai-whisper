@@ -50,6 +50,20 @@ It is **not** for:
 - invisible background automation you never watch.
 - people new to coding agents looking for a guided, hand-holding experience.
 
+## Prerequisites
+
+ai-whisper drives the *real* Claude and Codex CLIs, so you need both installed and authenticated first:
+
+- **[Claude Code CLI](https://claude.com/claude-code)** — the `claude` command, signed in.
+- **[Codex CLI](https://github.com/openai/codex)** — the `codex` command, signed in.
+- **Node.js 22+**.
+- **An LLM evaluator with credentials** — workflows are gated by it and refuse to start without it. See [Evaluator configuration](docs/evaluator-configuration.md).
+- **tmux** *(optional)* — only for `whisper collab start`, which auto-arranges both agents into panes. The mount flow below does not need it.
+
+## Safety & permissions
+
+ai-whisper launches each agent in **full-autonomy mode** so the relay can drive it unattended — `claude --dangerously-skip-permissions` and `codex --dangerously-bypass-approvals-and-sandbox`. Inside the mounted workspace the agents read, write, and run commands without prompting. Point it at code you're willing to let two agents change autonomously, watch the run on the dashboard, and remember you are the final gatekeeper — review the result before you ship it. The deeper rationale is in [Concepts](docs/concepts.md).
+
 ## Quickstart
 
 Install from npm:
@@ -89,6 +103,10 @@ whisper collab dashboard
 ```
 
 > Running from a repo checkout instead of a packaged install? Build first (`pnpm build`) and invoke the CLI as `node packages/cli/dist/bin/whisper.js ...` wherever these examples say `whisper ...`.
+
+## What happens if it fails?
+
+A run that stops short usually **escalates** — it does not crash. When the evaluator can't resolve a phase (the round budget is spent, an agent reports it's blocked, or confidence stays too low), the loop halts and turn ownership returns to you. That's a designed exit, not a failure: run state is durable, so you read the dashboard, fix the spec or unblock the agent, and `whisper workflow resume <id>` to pick up where it left off. Escalation is the system asking for a human exactly when it should — seeing it is normal, not a sign something broke.
 
 ## Core concepts
 

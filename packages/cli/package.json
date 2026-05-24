@@ -8,6 +8,22 @@
 		"url": "https://github.com/ai-creed/ai-whisper.git"
 	},
 	"homepage": "https://ai-creed.dev/projects/ai-whisper/",
+	"keywords": [
+		"ai-agents",
+		"claude",
+		"codex",
+		"coding-agent",
+		"cli",
+		"developer-tools",
+		"tmux",
+		"spec-driven-development",
+		"agent-orchestration",
+		"pair-programming",
+		"typescript"
+	],
+	"engines": {
+		"node": ">=22"
+	},
 	"type": "module",
 	"bin": {
 		"whisper": "./dist/bin/whisper.js",

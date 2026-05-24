@@ -58,6 +58,29 @@ describe("README public contract", () => {
 		expect(readme).toContain("whisper collab dashboard");
 	});
 
+	it("lists prerequisites (CLIs, Node, evaluator) with tmux marked optional", () => {
+		expect(readme).toMatch(/## Prerequisites/);
+		expect(readme).toMatch(/Claude Code CLI/);
+		expect(readme).toMatch(/Codex CLI/);
+		expect(readme).toMatch(/Node\.js 22/);
+		// tmux must be present but explicitly optional (mount mode does not need it).
+		expect(readme).toMatch(/tmux\b.*\*\(optional\)\*/);
+	});
+
+	it("surfaces the full-autonomy permissions note up front, naming the flags", () => {
+		expect(readme).toMatch(/## Safety & permissions/);
+		expect(readme).toContain("--dangerously-skip-permissions");
+		expect(readme).toContain("--dangerously-bypass-approvals-and-sandbox");
+		// Safety must appear BEFORE the Quickstart mount commands, not buried later.
+		expect(readme.indexOf("## Safety & permissions")).toBeLessThan(readme.indexOf("## Quickstart"));
+	});
+
+	it("reassures that escalation is normal, not failure", () => {
+		expect(readme).toMatch(/## What happens if it fails\?/);
+		expect(readme).toMatch(/escalat/i);
+		expect(readme).toContain("whisper workflow resume");
+	});
+
 	it("covers the required capability claims", () => {
 		expect(readme).toMatch(/terminal-native/i);
 		expect(readme).toMatch(/Claude/);

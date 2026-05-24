@@ -6,6 +6,8 @@ This document is the mental model behind ai-whisper. The [README](../README.md) 
 
 ai-whisper does not run a pool of agents that fan out, race, or vote. There are two agents — an implementer and a reviewer — and they take turns. No agent is "the orchestrator agent"; orchestration is done by the broker, not by a model improvising coordination. If you are looking for many agents working a problem in parallel, this is the wrong tool. The bet here is the opposite one: that two agents, one producing and one checking, with a clear contract between them, beat a crowd.
 
+This is a deliberate, standing **non-goal**, not a missing feature: ai-whisper will not grow into N-agent orchestration. Role flexibility *within* the pair is fair game — which agent implements and which reviews is yours to choose, and future workflows may swap roles between phases — but the unit is always two agents passing one baton. A third agent is out of scope by design.
+
 ## Agents do not type simultaneously
 
 At any moment exactly one agent owns the turn. The other is blocked — its input is gated until the baton comes back. This is deliberate. Two agents typing into a shared workspace at the same time produce race conditions, half-applied edits, and reviews of code that has already changed underneath them. Serializing the work removes that whole class of failure.
