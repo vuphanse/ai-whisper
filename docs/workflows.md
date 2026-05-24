@@ -12,7 +12,7 @@ ai-whisper ships two workflows today. Both run an implementer and a reviewer tha
 
 **`ralph-loop`** is a single open-ended phase. It reads a goal file as ground truth and grinds toward it chunk-by-chunk: each iteration the implementer picks the next smallest independently-verifiable chunk, delivers it, and a reviewer checks that chunk. When the implementer claims the whole goal is done, an acceptance review gates completion against the goal's criteria. Use it when the work is long-horizon or hard to fully plan in advance.
 
-Ralph keeps durable memory across context resets under `.ai-whisper/ralph/<workflowId>/`: `PROGRESS.md` (the work ledger) and `LEARNINGS.md` (generalizable lessons). Each accepted chunk is auto-committed. That is what lets a single goal run for hours and survive the implementer's context being reset between chunks.
+Ralph keeps durable memory under `.ai-whisper/ralph/<workflowId>/`: `PROGRESS.md` (the work ledger) and `LEARNINGS.md` (generalizable lessons). On every iteration the implementer re-orients from the goal file plus these two files rather than from prior conversation, so progress survives context compaction over a long run. The implementer is instructed to commit each chunk's code changes as it delivers them; the reviewer's approval gates whether the loop advances to the next chunk, not whether the commit is made — so a chunk that draws findings may already be in history, followed by fix commits.
 
 ## Choosing the workflow
 
@@ -61,7 +61,7 @@ This is not hypothetical. ai-whisper itself was built this way — nearly every 
 
 ### Writing a goal for ralph-loop
 
-The goal file is read as ground truth and **re-read on every iteration**. That single fact drives how you write it: anything you want applied to every chunk must live *inside the goal*, because the implementer's context is reset between chunks and the goal is the thing that persists.
+The goal file is read as ground truth and **re-read on every iteration**. That single fact drives how you write it: anything you want applied to every chunk must live *inside the goal*, because the implementer re-orients from the goal each iteration rather than from prior conversation, so the goal is the thing that reliably persists across a long run.
 
 A good goal:
 
@@ -69,7 +69,7 @@ A good goal:
 - **embeds the per-chunk procedure** — test-first, lint, commit format, and especially the definition-of-done — directly in the file. There is no separate procedure artifact; the goal carries it;
 - defines what "the whole goal is complete" means, so the final acceptance review has a target rather than a vibe.
 
-Avoid: a goal that is really one atomic task (use SDD), procedure kept in your head or in chat (it will not survive the context reset), or a finish line you never wrote down (the acceptance review cannot pass what it cannot check).
+Avoid: a goal that is really one atomic task (use SDD), procedure kept in your head or in chat (the implementer re-orients from the files, not the conversation, so it will not carry over), or a finish line you never wrote down (the acceptance review cannot pass what it cannot check).
 
 > **Weak:** "Add tests to the project."
 >
@@ -92,7 +92,7 @@ whisper workflow start --type=spec-driven-development --spec=/abs/path/to/spec.m
 whisper workflow start --type=ralph-loop --spec=/abs/path/to/goal.md
 ```
 
-The `/aiw-sdd <path>` and `/aiw-ralph <path>` skills do the same thing with a readiness check first. The defaults (implementer = Claude, reviewer = Codex) are filled in for you; you do not pass `--implementer` / `--reviewer`.
+The `/aiw-sdd <path>` and `/aiw-ralph <path>` skills do the same thing with a readiness check first — they require the bundled skills to be installed once (`whisper skill install`; see the README quickstart). The defaults (implementer = Claude, reviewer = Codex) are filled in for you; you do not pass `--implementer` / `--reviewer`.
 
 Then watch it run:
 
@@ -102,12 +102,12 @@ whisper collab dashboard
 
 The dashboard is the inspection surface — every handoff, every evaluator verdict, the round number, and the running cost are visible there. **Do not babysit a run from a chat session.** The broker uses idle detection to know when an agent is ready for the next handoff; an agent that keeps emitting output never reads as idle, and the handoff stalls. Kick off, then observe from the dashboard.
 
-If a run halts or you stop for the day, it is resumable — runs are durable, not fire-and-forget:
+Runs are durable, not fire-and-forget — but how you pick a run back up depends on *what* interrupted it:
 
-```bash
-whisper workflow resume <workflowId>
-whisper workflow cancel <workflowId>
-```
+- **A halted workflow** (it escalated, or you halted it) resumes directly: `whisper workflow resume <workflowId>`. `resume` only acts on a halted workflow; it will reject anything else.
+- **An interrupted broker or session** (the daemon died, you stopped for the day, a mounted session dropped) is a recovery case, not a resume case: `whisper collab recover`, then `whisper collab reconnect <codex|claude>` for each agent, then check `whisper collab status` / the dashboard. The workflow continues from its durable state once the collab is healthy again.
+
+To stop a run for good: `whisper workflow cancel <workflowId>` (canceled workflows cannot be resumed).
 
 When the evaluator cannot resolve a chain — the round budget is exhausted, the agent reports it is blocked, or confidence is too low — the chain **escalates**: the loop stops and ownership returns to you. Escalation is a designed exit, not a crash. For round budgets, verdict vocabulary, and the full state machine, see [Relay & handoff flows](relay-handoff-flows.md); for the evaluator credentials and model, see [Evaluator configuration](evaluator-configuration.md).
 
@@ -115,7 +115,7 @@ When the evaluator cannot resolve a chain — the round budget is exhausted, the
 
 - Pick the workflow by whether you can describe "done" up front: yes → SDD, not yet → ralph.
 - Write acceptance criteria a reviewer can actually check. A run can only converge on a target it can see.
-- For ralph, embed the per-chunk procedure and the definition-of-done *in the goal file* — it is the only thing that survives a context reset.
+- For ralph, embed the per-chunk procedure and the definition-of-done *in the goal file* — the implementer re-orients from it each iteration, so it is the one place instructions reliably persist.
 - Keep chunks small and independently verifiable. Big chunks produce big reviews and slow loops.
 - Let it run. Observe from the dashboard, not from chat.
 - Treat escalation as information. A run that escalates fast almost always means the artifact, not the workflow, needs another pass.
