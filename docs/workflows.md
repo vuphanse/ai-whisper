@@ -111,6 +111,12 @@ To stop a run for good: `whisper workflow cancel <workflowId>` (canceled workflo
 
 When the evaluator cannot resolve a chain — the round budget is exhausted, the agent reports it is blocked, or confidence is too low — the chain **escalates**: the loop stops and ownership returns to you. Escalation is a designed exit, not a crash. For round budgets, verdict vocabulary, and the full state machine, see [Relay & handoff flows](relay-handoff-flows.md); for the evaluator credentials and model, see [Evaluator configuration](evaluator-configuration.md).
 
+## You are the final gatekeeper
+
+Autonomous means the *loop* runs without you — implement, review, iterate, converge — not that the result ships on its own. The evaluator gates each handoff and the reviewer agent checks every phase, but that raises the floor; it does not certify that the work clears your bar. The reviewer is a second model, not your QA sign-off, and the acceptance criteria the run converges on are the ones *you* wrote — a run can satisfy a thin or wrong spec perfectly.
+
+So treat a finished workflow as a strong draft, not a shipped deliverable. Before anything merges, deploys, or releases, a human developer still reviews, verifies, and QAs the final output — reads the diff, runs the thing, judges whether it actually solves the problem. ai-whisper does the convergence work and shows you the full trail to make that judgment fast; the decision to ship stays yours. This is the same line concepts.md draws as *supervised autonomy*: escalation hands control back to you mid-run, and so does the end of every run.
+
 ## Getting better outcomes
 
 - Pick the workflow by whether you can describe "done" up front: yes → SDD, not yet → ralph.
@@ -119,3 +125,4 @@ When the evaluator cannot resolve a chain — the round budget is exhausted, the
 - Keep chunks small and independently verifiable. Big chunks produce big reviews and slow loops.
 - Let it run. Observe from the dashboard, not from chat.
 - Treat escalation as information. A run that escalates fast almost always means the artifact, not the workflow, needs another pass.
+- A finished run is a draft, not a release. Review, run, and QA the deliverable yourself before you ship it — you are the final gatekeeper.
