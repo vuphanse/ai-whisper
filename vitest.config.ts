@@ -11,7 +11,7 @@ export default defineConfig({
 				__dirname,
 				"packages/companion-core/src/index.ts",
 			),
-			"@ai-whisper/cli": resolve(__dirname, "packages/cli/src/index.ts"),
+			"ai-whisper": resolve(__dirname, "packages/cli/src/index.ts"),
 			"@ai-whisper/adapter-codex": resolve(
 				__dirname,
 				"packages/adapter-codex/src/index.ts",

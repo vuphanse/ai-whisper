@@ -52,7 +52,13 @@ It is **not** for:
 
 ## Quickstart
 
-From a repo checkout:
+Install from npm:
+
+```bash
+npm install -g ai-whisper
+```
+
+Or from a repo checkout:
 
 ```bash
 pnpm install

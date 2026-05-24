@@ -1,42 +1,36 @@
 {
-	"name": "@ai-whisper/cli",
-	"private": true,
+	"name": "ai-whisper",
+	"version": "0.1.0",
 	"license": "Apache-2.0",
 	"type": "module",
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
 	"bin": {
 		"whisper": "./dist/bin/whisper.js",
 		"whisper-relay-monitor": "./dist/bin/relay-monitor.js"
 	},
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		}
-	},
 	"dependencies": {
-		"@ai-whisper/adapter-claude": "workspace:*",
-		"@ai-whisper/adapter-codex": "workspace:*",
-		"@ai-whisper/broker": "workspace:*",
-		"@ai-whisper/companion-core": "workspace:*",
-		"@ai-whisper/shared": "workspace:*",
 		"@anthropic-ai/sdk": "^0.88.0",
 		"better-sqlite3": "^11.8.1",
 		"commander": "^13.1.0",
+		"fastify": "^5.2.1",
 		"ink": "^7.0.3",
+		"nanoid": "^5.1.5",
 		"node-pty": "^1.1.0",
 		"ollama": "^0.6.3",
 		"react": "^19.2.6",
 		"zod": "^3.24.2"
 	},
 	"devDependencies": {
+		"@ai-whisper/adapter-claude": "workspace:*",
+		"@ai-whisper/adapter-codex": "workspace:*",
+		"@ai-whisper/broker": "workspace:*",
+		"@ai-whisper/companion-core": "workspace:*",
+		"@ai-whisper/shared": "workspace:*",
 		"@types/better-sqlite3": "^7.6.12",
 		"@types/react": "^19.2.14",
 		"ink-testing-library": "^4.0.0"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.json && node scripts/copy-skills.mjs",
+		"build": "node scripts/bundle.mjs && node scripts/copy-skills.mjs",
 		"typecheck": "tsc -b --emitDeclarationOnly"
 	},
 	"files": ["dist", "skills"]

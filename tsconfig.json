@@ -9,7 +9,7 @@
 			"@ai-whisper/shared": ["./packages/shared/src/index.ts"],
 			"@ai-whisper/broker": ["./packages/broker/src/index.ts"],
 			"@ai-whisper/companion-core": ["./packages/companion-core/src/index.ts"],
-			"@ai-whisper/cli": ["./packages/cli/src/index.ts"],
+			"ai-whisper": ["./packages/cli/src/index.ts"],
 			"@ai-whisper/adapter-codex": ["./packages/adapter-codex/src/index.ts"],
 			"@ai-whisper/adapter-claude": ["./packages/adapter-claude/src/index.ts"]
 		}
