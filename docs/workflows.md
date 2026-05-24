@@ -4,7 +4,7 @@ A workflow is a structured loop: a sequence of phases, each with its own role as
 
 The outcome of a run is mostly decided by two choices you make before anything starts: which workflow you pick, and what you feed it. Everything else — mounting, kickoff, watching the dashboard — is mechanics. This guide spends most of its words on those two choices.
 
-ai-whisper ships two workflows today. Both run an implementer and a reviewer that take turns (default: implementer = Claude, reviewer = Codex), and both are gated by the LLM evaluator that decides, after each handback, whether to advance, loop, or escalate.
+ai-whisper ships two workflows today. Both run an implementer and a reviewer that take turns — the agent you trigger the run from becomes the implementer and the other becomes the reviewer (override with `--implementer` / `--reviewer`) — and both are gated by the LLM evaluator that decides, after each handback, whether to advance, loop, or escalate.
 
 ## The two workflows at a glance
 
@@ -92,7 +92,7 @@ whisper workflow start --type=spec-driven-development --spec=/abs/path/to/spec.m
 whisper workflow start --type=ralph-loop --spec=/abs/path/to/goal.md
 ```
 
-The `/aiw-sdd <path>` and `/aiw-ralph <path>` skills do the same thing with a readiness check first — they require the bundled skills to be installed once (`whisper skill install`; see the README quickstart). The defaults (implementer = Claude, reviewer = Codex) are filled in for you; you do not pass `--implementer` / `--reviewer`.
+The `/aiw-sdd <path>` and `/aiw-ralph <path>` skills do the same thing with a readiness check first — they require the bundled skills to be installed once (`whisper skill install`; see the README quickstart). Roles follow the caller: the agent you start the run from is the implementer and the other agent reviews, so you do not normally pass `--implementer` / `--reviewer` — add them only to override. (Started outside a mounted session with no flags, the run falls back to the workflow type's default pairing and warns.)
 
 Then watch it run:
 
