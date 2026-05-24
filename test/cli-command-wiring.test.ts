@@ -1,7 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { createCli } from "../packages/cli/src/create-cli.ts";
+import { createCli, resolveCliVersion } from "../packages/cli/src/create-cli.ts";
 
 describe("cli command wiring", () => {
+	it("exposes -v / --version reporting the package version", () => {
+		const v = resolveCliVersion();
+		expect(v).toMatch(/^\d+\.\d+\.\d+/);
+		// commander stores the configured version; the getter returns it.
+		expect(createCli().version()).toBe(v);
+	});
+
+	it("-v prints the version and exits without running a command", () => {
+		const cli = createCli().exitOverride();
+		let out = "";
+		cli.configureOutput({ writeOut: (s) => (out += s) });
+		// commander's version action writes the version then exits (throws under exitOverride).
+		expect(() => cli.parse(["node", "whisper", "-v"])).toThrow();
+		expect(out.trim()).toBe(resolveCliVersion());
+	});
+
 	it("registers collab subcommands: start, status, tell, stop, recover, reconnect, inspect, mount, relay-monitor, dashboard", () => {
 		const cli = createCli();
 		const collab = cli.commands.find((c) => c.name() === "collab");

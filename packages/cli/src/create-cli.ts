@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { Command, Option } from "commander";
 import { waitForBrokerReady } from "./runtime/wait-for-broker-ready.js";
 import { runCollabMount } from "./commands/collab/mount.js";
@@ -54,8 +55,30 @@ function collectArtifact(value: string, previous: string[] = []): string[] {
 	return [...previous, value];
 }
 
+// Resolve the published version from package.json. The path differs between
+// the bundled binary (dist/bin/whisper.js → ../../package.json) and tests that
+// import this module from source (packages/cli/src/ → ../package.json), so try
+// both and key off the package name so a parent package.json can't shadow it.
+export function resolveCliVersion(): string {
+	for (const rel of ["../../package.json", "../package.json"]) {
+		try {
+			const pkg = JSON.parse(readFileSync(new URL(rel, import.meta.url), "utf8")) as {
+				name?: string;
+				version?: string;
+			};
+			if (pkg.name === "ai-whisper" && typeof pkg.version === "string") return pkg.version;
+		} catch {
+			// try the next candidate
+		}
+	}
+	return "0.0.0-dev";
+}
+
 export function createCli(): Command {
-	const cli = new Command().name("whisper").description("ai-whisper CLI");
+	const cli = new Command()
+		.name("whisper")
+		.description("ai-whisper CLI")
+		.version(resolveCliVersion(), "-v, --version", "output the version number");
 
 	const collab = cli
 		.command("collab")
