@@ -381,3 +381,107 @@ describe("workflow-control renders bugfix paths", () => {
 		}
 	});
 });
+
+/** Drive one phase's implement → review → approve. Returns nothing; the next
+ *  phase (if any) is kicked off by the engine on approve. */
+function approvePhase(
+	broker: ReturnType<typeof makeBroker>,
+	workflowId: string,
+	implementHandoffId: string,
+	now: string,
+) {
+	const review = deliverToReview(broker, workflowId, implementHandoffId, now);
+	setHandback(broker, review.handoffId, "Approved.");
+	return broker.control.applyOrchestratorVerdict({
+		handoffId: review.handoffId,
+		verdict: "approve",
+		confidence: 0.95,
+		reason: "phase accepted",
+		now,
+	});
+}
+
+describe("complex-bug-fixing progression", () => {
+	it("approve→approve→approve advances diagnosis → fix-and-verify → post-mortem → done", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			// Phase 0 diagnosis
+			approvePhase(broker, workflowId, handoffId, now);
+			expect(broker.control.getWorkflow(workflowId)?.currentPhaseIndex).toBe(1);
+
+			// Phase 1 fix-and-verify
+			const fixImpl = latestForStep(broker, workflowId, "implement");
+			approvePhase(broker, workflowId, fixImpl.handoffId, now);
+			expect(broker.control.getWorkflow(workflowId)?.currentPhaseIndex).toBe(2);
+
+			// Phase 2 post-mortem
+			const pmImpl = latestForStep(broker, workflowId, "implement");
+			const result = approvePhase(broker, workflowId, pmImpl.handoffId, now);
+			expect(result.action).toBe("workflow-done");
+			expect(broker.control.getWorkflow(workflowId)?.status).toBe("done");
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("findings on the diagnosis phase loops back to a fix step without advancing", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			const review = deliverToReview(broker, workflowId, handoffId, now);
+			setHandback(broker, review.handoffId, "Findings: cause unproven.");
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId: review.handoffId,
+				verdict: "findings",
+				confidence: 0.9,
+				reason: "defective diagnosis",
+				followUpMessage: "Prove the cause.",
+				now,
+			});
+
+			expect(result.action).toBe("chain-continued");
+			expect(broker.control.getWorkflow(workflowId)?.currentPhaseIndex).toBe(0);
+			expect(broker.control.getWorkflow(workflowId)?.status).toBe("running");
+			// the next handoff is a fix step in the same phase
+			const latest = broker.db
+				.prepare(
+					"SELECT handoff_step FROM relay_handoff WHERE workflow_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+				)
+				.get(workflowId) as { handoff_step: string };
+			expect(latest.handoff_step).toBe("fix");
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("escalate on a phase halts the workflow", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			const review = deliverToReview(broker, workflowId, handoffId, now);
+			setHandback(broker, review.handoffId, "Cannot proceed; repro inputs absent.");
+			const result = broker.control.applyOrchestratorVerdict({
+				handoffId: review.handoffId,
+				verdict: "escalate",
+				confidence: 0.9,
+				reason: "unreviewable",
+				now,
+			});
+
+			expect(result.action).toBe("workflow-halted");
+			expect(broker.control.getWorkflow(workflowId)?.status).toBe("halted");
+		} finally {
+			await broker.stop();
+		}
+	});
+});
