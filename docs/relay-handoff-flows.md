@@ -169,10 +169,10 @@ An autonomous workflow is a multi-phase pipeline that drives both agents through
 ```bash
 whisper workflow start \
   --type spec-driven-development \
-  --spec docs/path/to/spec.md \
-  --implementer claude \
-  --reviewer codex
+  --spec docs/path/to/spec.md
 ```
+
+The agent you run this from becomes the implementer and the other agent the reviewer. Add `--implementer <agent> --reviewer <agent>` to choose roles explicitly; run with neither flag outside a mounted session and it falls back to the workflow type's default pairing (with a warning).
 
 This creates the workflow row, kicks off phase 0, and seeds the first handoff.
 

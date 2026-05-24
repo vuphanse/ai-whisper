@@ -25,12 +25,22 @@ function scanTargets(): string[] {
 	return out.filter((p) => existsSync(resolve(root, p)));
 }
 
+// A live doc must not present a caller-independent Claude/Codex pairing, in
+// either the prose form ("implementer = claude, reviewer = codex") or the
+// concrete CLI-flag form ("--implementer claude --reviewer codex"). The flag
+// form with literal placeholders ("--implementer <agent>") and the bare
+// "--implementer / --reviewer" mention are legitimate and must NOT match.
+const STALE_PATTERNS: RegExp[] = [
+	/implementer\s*=\s*claude\s*,\s*reviewer\s*=\s*codex/i,
+	/--implementer\s+(?:claude|codex)[\s\S]{0,40}?--reviewer\s+(?:claude|codex)/i,
+];
+
 describe("live docs do not claim a caller-independent Claude default", () => {
-	it("no in-scope surface asserts implementer = Claude, reviewer = Codex", () => {
+	it("no in-scope surface hardcodes implementer=claude / reviewer=codex (prose or CLI flags)", () => {
 		const offenders: string[] = [];
 		for (const rel of scanTargets()) {
 			const txt = readFileSync(resolve(root, rel), "utf8");
-			if (/implementer\s*=\s*claude\s*,\s*reviewer\s*=\s*codex/i.test(txt)) offenders.push(rel);
+			if (STALE_PATTERNS.some((re) => re.test(txt))) offenders.push(rel);
 		}
 		expect(offenders, `stale caller-independent default in: ${offenders.join(", ")}`).toEqual([]);
 	});
