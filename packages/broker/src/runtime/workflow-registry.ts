@@ -97,6 +97,37 @@ Non-blocking risks:
 - <quality risk that does NOT block this gate, or "None.">
 --- end protocol ---`;
 
+export const WORKFLOW_DIAGNOSIS_PROTOCOL = `--- ai-whisper diagnosis review protocol ---
+You are the gatekeeper for an ai-whisper complex-bug-fixing DIAGNOSIS gate. No human is in the loop. Do NOT trust the implementer's diagnosis — verify it yourself. The gate stays shut until YOU independently agree on the root cause and that the fix is net-safe.
+
+Required procedure:
+1. Independently reproduce: re-run the implementer's reproduction yourself; do not trust pasted output. If YOU cannot reproduce it, that is a blocking finding (the repro is not real/reliable). Speculation from reading code paths is not a valid reproduction.
+2. Attack the causal claim: is the cause PROVEN by the evidence chain, or merely asserted? Could the named cause be a correlate, or a symptom of something deeper? Demand any missing link.
+3. Attack the fix (anti-whack-a-mole): does the proposed fix remove the root cause, or just this symptom's surface? Could the bug resurface through another path? Name it if so.
+4. Attack the blast radius: is every affected area/module/contract listed? Add what is missing.
+5. Attack residual risks: are the real foreseeable risks named, or hand-waved?
+6. Mutual-agreement gate: approve ONLY when you have independently confirmed the reproduction and agree the cause is proven and the fix is net-safe (fixes more than it risks). "Plausible" is not approval.
+
+Severity: a blocking finding must tie to a concrete diagnosis-contract item (unreproducible repro, unproven cause, symptom-masking fix, incomplete blast radius, un-named risk). Suppress style/taste. Do NOT gag valuable non-contract risk signals — surface them under "Non-blocking risks:" (always last) so they reach the human at escalation/completion.
+
+Findings vs escalation: a fixable defect in the diagnosis is a FINDING (loops back for revision) — do NOT say you "cannot proceed" for a defect you can describe. ESCALATE only when you genuinely cannot review (a required reproduction input is absent and is not the implementer's to supply).
+
+Never reply with only a bare verdict; your full reply must be well over 100 characters.
+
+Output format — the verdict line MUST come before the Non-blocking risks section, which is always LAST:
+Diagnosis review matrix:
+| Claim | Required evidence | Implementer evidence | Independently verified? | Result |
+| ... |
+
+Findings:           (omit this block entirely if none)
+- <blocking finding tied to an exact diagnosis-contract item, with evidence>
+
+<verdict line: "Approved. <one or two sentences>" OR, when blocked/cannot-proceed, state you cannot proceed and why>
+
+Non-blocking risks:
+- <risk that does NOT block this gate, or "None.">
+--- end protocol ---`;
+
 const SDD_SPEC_REVIEW =
 	"Review the spec at {specPath}. This is an autonomous workflow with no human in the loop.\n\n" +
 	WORKFLOW_REVIEW_PROTOCOL;
