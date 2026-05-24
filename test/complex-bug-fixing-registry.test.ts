@@ -1,3 +1,6 @@
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as pjoin } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	bugfixRunDir,
@@ -7,6 +10,7 @@ import {
 	listWorkflowTypes,
 	renderTemplate,
 } from "../packages/broker/src/runtime/workflow-registry.ts";
+import { ensureBugfixWorkspace } from "../packages/broker/src/runtime/bugfix-setup.ts";
 
 describe("bugfixRunDir / bugfixPaths", () => {
 	it("bugfixRunDir joins workspace + .ai-whisper/bugfix/<workflowId>", () => {
@@ -100,6 +104,20 @@ describe("complex-bug-fixing workflow definition", () => {
 				});
 				expect(out).not.toMatch(/\{(specPath|bugfixDir|diagnosisPath|postmortemPath|commitRange|reviewMode)\}/);
 			}
+		}
+	});
+});
+
+describe("ensureBugfixWorkspace", () => {
+	it("creates the run dir idempotently and returns its path", () => {
+		const ws = mkdtempSync(pjoin(tmpdir(), "bugfix-ws-"));
+		try {
+			const dir = ensureBugfixWorkspace(ws, "wf_x");
+			expect(dir).toBe(pjoin(ws, ".ai-whisper", "bugfix", "wf_x"));
+			expect(existsSync(dir)).toBe(true);
+			expect(() => ensureBugfixWorkspace(ws, "wf_x")).not.toThrow(); // idempotent
+		} finally {
+			rmSync(ws, { recursive: true, force: true });
 		}
 	});
 });
