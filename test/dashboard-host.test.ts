@@ -98,6 +98,40 @@ describe("dashboard host", () => {
 		await m.stop();
 	});
 
+	it("clears the screen on a wall<->inspector switch, but not on same-mode repaints", async () => {
+		// Bug: switching views left the prior (taller) frame on screen and the new
+		// view rendered below it ("duplicated/appended"). A view switch must fully
+		// clear first; same-mode repaints must NOT (ink's incremental erase handles
+		// those — a full clear every poll would flicker).
+		const stdout = new PassThrough();
+		(stdout as unknown as { columns: number }).columns = 100;
+		(stdout as unknown as { rows: number }).rows = 24;
+		const m = createDashboardRuntime({
+			broker: fakeBroker([S({})]) as never,
+			dashboardId: "d1",
+			stdout: stdout as unknown as NodeJS.WritableStream,
+			pollIntervalMs: 10,
+		}) as never as {
+			start(): void; stop(): Promise<void>;
+			__handleKey(ev: { key?: string; escape?: boolean }): void;
+			__mode(): string; __clears(): number;
+		};
+		m.start();
+		await new Promise((r) => setTimeout(r, 30));
+		const base = m.__clears();
+		m.__handleKey({ key: "\r" }); // wall → inspector
+		expect(m.__mode()).toBe("inspector");
+		expect(m.__clears()).toBe(base + 1); // switch cleared once
+		// A same-mode no-op key must not add a clear (frame may be identical →
+		// skipped entirely, or repaint without a full clear).
+		m.__handleKey({ key: "1" }); // inspector section "live" (already live) — same mode
+		expect(m.__clears()).toBe(base + 1);
+		m.__handleKey({ escape: true }); // inspector → wall
+		expect(m.__mode()).toBe("wall");
+		expect(m.__clears()).toBe(base + 2); // switch back cleared again
+		await m.stop();
+	});
+
 	it("survives a broker throw on poll (degraded but alive)", async () => {
 		const broker = fakeBroker([S({})]);
 		let n = 0;

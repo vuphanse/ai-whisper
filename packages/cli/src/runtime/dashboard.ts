@@ -108,6 +108,15 @@ export function createDashboardRuntime(input: {
 	let lastSig: string | null = null;
 	let renderCount = 0;
 	let recycles = 0;
+	// View-switch clear: ink repaints by erasing only the PREVIOUS frame's
+	// tracked line count. Switching wall<->inspector swaps a very different
+	// (often viewport-overflowing) frame, so that erase under-covers and the
+	// new view renders BELOW leftover content (the "duplicated/appended" bug).
+	// On a mode change we ink.clear() first so each view starts from a clean
+	// frame. `lastRenderedMode` tracks what is actually on screen, not the
+	// pending `mode` (which handleKey may have already flipped).
+	let lastRenderedMode: Mode = "wall";
+	let clearCount = 0;
 	const recycleEvery = Math.max(1, input.__recycleEveryRenders ?? 750);
 
 	function toPhaseRuns(
@@ -384,6 +393,15 @@ export function createDashboardRuntime(input: {
 			lastSig = pendingSig;
 			renderCount += 1;
 			const full = createElement(DashboardApp, { node: el, onKey: handleKey });
+			// View switch (wall<->inspector): erase the whole previous frame before
+			// drawing the new view, so a taller prior frame can't leave stale rows
+			// behind the shorter one. Same-mode repaints take ink's normal
+			// incremental erase (no full clear → no flicker).
+			if (mode !== lastRenderedMode) {
+				ink.clear();
+				clearCount += 1;
+				lastRenderedMode = mode;
+			}
 			// Fix 3: every Nth real render, recycle the ink instance instead of
 			// rerendering, so ink's accumulated per-rerender retention is released.
 			if (renderCount % recycleEvery === 0) {
@@ -515,5 +533,6 @@ export function createDashboardRuntime(input: {
 		}),
 		__renderCount: () => renderCount,
 		__recycles: () => recycles,
+		__clears: () => clearCount,
 	};
 }

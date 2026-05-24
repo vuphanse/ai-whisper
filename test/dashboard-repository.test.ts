@@ -133,6 +133,48 @@ describe("listActiveCollabSummaries", () => {
 		expect(rows[0]?.lastActivityAt).toBe("2026-05-20T00:50:00.000Z");
 	});
 
+	it("backfills finished-workflow collabs to a floor of 3 when fewer are recently active (newest-first)", () => {
+		const db = freshDb();
+		// One recently-active running collab (eligible).
+		insCollab(db, "c_active");
+		insWorkflow(db, { id: "wf_a", collab: "c_active", status: "running", createdAt: "2026-05-20T00:40:00.000Z" });
+		insHandoff(db, { id: "ha", collab: "c_active", wf: "wf_a", createdAt: "2026-05-20T00:55:00.000Z", lastAct: "2026-05-20T00:59:00.000Z" });
+		// Three FINISHED collabs whose activity is well outside the recency window —
+		// so they are NOT eligible on their own. Distinct created_at for ordering.
+		insCollab(db, "c_done");
+		insWorkflow(db, { id: "wf_d", collab: "c_done", status: "done", createdAt: "2026-05-19T10:00:00.000Z" });
+		insCollab(db, "c_halt");
+		insWorkflow(db, { id: "wf_h", collab: "c_halt", status: "halted", createdAt: "2026-05-19T12:00:00.000Z" });
+		insCollab(db, "c_cancel");
+		insWorkflow(db, { id: "wf_c", collab: "c_cancel", status: "canceled", createdAt: "2026-05-19T11:00:00.000Z" });
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		const ids = rows.map((r) => r.collabId);
+		// Floor of 3: the active one + the two NEWEST finished (halt@12:00, cancel@11:00).
+		expect(rows).toHaveLength(3);
+		expect(ids).toContain("c_active");
+		expect(ids).toContain("c_halt");
+		expect(ids).toContain("c_cancel");
+		expect(ids).not.toContain("c_done"); // oldest finished — beyond the floor
+		// Backfilled summaries are fully projected (status reflected).
+		expect(rows.find((r) => r.collabId === "c_halt")?.workflowStatus).toBe("halted");
+	});
+
+	it("does NOT backfill when 3+ collabs are already recently active", () => {
+		const db = freshDb();
+		for (const id of ["a1", "a2", "a3"]) {
+			insCollab(db, id);
+			insHandoff(db, { id: `h_${id}`, collab: id, createdAt: "2026-05-20T00:58:00.000Z", lastAct: "2026-05-20T00:58:00.000Z" });
+		}
+		// A finished-only collab that must stay OFF when the floor is already met.
+		insCollab(db, "c_finished_extra");
+		insWorkflow(db, { id: "wf_x", collab: "c_finished_extra", status: "done", createdAt: "2026-05-19T09:00:00.000Z" });
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		expect(rows).toHaveLength(3);
+		expect(rows.map((r) => r.collabId)).not.toContain("c_finished_extra");
+	});
+
 	it("manual-relay lastActivityAt scopes to workflow_id IS NULL only (tagged handoffs do NOT leak)", () => {
 		const db = freshDb();
 		// No workflow records on this collab → resolver picks manual (null wf).

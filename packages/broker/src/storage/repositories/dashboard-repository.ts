@@ -47,9 +47,14 @@ export type RunCostRow = {
 // the recency window. Resolution mirrors the #1 host: running workflow (unique
 // per the schema index) → else most-recent workflow → else manual-relay (null).
 // All reads are CURRENT rows (no cursor) so in-place mutations are reflected.
+//
+// `minResults` (default 3): a finished run drops off the wall once its activity
+// ages past the window. To keep recent runs visible, when fewer than
+// `minResults` collabs are eligible we backfill with the most-recently-created
+// FINISHED-workflow collabs (done/halted/canceled), newest-first, deduped.
 export function listActiveCollabSummaries(
 	db: Database.Database,
-	input: { sinceMs: number; now?: string },
+	input: { sinceMs: number; now?: string; minResults?: number },
 ): CollabSummary[] {
 	const nowMs = Date.parse(input.now ?? new Date().toISOString());
 	const cutoff = new Date(
@@ -70,7 +75,41 @@ export function listActiveCollabSummaries(
 		.all(cutoff) as Array<{ collabId: string; lastAct: string }>;
 
 	const out: CollabSummary[] = [];
+	const seen = new Set<string>();
 	for (const e of eligible) {
+		out.push(buildCollabSummary(db, e.collabId));
+		seen.add(e.collabId);
+	}
+
+	// Backfill to the floor with the newest finished-workflow collabs not already
+	// shown. Ordered by each collab's most-recent finished workflow, newest first.
+	const minResults = input.minResults ?? 3;
+	if (out.length < minResults) {
+		const finished = db
+			.prepare(
+				`SELECT collab_id AS collabId, MAX(created_at) AS lastCreated
+				   FROM workflows
+				  WHERE status IN ('done','halted','canceled')
+				  GROUP BY collab_id
+				  ORDER BY lastCreated DESC, collab_id DESC`,
+			)
+			.all() as Array<{ collabId: string; lastCreated: string }>;
+		for (const f of finished) {
+			if (out.length >= minResults) break;
+			if (seen.has(f.collabId)) continue;
+			out.push(buildCollabSummary(db, f.collabId));
+			seen.add(f.collabId);
+		}
+	}
+	return out;
+}
+
+// Project a single collab into a CollabSummary. Resolution: running workflow →
+// else most-recent workflow → else manual-relay (null). Shared by the eligible
+// and backfill paths so both build identical rows.
+function buildCollabSummary(db: Database.Database, collabId: string): CollabSummary {
+	{
+		const e = { collabId };
 		const collab = db
 			.prepare(
 				`SELECT display_name AS displayName, workspace_root AS workspaceRoot
@@ -202,7 +241,7 @@ export function listActiveCollabSummaries(
 					.get(e.collabId) as { lastAct: string } | undefined);
 		const runLastAct = runLastActRow?.lastAct ?? "";
 
-		out.push({
+		return {
 			collabId: e.collabId,
 			label,
 			workflowId: wf?.workflowId ?? null,
@@ -221,9 +260,8 @@ export function listActiveCollabSummaries(
 			},
 			sessions,
 			lastActivityAt: runLastAct,
-		});
+		};
 	}
-	return out;
 }
 
 // Bug B: enumerate the FULL workflow run history for a collab, newest-first.
