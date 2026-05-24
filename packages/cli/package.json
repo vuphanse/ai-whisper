@@ -1,7 +1,13 @@
 {
 	"name": "ai-whisper",
 	"version": "0.1.0",
+	"description": "Terminal-first relay for paired AI coding agents (Claude + Codex), driven by structured workflows.",
 	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/ai-creed/ai-whisper.git"
+	},
+	"homepage": "https://ai-creed.dev/projects/ai-whisper/",
 	"type": "module",
 	"bin": {
 		"whisper": "./dist/bin/whisper.js",
