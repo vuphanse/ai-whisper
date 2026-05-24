@@ -1,4 +1,12 @@
-import { mkdtempSync, existsSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	mkdtempSync,
+	mkdirSync,
+	existsSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pjoin } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -116,6 +124,39 @@ describe("ensureBugfixWorkspace", () => {
 			expect(dir).toBe(pjoin(ws, ".ai-whisper", "bugfix", "wf_x"));
 			expect(existsSync(dir)).toBe(true);
 			expect(() => ensureBugfixWorkspace(ws, "wf_x")).not.toThrow(); // idempotent
+		} finally {
+			rmSync(ws, { recursive: true, force: true });
+		}
+	});
+
+	// The bugfix templates and docs promise the run dir "is gitignored". In a user
+	// workspace that has never run ralph, nothing ignores .ai-whisper/ — so setup
+	// must write self-owned ignore files exactly like ensureRalphWorkspace, or the
+	// diagnosis/postmortem artifacts would get committed.
+	it("guarantees the run dir is git-ignored in a fresh repo (no prior ralph run)", () => {
+		const ws = mkdtempSync(pjoin(tmpdir(), "bugfix-gi-"));
+		try {
+			execFileSync("git", ["init", "-q"], { cwd: ws });
+			ensureBugfixWorkspace(ws, "wf_y");
+			const artifact = pjoin(ws, ".ai-whisper", "bugfix", "wf_y", "diagnosis.md");
+			// exit 0 = ignored; throws otherwise.
+			expect(() =>
+				execFileSync("git", ["check-ignore", "-q", artifact], { cwd: ws }),
+			).not.toThrow();
+		} finally {
+			rmSync(ws, { recursive: true, force: true });
+		}
+	});
+
+	it("never clobbers a pre-existing .ai-whisper/.gitignore", () => {
+		const ws = mkdtempSync(pjoin(tmpdir(), "bugfix-keep-"));
+		try {
+			mkdirSync(pjoin(ws, ".ai-whisper"), { recursive: true });
+			writeFileSync(pjoin(ws, ".ai-whisper", ".gitignore"), "# user owned\n");
+			ensureBugfixWorkspace(ws, "wf_z");
+			expect(readFileSync(pjoin(ws, ".ai-whisper", ".gitignore"), "utf8")).toBe(
+				"# user owned\n",
+			);
 		} finally {
 			rmSync(ws, { recursive: true, force: true });
 		}
