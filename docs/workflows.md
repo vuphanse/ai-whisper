@@ -57,6 +57,8 @@ Avoid: a wishlist of loosely related features, "make it better" without a defini
 >
 > **Strong:** "Replace the per-request token decode in `auth/verify.ts` with a cached verifier. Done when: tokens are verified against a key set cached for its TTL, a cache miss refetches once, expired/invalid tokens still 401, and the existing auth tests pass unchanged. Do not change the public `verifyRequest` signature."
 
+This is not hypothetical. ai-whisper itself was built this way — nearly every feature in this repo started as a spec run through `spec-driven-development`, and those specs are still in the tree under [`docs/superpowers/specs/`](superpowers/specs/). If you want to see what a spec that actually drove a run looks like — scope, acceptance criteria, the level of detail that converges rather than loops — read a few of them. They are battle-tested by the fact that the code they describe exists.
+
 ### Writing a goal for ralph-loop
 
 The goal file is read as ground truth and **re-read on every iteration**. That single fact drives how you write it: anything you want applied to every chunk must live *inside the goal*, because the implementer's context is reset between chunks and the goal is the thing that persists.
