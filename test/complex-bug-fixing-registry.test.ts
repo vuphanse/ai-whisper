@@ -99,6 +99,23 @@ describe("complex-bug-fixing workflow definition", () => {
 		expect(fix.stepTemplates.review).toMatch(/coverage/i);
 	});
 
+	it("diagnosis fix prompt carries the commit-the-RED-test requirement into fix rounds", () => {
+		// A diagnosis fix round can add/change the reproduction test; it must be
+		// committed so the next phase's base..HEAD review sees it.
+		const diagFix = def!.phases[0]!.stepTemplates.fix!;
+		expect(diagFix).toMatch(/commit/i);
+		expect(diagFix).toMatch(/reproduction test|RED/);
+	});
+
+	it("fix-and-verify cause-was-wrong guidance describes halt, not an unsupported auto-reopen", () => {
+		// The engine has no phase-1 → phase-0 transition; the prompt must not promise
+		// an automatic diagnosis re-open. It must tell the implementer to halt
+		// (cannot proceed) and hand control to a human.
+		const fixKickoff = def!.phases[1]!.stepTemplates.implement!;
+		expect(fixKickoff).toMatch(/cannot proceed/i);
+		expect(fixKickoff).not.toMatch(/so the diagnosis is re-opened/i);
+	});
+
 	it("phase templates render all placeholders with no stray braces", () => {
 		for (const phase of def!.phases) {
 			for (const tmpl of [phase.kickoffTemplate, ...Object.values(phase.stepTemplates)]) {
