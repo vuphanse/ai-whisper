@@ -66,6 +66,7 @@ describe("README public contract", () => {
 	});
 
 	it("routes deep detail to docs instead of embedding it", () => {
+		expect(readme).toContain("docs/workflows.md");
 		expect(readme).toContain("docs/concepts.md");
 		expect(readme).toContain("docs/relay-handoff-flows.md");
 		expect(readme).toContain("docs/evaluator-configuration.md");
@@ -77,6 +78,7 @@ describe("README public contract", () => {
 
 describe("docs and assets routed from the README exist", () => {
 	it.each([
+		"docs/workflows.md",
 		"docs/concepts.md",
 		"docs/relay-handoff-flows.md",
 		"docs/evaluator-configuration.md",
