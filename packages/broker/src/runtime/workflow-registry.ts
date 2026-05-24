@@ -249,6 +249,22 @@ export function ralphRunDir(workspaceRoot: string, workflowId: string): string {
 	return join(workspaceRoot, ".ai-whisper", "ralph", workflowId);
 }
 
+export function bugfixRunDir(workspaceRoot: string, workflowId: string): string {
+	return join(workspaceRoot, ".ai-whisper", "bugfix", workflowId);
+}
+
+export function bugfixPaths(
+	workspaceRoot: string,
+	workflowId: string,
+): { bugfixDir: string; diagnosisPath: string; postmortemPath: string } {
+	const bugfixDir = bugfixRunDir(workspaceRoot, workflowId);
+	return {
+		bugfixDir,
+		diagnosisPath: join(bugfixDir, "diagnosis.md"),
+		postmortemPath: join(bugfixDir, "postmortem.md"),
+	};
+}
+
 export function getWorkflowDefinition(
 	type: string,
 ): WorkflowDefinition | undefined {
