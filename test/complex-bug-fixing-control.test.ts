@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkflowDriver } from "../packages/broker/src/runtime/workflow-driver.ts";
+import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { bugfixRunDir } from "../packages/broker/src/runtime/workflow-registry.ts";
 
 type Captured = {
 	initialHandoffStep: string;
@@ -125,6 +127,257 @@ describe("workflow-driver: complex-bug-fixing first-phase kickoff", () => {
 			expect(h.captured[0]!.executionBaseHeadSha).toBeUndefined();
 		} finally {
 			h.cleanup();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Broker-backed control harness (mirrors test/ralph-loop-control.test.ts), used
+// to drive real verdicts through applyOrchestratorVerdict and inspect the
+// rendered request_text for the new bugfix phases.
+// ---------------------------------------------------------------------------
+
+const COLLAB_ID = "collab_bugfix";
+const WS_ROOT = "/tmp/bugfix-ws";
+
+function makeBroker() {
+	const dir = mkdtempSync(join(tmpdir(), "aiw-bugfix-ctl-"));
+	return createBrokerRuntime({
+		sqlitePath: join(dir, "x.sqlite"),
+		host: "127.0.0.1",
+		port: 4732,
+		runWorkflowDriver: false,
+		runDiagnosticsSweep: false,
+		runDaemonHeartbeat: false,
+		runBrokerDaemonSweep: false,
+	});
+}
+
+function seedCollab(broker: ReturnType<typeof makeBroker>, now = new Date().toISOString()) {
+	broker.control.startCollab({
+		collabId: COLLAB_ID,
+		workspaceRoot: WS_ROOT,
+		displayName: "bugfix",
+		orchestratorEnabled: true,
+		orchestratorMaxRounds: 5,
+		now,
+	});
+	for (const agent of ["codex", "claude"] as const) {
+		broker.control.setSessionBinding({
+			collabId: COLLAB_ID,
+			agentType: agent,
+			sessionId: `session_${agent}_bugfix`,
+			bindingSource: "adopted",
+			now,
+		});
+	}
+}
+
+/** Start a complex-bug-fixing workflow and kick off the diagnosis (implement)
+ *  handoff, anchoring baseBeforeExecution to `base` exactly as the driver does. */
+function startBugfix(
+	broker: ReturnType<typeof makeBroker>,
+	base = "deadbeef",
+	now = new Date().toISOString(),
+) {
+	const { workflowId } = broker.control.createWorkflow({
+		collabId: COLLAB_ID,
+		workflowType: "complex-bug-fixing",
+		specPath: `${WS_ROOT}/bug.md`,
+		roleBindings: { implementer: "claude", reviewer: "codex" },
+		now,
+	});
+	const { handoffId } = broker.control.beginPhaseRun({
+		workflowId,
+		phaseIndex: 0,
+		phaseName: "diagnosis",
+		initialHandoffStep: "implement",
+		kickoffText: "Diagnose the bug.",
+		sender: "codex",
+		target: "claude",
+		maxRounds: 5,
+		executionBaseHeadSha: base,
+		now,
+	});
+	return { workflowId, handoffId };
+}
+
+function setHandback(broker: ReturnType<typeof makeBroker>, handoffId: string, text: string) {
+	broker.db
+		.prepare("UPDATE relay_handoff SET handback_text = ? WHERE handoff_id = ?")
+		.run(text, handoffId);
+}
+
+function latestForStep(
+	broker: ReturnType<typeof makeBroker>,
+	workflowId: string,
+	step: string,
+): { handoffId: string; requestText: string } {
+	const row = broker.db
+		.prepare(
+			"SELECT handoff_id, request_text FROM relay_handoff WHERE workflow_id = ? AND handoff_step = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+		)
+		.get(workflowId, step) as { handoff_id: string; request_text: string };
+	return { handoffId: row.handoff_id, requestText: row.request_text };
+}
+
+/** Deliver the current implement handoff, returning the review handoff it spawns. */
+function deliverToReview(
+	broker: ReturnType<typeof makeBroker>,
+	workflowId: string,
+	implementHandoffId: string,
+	now: string,
+): { handoffId: string; requestText: string } {
+	setHandback(broker, implementHandoffId, "Did the work, see artifact.");
+	broker.control.applyOrchestratorVerdict({
+		handoffId: implementHandoffId,
+		verdict: "delivered",
+		confidence: 0.9,
+		reason: "delivered",
+		now,
+	});
+	return latestForStep(broker, workflowId, "review");
+}
+
+describe("workflow-control renders bugfix paths", () => {
+	it("fix-and-verify review request contains {diagnosisPath} and base..HEAD {commitRange}", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			// diagnosis: deliver implement → review → approve advances to fix-and-verify
+			const diagReview = deliverToReview(broker, workflowId, handoffId, now);
+			setHandback(broker, diagReview.handoffId, "Approved.");
+			broker.control.applyOrchestratorVerdict({
+				handoffId: diagReview.handoffId,
+				verdict: "approve",
+				confidence: 0.9,
+				reason: "diagnosis sound",
+				now,
+			});
+
+			// fix-and-verify: deliver implement → review handoff
+			const fixImpl = latestForStep(broker, workflowId, "implement");
+			const fixReview = deliverToReview(broker, workflowId, fixImpl.handoffId, now);
+
+			const diagPath = `${bugfixRunDir(WS_ROOT, workflowId)}/diagnosis.md`;
+			expect(fixReview.requestText).toContain(diagPath);
+			expect(fixReview.requestText).toContain("deadbeef..HEAD");
+			expect(fixReview.requestText).not.toMatch(/\{(diagnosisPath|commitRange|specPath)\}/);
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("diagnosis findings→fix request renders {diagnosisPath} and stays in the implementer layer", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			const diagReview = deliverToReview(broker, workflowId, handoffId, now);
+			setHandback(broker, diagReview.handoffId, "Findings: the repro is not real.");
+			broker.control.applyOrchestratorVerdict({
+				handoffId: diagReview.handoffId,
+				verdict: "findings",
+				confidence: 0.9,
+				reason: "diagnosis defective",
+				followUpMessage: "Re-run the reproduction; the cause is unproven.",
+				now,
+			});
+
+			const fix = latestForStep(broker, workflowId, "fix");
+			const diagPath = `${bugfixRunDir(WS_ROOT, workflowId)}/diagnosis.md`;
+			expect(fix.requestText).toContain(diagPath);
+			expect(fix.requestText).not.toContain("{diagnosisPath}");
+			// layer separation: the reviewer protocol must not leak into the fix prompt
+			expect(fix.requestText).not.toContain("ai-whisper diagnosis review protocol");
+			// the reviewer findings are appended
+			expect(fix.requestText).toContain("the cause is unproven");
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("fix-and-verify findings→fix request renders base..HEAD {commitRange}", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId, handoffId } = startBugfix(broker, "deadbeef", now);
+
+			const diagReview = deliverToReview(broker, workflowId, handoffId, now);
+			setHandback(broker, diagReview.handoffId, "Approved.");
+			broker.control.applyOrchestratorVerdict({
+				handoffId: diagReview.handoffId,
+				verdict: "approve",
+				confidence: 0.9,
+				reason: "diagnosis sound",
+				now,
+			});
+
+			const fixImpl = latestForStep(broker, workflowId, "implement");
+			const fixReview = deliverToReview(broker, workflowId, fixImpl.handoffId, now);
+			setHandback(broker, fixReview.handoffId, "Findings: missing edge-case test.");
+			broker.control.applyOrchestratorVerdict({
+				handoffId: fixReview.handoffId,
+				verdict: "findings",
+				confidence: 0.9,
+				reason: "coverage thin",
+				followUpMessage: "Add the edge-case test.",
+				now,
+			});
+
+			const fix = latestForStep(broker, workflowId, "fix");
+			expect(fix.requestText).toContain("deadbeef..HEAD");
+			expect(fix.requestText).not.toContain("{commitRange}");
+		} finally {
+			await broker.stop();
+		}
+	});
+
+	it("SDD findings→fix still uses the generic wrapper (regression)", async () => {
+		const broker = makeBroker();
+		try {
+			const now = "2026-05-24T00:00:00.000Z";
+			seedCollab(broker, now);
+			const { workflowId } = broker.control.createWorkflow({
+				collabId: COLLAB_ID,
+				workflowType: "spec-driven-development",
+				specPath: "docs/spec.md",
+				roleBindings: { implementer: "claude", reviewer: "codex" },
+				now,
+			});
+			// spec-refining review handoff
+			const { handoffId } = broker.control.beginPhaseRun({
+				workflowId,
+				phaseIndex: 0,
+				phaseName: "spec-refining",
+				initialHandoffStep: "review",
+				kickoffText: "Review the spec.",
+				sender: "claude",
+				target: "codex",
+				maxRounds: 5,
+				now,
+			});
+			setHandback(broker, handoffId, "Findings: tighten acceptance criteria.");
+			broker.control.applyOrchestratorVerdict({
+				handoffId,
+				verdict: "findings",
+				confidence: 0.9,
+				reason: "spec vague",
+				followUpMessage: "Add acceptance criteria.",
+				now,
+			});
+
+			const fix = latestForStep(broker, workflowId, "fix");
+			expect(fix.requestText).toMatch(/^Apply the following reviewer findings now/);
+			expect(fix.requestText).not.toContain("/.ai-whisper/bugfix/");
+		} finally {
+			await broker.stop();
 		}
 	});
 });

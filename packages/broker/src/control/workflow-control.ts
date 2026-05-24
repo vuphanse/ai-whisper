@@ -40,6 +40,7 @@ import {
 	renderTemplate,
 	derivePlanPath,
 	ralphRunDir,
+	bugfixPaths,
 	RALPH_GOAL_COMPLETE_MARKER,
 	ralphFinalLineMarker,
 	type PhaseConfig,
@@ -375,6 +376,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		const reviewMode: ReviewMode = useAcceptance
 			? "acceptance-review"
 			: (input.phase.reviewMode ?? "phase-review");
+		const bf = collab
+			? bugfixPaths(collab.workspaceRoot, input.workflow.workflowId)
+			: { bugfixDir: "", diagnosisPath: "", postmortemPath: "" };
 		return renderTemplate(tmpl, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -384,6 +388,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			commitRange: liveReviewCommitRange(ctx),
 			ralphDir,
 			reviewMode,
+			bugfixDir: bf.bugfixDir,
+			diagnosisPath: bf.diagnosisPath,
+			postmortemPath: bf.postmortemPath,
 		});
 	}
 
@@ -450,6 +457,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		const ctx = input.workflow.workflowContext as { commitRange?: string; baseBeforeExecution?: string };
 		const collab = getCollab(db, input.workflow.collabId);
 		const ralphDir = collab ? ralphRunDir(collab.workspaceRoot, input.workflow.workflowId) : "";
+		const bf = collab
+			? bugfixPaths(collab.workspaceRoot, input.workflow.workflowId)
+			: { bugfixDir: "", diagnosisPath: "", postmortemPath: "" };
 		const kickoffText = renderTemplate(phase.kickoffTemplate, {
 			specPath: input.workflow.specPath,
 			planPath: safeDerivePlanPath(
@@ -459,6 +469,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			commitRange: liveReviewCommitRange(ctx),
 			ralphDir,
 			reviewMode: phase.reviewMode ?? "phase-review",
+			bugfixDir: bf.bugfixDir,
+			diagnosisPath: bf.diagnosisPath,
+			postmortemPath: bf.postmortemPath,
 		});
 		const chainId = `relay_ch_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 		const phaseRunId = `wfp_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -798,17 +811,25 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				const findingsText =
 					input.followUpMessage ?? "Address the reviewer's findings.";
 				let fixRequestText: string;
-				if (phase.repeatUntilComplete && phase.stepTemplates.fix) {
-					// Ralph fix step: use the phase's fix template (it instructs the
-					// implementer to append generalizable lessons to LEARNINGS.md,
-					// update PROGRESS.md, and end with the item marker — the
-					// anti-amnesia requirement), rendered with ralphDir, then append
-					// the reviewer findings. The generic prompt below lacks all of that.
+				if (
+					(phase.repeatUntilComplete || phase.renderFixTemplateOnFindings) &&
+					phase.stepTemplates.fix
+				) {
+					// Phase-specific fix step. For ralph this carries the anti-amnesia
+					// instructions (LEARNINGS.md / PROGRESS.md / item marker) rendered
+					// with ralphDir; for complex-bug-fixing it carries the bugfix
+					// placeholders ({diagnosisPath}/{postmortemPath}/{commitRange}) so a
+					// diagnosis loop points at the artifact and a fix loop at the commit
+					// range. The reviewer findings are appended. The generic prompt below
+					// lacks all of that. SDD sets neither flag, so it falls through.
 					const ctx = workflow.workflowContext as { commitRange?: string; baseBeforeExecution?: string };
 					const collab = getCollab(db, workflow.collabId);
 					const ralphDir = collab
 						? ralphRunDir(collab.workspaceRoot, workflow.workflowId)
 						: "";
+					const bf = collab
+						? bugfixPaths(collab.workspaceRoot, workflow.workflowId)
+						: { bugfixDir: "", diagnosisPath: "", postmortemPath: "" };
 					const fixTmpl = renderTemplate(phase.stepTemplates.fix, {
 						specPath: workflow.specPath,
 						planPath: safeDerivePlanPath(
@@ -817,6 +838,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 						),
 						commitRange: liveReviewCommitRange(ctx),
 						ralphDir,
+						bugfixDir: bf.bugfixDir,
+						diagnosisPath: bf.diagnosisPath,
+						postmortemPath: bf.postmortemPath,
 					});
 					fixRequestText = `${fixTmpl}\n\nReviewer findings:\n${findingsText}`;
 				} else {
