@@ -271,7 +271,13 @@ export function computeLiveness(snap: RelayViewSnapshot): {
 	let stuck = false;
 	let liveOverride: string | null = null;
 
-	if (terminal === "halted" || terminal === "canceled") {
+	if (terminal === "done") {
+		// A completed workflow is finished, never stuck. Short-circuit BEFORE the
+		// idle/mount-liveness checks — a done run backfilled onto the wall has
+		// aged past budget and its mounts are gone, which would otherwise trip
+		// the "no progress and mount not alive" branch and render it STUCK.
+		return { stuck: false, why: null, liveText: "done" };
+	} else if (terminal === "halted" || terminal === "canceled") {
 		stuck = true;
 		why = snap.workflow?.haltReason
 			? `${terminal}: ${snap.workflow.haltReason}`

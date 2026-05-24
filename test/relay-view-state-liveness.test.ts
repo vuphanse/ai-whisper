@@ -53,6 +53,30 @@ describe("computeLiveness — decoupled phase-aware threshold + per-agent mountA
 		expect(r.stuck).toBe(false);
 	});
 
+	it("a DONE workflow is never stuck — even when long-idle with a dead/absent mount", () => {
+		// Regression: a completed run backfilled onto the wall had aged far past
+		// budget and its sessions were gone (mountAlive absent → false), so it fell
+		// through to the idle+mount-dead branch and rendered "STUCK". A terminal
+		// `done` workflow is finished, not stuck.
+		const r = computeLiveness(
+			snap({
+				workflow: {
+					workflowId: "wf_done",
+					workflowType: "spec-driven-development",
+					name: "x",
+					status: "done",
+					createdAt: ago(3_600_000),
+					haltReason: null,
+				},
+				lastActivityAt: ago(STEP * 5), // long past any budget
+				sessions: [], // mounts gone → mountAlive absent → false
+				turn: { turnOwner: "none", waitingAgent: null, handoffState: "idle" },
+			}),
+		);
+		expect(r.stuck).toBe(false);
+		expect(r.why).toBeNull();
+	});
+
 	it("idle over baseline but under the larger execute budget → not stuck (phase-aware)", () => {
 		const r = computeLiveness(snap({ currentStep: "execute", lastActivityAt: ago(BASE + 60_000) }));
 		expect(r.stuck).toBe(false);
