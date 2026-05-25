@@ -1,3 +1,5 @@
+import type { CaptureHandbackResult } from "./capture-handback-text.js";
+
 type RelayTurnState = {
 	collabId: string;
 	turnOwner: "codex" | "claude" | "none";
@@ -221,7 +223,9 @@ export function createMountedTurnOwnedRelay(input: {
 	writeUserInput: (text: string) => void;
 	submitUserInput?: (text: string) => Promise<void>;
 	openComposer: (args: { prompt: string; initialValue: string }) => Promise<string | null>;
-	captureHandbackText?: () => Promise<string | null>;
+	captureHandbackText?: (
+		turnText: string,
+	) => Promise<string | CaptureHandbackResult | null>;
 	confirmHandbackCapture?: (args: { target: "codex" | "claude"; text: string }) => Promise<boolean>;
 	prefillHandbackFromCapture?: boolean;
 	turnCapture?: {
@@ -505,7 +509,11 @@ export function createMountedTurnOwnedRelay(input: {
 			let composed: string | null = null;
 			let initialValue = "";
 			if (input.captureHandbackText) {
-				const captured = (await input.captureHandbackText()) ?? "";
+				// Force-handback path: prefill the composer with the captured text.
+				// Normalize the structured result (or a legacy string) to a string;
+				// a lease degrade yields null text → empty prefill (same as a miss).
+				const outcome = (await input.captureHandbackText("")) ?? "";
+				const captured = typeof outcome === "string" ? outcome : (outcome.text ?? "");
 				if (captured.trim().length > 0 && input.confirmHandbackCapture) {
 					const accepted = await input.confirmHandbackCapture({
 						target,
@@ -592,15 +600,34 @@ export function createMountedTurnOwnedRelay(input: {
 				input.turnCapture?.extractLatestAssistantTurn() ?? { confidence: "low", text: null };
 
 			let clipboardText: string | null = null;
+			let leaseDegraded = false;
+			let interferenceDetected = false;
 			try {
-				clipboardText = (await input.captureHandbackText?.()) ?? null;
+				const captureResult =
+					(await input.captureHandbackText?.(turnResult.text ?? "")) ?? null;
+				if (typeof captureResult === "string") {
+					clipboardText = captureResult; // legacy / direct text
+				} else if (captureResult !== null) {
+					interferenceDetected = captureResult.interferenceDetected;
+					if (captureResult.status === "captured") {
+						clipboardText = captureResult.text;
+					} else {
+						leaseDegraded = true; // degraded_pty_only (timeout or persistent interference)
+					}
+				}
 			} catch {
 				clipboardText = null;
 			}
 
 			const classification = classifyCapture(turnResult, clipboardText);
 			const captureStatus = classification.status;
-			const requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
+			let requestText = captureStatus === "ok" ? (clipboardText ?? "") : "";
+
+			// Spec: a lease degrade (acquire timeout or persistent human interference)
+			// falls back to the PTY turn text rather than delivering an empty handback.
+			if (leaseDegraded && (turnResult.text ?? "").trim().length > 0) {
+				requestText = turnResult.text as string;
+			}
 
 			// Evaluate race guard synchronously so the diagnostic row carries the correct flag.
 			const currentAcceptedId = getAcceptedHandoff()?.handoffId;
@@ -632,6 +659,7 @@ export function createMountedTurnOwnedRelay(input: {
 					clipSample: sampleOf(clipboardText),
 					turnSample: sampleOf(turnResult.text),
 					abortedByRaceGuard,
+					interferenceDetected,
 					now,
 				});
 			} catch (err) {

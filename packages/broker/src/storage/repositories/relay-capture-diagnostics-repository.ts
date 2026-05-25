@@ -21,7 +21,8 @@ export type RelayCaptureDiagnosticRecord = {
 	clipSample: string | null;
 	turnSample: string | null;
 	abortedByRaceGuard: boolean;
-	interferenceDetected: boolean;
+	/** Optional on insert (defaults to false); always populated on read. */
+	interferenceDetected?: boolean;
 	createdAt: string;
 };
 

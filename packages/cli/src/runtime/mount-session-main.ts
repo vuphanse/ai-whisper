@@ -5,6 +5,7 @@ import {
 	deleteSessionAttachment,
 	getRecoveryState,
 	reapSupersededSessions,
+	releaseCaptureLease,
 	upsertRecoveryState,
 } from "@ai-whisper/broker";
 import { getSharedSqlitePath } from "./state-root.js";
@@ -26,8 +27,15 @@ import {
 } from "./local-multiline-composer.js";
 import { createAssistantTurnCapture } from "./assistant-turn-capture.js";
 import { captureClipboardHandback } from "./clipboard-handback-capture.js";
+import { captureHandbackText as runLeasedCapture } from "./capture-handback-text.js";
+import { makeChangeCountReader } from "./clipboard-change-count.js";
 import { submitInjectedProviderInput } from "./provider-submit-strategy.js";
 import { createRuntimeDebugLogger } from "./runtime-debug-log.js";
+
+// changeCount reader for the clipboard capture lease (component 6). Degrades to
+// null off-darwin or when the native helper is missing, so the ownership check
+// is skipped rather than blocking capture.
+const readChangeCount = makeChangeCountReader();
 
 // Best-effort reap of superseded `session` rows for a (collab, agent), keeping
 // only the active/kept session id. Wrapped so a reaping failure is logged and
@@ -174,6 +182,9 @@ export function createMountSessionRuntime(input: {
 								agentType: input.target,
 								attachmentKind: "mounted",
 							});
+							// Release any held capture lease on teardown (mirrors dead-daemon
+							// handling; the startup sweep / TTL is the backstop if missed).
+							releaseCaptureLease(db, resolvedClaim.collabId);
 						} finally {
 							db.close();
 						}
@@ -357,17 +368,35 @@ export function createMountSessionRuntime(input: {
 						}
 						return runComposer();
 					},
-					captureHandbackText: async () => {
-						return captureClipboardHandback({
-							triggerCopy: () => submitInjectedInput("/copy"),
-							// Some provider versions show a picker after /copy (e.g. Claude Code's
-							// content-type picker). Send Enter to confirm the default selection
-							// if the clipboard has not changed yet after the trigger delay.
-							confirmPicker: () => {
-								writeInjectedInput("mounted-submit-picker", "\r");
-							},
-							triggerDelayMs: 300,
-						});
+					captureHandbackText: async (turnText: string) => {
+						if (!resolvedClaim) return null;
+						const db = openDatabase(getSharedSqlitePath());
+						try {
+							// Serialize the /copy capture host-wide via the capture lease so
+							// the pbpaste read is provably this collab's own output, and
+							// detect human ⌘C interference via changeCount. Returns a
+							// structured result the relay consumes (captured vs degraded).
+							return await runLeasedCapture({
+								db,
+								collabId: resolvedClaim.collabId,
+								pid: process.pid,
+								turnText,
+								readChangeCount,
+								runCapture: () =>
+									captureClipboardHandback({
+										triggerCopy: () => submitInjectedInput("/copy"),
+										// Some provider versions show a picker after /copy (e.g. Claude
+										// Code's content-type picker). Send Enter to confirm the default
+										// selection if the clipboard has not changed yet after the delay.
+										confirmPicker: () => {
+											writeInjectedInput("mounted-submit-picker", "\r");
+										},
+										triggerDelayMs: 300,
+									}),
+							});
+						} finally {
+							db.close();
+						}
 					},
 					confirmHandbackCapture: async () => {
 						const runConfirm = async () => {
