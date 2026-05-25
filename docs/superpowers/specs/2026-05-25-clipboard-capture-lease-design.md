@@ -142,11 +142,20 @@ fallback. The ladder, in order:
    no *collab* can interfere; re-inject `/copy`, re-snapshot `C0`, re-read.
    Bounded to `N` attempts (default 2) with short backoff. A human is unlikely
    to collide on consecutive attempts.
-2. **Content acceptance.** On any attempt, if the captured clipboard passes the
-   existing `classifyCapture` checks against this collab's PTY turn text, accept
-   it regardless of `changeCount` — matching content means it is effectively
-   ours. This also makes the check self-correcting if the +1 assumption is ever
-   wrong for a future provider version.
+2. **Content acceptance (similarity/identity only — never the fast-path).** On
+   any attempt, accept the captured clipboard *only* if it actually matches this
+   collab's PTY turn text by content: an exact/normalized identity match, or a
+   similarity score clearing the existing `classifyCapture` thresholds
+   (`jaccard ≥ 0.6` or `containment ≥ 0.8`). This check **must bypass the
+   ≥100-char fast-path** — once `changeCount` has flagged interference
+   (`Cn − C0 > 1`), the fast-path's "any substantial clipboard is ours"
+   assumption is exactly what is no longer true, so accepting on length alone
+   would re-admit the foreign ≥100-char human copy the `changeCount` check just
+   detected. Matching content means it is effectively ours and is safe to accept
+   regardless of `changeCount`; this also makes the check self-correcting if the
+   +1 assumption is ever wrong for a future provider version. A clipboard that
+   only clears the length floor but fails similarity/identity is **not** accepted
+   here — it falls through to step 3.
 3. **PTY-only degrade.** If every attempt shows interference *and* content never
    validates, fall back to the PTY turn text (the existing degraded path) and
    record a capture diagnostic flagged `interference_detected`. The workflow
@@ -224,8 +233,16 @@ result of *this* collab's `/copy`.
 - **Degrade path:** acquire timeout → PTY-only capture + diagnostic, no wrong
   text delivered.
 - **changeCount ladder:** `Cn − C0 > 1` → re-capture; re-capture that validates
-  by content → accepted; persistent interference + invalid content → PTY-only +
-  `interference_detected` diagnostic. Assert the turn is never blocked.
+  by content (similarity/identity match to the PTY turn text) → accepted;
+  persistent interference + invalid content → PTY-only + `interference_detected`
+  diagnostic. Assert the turn is never blocked.
+- **changeCount ladder rejects foreign long copy (regression guard):** with
+  interference detected (`Cn − C0 > 1`) and a captured clipboard that is ≥100
+  chars but does **not** match the PTY turn text by similarity/identity, the
+  content-acceptance step must **reject** it (the ≥100-char fast-path is bypassed
+  in the interference path) and fall through to PTY-only +
+  `interference_detected`. This is the human-⌘C guarantee: a foreign long copy
+  inside the held window is never accepted as this collab's answer.
 - **changeCount helper absent:** check skipped, capture still succeeds on lease +
   similarity. Inject a `null`-returning reader to simulate.
 - **Cleanup:** startup sweep reclaims a stale singleton row left by a dead pid.
