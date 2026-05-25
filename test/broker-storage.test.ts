@@ -60,6 +60,7 @@ describe("broker storage bootstrap", () => {
 				"containment_score",
 				"created_at",
 				"handoff_id",
+				"interference_detected",
 				"jaccard_score",
 				"target_provider",
 				"turn_confidence",

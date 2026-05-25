@@ -1173,6 +1173,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			clipSample: string | null;
 			turnSample: string | null;
 			abortedByRaceGuard: boolean;
+			interferenceDetected?: boolean;
 			now: string;
 		}): { captureId: string } {
 			const captureId = `capture_${input.now.replace(/[^0-9]/g, "")}_${input.handoffId.slice(-8)}`;
@@ -1192,6 +1193,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 				clipSample: input.clipSample,
 				turnSample: input.turnSample,
 				abortedByRaceGuard: input.abortedByRaceGuard,
+				interferenceDetected: input.interferenceDetected ?? false,
 				createdAt: input.now,
 			});
 			return { captureId };

@@ -21,6 +21,8 @@ export type RelayCaptureDiagnosticRecord = {
 	clipSample: string | null;
 	turnSample: string | null;
 	abortedByRaceGuard: boolean;
+	/** Optional on insert (defaults to false); always populated on read. */
+	interferenceDetected?: boolean;
 	createdAt: string;
 };
 
@@ -40,6 +42,7 @@ type Row = {
 	clip_sample: string | null;
 	turn_sample: string | null;
 	aborted_by_race_guard: number;
+	interference_detected: number;
 	created_at: string;
 };
 
@@ -60,6 +63,7 @@ function rowToRecord(row: Row): RelayCaptureDiagnosticRecord {
 		clipSample: row.clip_sample,
 		turnSample: row.turn_sample,
 		abortedByRaceGuard: row.aborted_by_race_guard === 1,
+		interferenceDetected: row.interference_detected === 1,
 		createdAt: row.created_at,
 	};
 }
@@ -72,8 +76,9 @@ export function insertCaptureDiagnostic(
 		`INSERT INTO relay_capture_diagnostics
 		 (capture_id, handoff_id, collab_id, chain_id, workflow_id, target_provider,
 		  capture_status, clip_len, turn_len, turn_confidence, jaccard_score,
-		  containment_score, clip_sample, turn_sample, aborted_by_race_guard, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		  containment_score, clip_sample, turn_sample, aborted_by_race_guard,
+		  interference_detected, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	).run(
 		input.captureId,
 		input.handoffId,
@@ -90,6 +95,7 @@ export function insertCaptureDiagnostic(
 		input.clipSample,
 		input.turnSample,
 		input.abortedByRaceGuard ? 1 : 0,
+		input.interferenceDetected ? 1 : 0,
 		input.createdAt,
 	);
 }

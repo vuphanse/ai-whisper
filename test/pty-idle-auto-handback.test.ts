@@ -158,7 +158,13 @@ describe("classifyCapture", () => {
 function makeRelayForIdle(opts: {
 	handoffStatus: "none" | "pending" | "deferred" | "accepted";
 	isPausedInput?: () => boolean;
-	captureHandbackText?: () => Promise<string | null>;
+	captureHandbackText?: (
+		turnText: string,
+	) => Promise<
+		| string
+		| null
+		| { status: "captured" | "degraded_pty_only"; text: string | null; interferenceDetected: boolean }
+	>;
 	turnCapture?: {
 		reset: () => void;
 		finishAssistantTurn: () => void;
@@ -617,6 +623,88 @@ describe("checkIdleActions: auto-handback diagnostics", () => {
 				process.env["AI_WHISPER_NO_CAPTURE_SAMPLES"] = prior;
 			}
 		}
+	});
+
+	it("hands back the PTY turn text (not empty) when capture degrades to PTY-only", async () => {
+		const turnText = "implement approved plan keep commits small verify tests pass";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => ({
+				status: "degraded_pty_only" as const,
+				text: null,
+				interferenceDetected: true,
+			}),
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "high" as const, text: turnText })),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ requestText: turnText }),
+		);
+	});
+
+	it("records the diagnostic with interferenceDetected=true on a degraded interference capture", async () => {
+		const turnText = "implement approved plan keep commits small verify tests pass";
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => ({
+				status: "degraded_pty_only" as const,
+				text: null,
+				interferenceDetected: true,
+			}),
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => true),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "high" as const, text: turnText })),
+			},
+		});
+		await relay.checkIdleActions();
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+		const arg = vi.mocked(broker.control.recordCaptureDiagnostic!).mock.calls[0]![0]!;
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+		expect(arg.interferenceDetected).toBe(true);
+	});
+
+	it("keeps requestText empty on degrade when there is no PTY turn text", async () => {
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => ({
+				status: "degraded_pty_only" as const,
+				text: null,
+				interferenceDetected: false,
+			}),
+			turnCapture: {
+				reset: vi.fn(),
+				finishAssistantTurn: vi.fn(),
+				hasVisibleAssistantTurn: vi.fn(() => false),
+				extractLatestAssistantTurn: vi.fn(() => ({ confidence: "low" as const, text: null })),
+			},
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ requestText: "" }),
+		);
+	});
+
+	it("still accepts a legacy bare-string capture result (backward compatible)", async () => {
+		const result = "a".repeat(150);
+		const { relay, broker } = makeRelayForIdle({
+			handoffStatus: "accepted",
+			handoffAgeMs: 60_000,
+			captureHandbackText: async () => result,
+		});
+		await relay.checkIdleActions();
+		expect(broker.control.handoffBackRelay).toHaveBeenCalledWith(
+			expect.objectContaining({ captureStatus: "ok", requestText: result }),
+		);
 	});
 
 	it("does NOT block handoffBackRelay when recordCaptureDiagnostic throws", async () => {
