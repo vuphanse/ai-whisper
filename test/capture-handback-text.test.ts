@@ -1,0 +1,152 @@
+import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
+import { openDatabase } from "../packages/broker/src/storage/open-database.ts";
+import { acquireCaptureLease } from "../packages/broker/src/storage/clipboard-capture-lease.ts";
+import { captureHandbackText } from "../packages/cli/src/runtime/capture-handback-text.ts";
+
+function freshDb() {
+	const dir = mkdtempSync(join(tmpdir(), "capwrap-"));
+	const db = openDatabase(join(dir, "broker.sqlite"));
+	applyMigrations(db);
+	return db;
+}
+
+const leaseOptions = { isPidAlive: () => true, ttlMs: 5000, now: () => 0 };
+const baseDeps = {
+	collabId: "collabA",
+	pid: 100,
+	turnText: "The verdict is approved because all tests pass and coverage holds.",
+	leaseOptions,
+};
+
+describe("captureHandbackText — clean path", () => {
+	it("returns captured text and no interference when changeCount delta is +1", async () => {
+		const db = freshDb();
+		let cc = 10;
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			runCapture: async () => {
+				cc += 1; // our single /copy advances changeCount by exactly 1
+				return "A long captured clipboard response that exceeds one hundred characters in length, trusted by the fast path.";
+			},
+			readChangeCount: async () => cc,
+		});
+		expect(result.status).toBe("captured");
+		expect(result.text).toContain("long captured clipboard response");
+		expect(result.interferenceDetected).toBe(false);
+	});
+});
+
+describe("captureHandbackText — serialization", () => {
+	it("a second collab cannot capture while the first holds the lease", async () => {
+		const db = freshDb();
+		expect(acquireCaptureLease(db, "collabA", 100, leaseOptions)).toBe(true);
+
+		const result = await captureHandbackText({
+			db,
+			collabId: "collabB",
+			pid: 200,
+			turnText: "irrelevant",
+			leaseOptions,
+			acquireMaxWaitMs: 50,
+			acquireBackoffMs: 10,
+			sleep: async () => {},
+			runCapture: async () => "should never run",
+			readChangeCount: async () => 1,
+		});
+		expect(result.status).toBe("degraded_pty_only");
+		expect(result.text).toBeNull();
+	});
+});
+
+describe("captureHandbackText — degrade path", () => {
+	it("acquire timeout degrades to PTY-only with no racy read", async () => {
+		const db = freshDb();
+		acquireCaptureLease(db, "other", 999, leaseOptions);
+		let captureCalled = false;
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			acquireMaxWaitMs: 30,
+			acquireBackoffMs: 10,
+			sleep: async () => {},
+			runCapture: async () => {
+				captureCalled = true;
+				return "x";
+			},
+			readChangeCount: async () => 1,
+		});
+		expect(result.status).toBe("degraded_pty_only");
+		expect(result.interferenceDetected).toBe(false);
+		expect(captureCalled).toBe(false); // never proceed to a racy read
+	});
+});
+
+describe("captureHandbackText — interference ladder", () => {
+	it("re-captures on delta > 1, then content-accepts a matching re-capture", async () => {
+		const db = freshDb();
+		let cc = 10;
+		let attempt = 0;
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			recaptureAttempts: 2,
+			recaptureBackoffMs: 1,
+			sleep: async () => {},
+			readChangeCount: async () => cc,
+			runCapture: async () => {
+				attempt += 1;
+				if (attempt === 1) {
+					cc += 2; // human ⌘C interleaved → delta 2
+					return "Some completely unrelated foreign clipboard text from a human copy action here.";
+				}
+				cc += 1; // clean re-capture
+				return baseDeps.turnText; // identity match to the PTY turn text
+			},
+		});
+		expect(result.status).toBe("captured");
+		expect(result.text).toBe(baseDeps.turnText);
+	});
+
+	it("rejects a foreign >=100-char copy under detected interference (regression guard)", async () => {
+		const db = freshDb();
+		let cc = 10;
+		const foreignLong =
+			"This is a foreign human clipboard payload that is well over one hundred characters long but is NOT this collab's answer at all.";
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			recaptureAttempts: 2,
+			recaptureBackoffMs: 1,
+			sleep: async () => {},
+			readChangeCount: async () => cc,
+			runCapture: async () => {
+				cc += 2; // every attempt shows interference
+				return foreignLong; // >=100 chars but fails similarity vs turnText
+			},
+		});
+		// Fast-path bypassed in interference path: length alone must NOT accept.
+		expect(result.status).toBe("degraded_pty_only");
+		expect(result.interferenceDetected).toBe(true);
+		expect(result.text).not.toBe(foreignLong);
+	});
+});
+
+describe("captureHandbackText — changeCount helper absent", () => {
+	it("skips the ownership check and accepts a clean long capture when readChangeCount returns null", async () => {
+		const db = freshDb();
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			readChangeCount: async () => null, // helper unavailable
+			runCapture: async () =>
+				"A long captured clipboard response exceeding one hundred characters that the lease guarantees is ours.",
+		});
+		expect(result.status).toBe("captured");
+		expect(result.interferenceDetected).toBe(false);
+	});
+});
