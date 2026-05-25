@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { enforceOneActiveCollabPerWorkspace } from "./enforce-one-active-collab.js";
 
 // Bump this whenever runMigrationBody gains new schema (tables/columns/indexes).
 // The body is fully idempotent (CREATE ... IF NOT EXISTS + PRAGMA-guarded
@@ -307,21 +308,23 @@ function ensureBrokerStateRow(db: Database.Database): void {
 
 export function applyMigrations(db: Database.Database): void {
 	const current = db.pragma("user_version", { simple: true }) as number;
-	if (current >= CURRENT_SCHEMA_VERSION) {
-		ensureBrokerStateRow(db);
-		return;
+	if (current < CURRENT_SCHEMA_VERSION) {
+		db.exec("BEGIN EXCLUSIVE");
+		try {
+			runMigrationBody(db);
+			db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
+			db.exec("COMMIT");
+		} catch (err) {
+			db.exec("ROLLBACK");
+			throw err;
+		}
 	}
-
-	db.exec("BEGIN EXCLUSIVE");
-	try {
-		runMigrationBody(db);
-		db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
-		ensureBrokerStateRow(db);
-		db.exec("COMMIT");
-	} catch (err) {
-		db.exec("ROLLBACK");
-		throw err;
-	}
+	ensureBrokerStateRow(db);
+	// Runs on EVERY call (not behind the user_version gate) and is idempotent:
+	// a clean DB is a no-op, and the index is created on a later startup once a
+	// residual duplicate is resolved. Kept out of runMigrationBody because the
+	// unique index can fail on pre-existing duplicate rows.
+	enforceOneActiveCollabPerWorkspace(db);
 }
 
 function runMigrationBody(db: Database.Database): void {

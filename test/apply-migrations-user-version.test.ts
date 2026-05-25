@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -93,5 +93,142 @@ describe("apply-migrations: PRAGMA user_version", () => {
 			db.prepare("PRAGMA table_info(broker_daemon)").all() as Array<{ name: string }>
 		).map((c) => c.name);
 		expect(cols).toContain("evaluator_status");
+	});
+});
+
+describe("apply-migrations: one-active-collab enforcement", () => {
+	function freshDb2() {
+		const dir = mkdtempSync(join(tmpdir(), "ver-enf-"));
+		return openDatabase(join(dir, "broker.sqlite"));
+	}
+
+	it("creates idx_collab_one_active_per_workspace on a fresh DB", () => {
+		const db = freshDb2();
+		applyMigrations(db);
+		const row = db
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_collab_one_active_per_workspace'",
+			)
+			.get();
+		expect(row).toBeDefined();
+	});
+
+	it("deduplicates seeded duplicate active collabs on applyMigrations", () => {
+		const db = freshDb2();
+		applyMigrations(db);
+		// Simulate an incident-era DB that predates the index: drop it so the
+		// duplicate active rows can be seeded (the unique index would otherwise
+		// reject the second insert), then re-run applyMigrations as a daemon
+		// restart would — enforcement dedups and re-creates the index.
+		db.exec("DROP INDEX IF EXISTS idx_collab_one_active_per_workspace");
+		for (const [id, created] of [
+			["older", "2026-05-24T23:16:00Z"],
+			["newer", "2026-05-24T23:30:00Z"],
+		] as const) {
+			db.prepare(
+				"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, created_at, updated_at, orchestrator_enabled, orchestrator_max_rounds) VALUES (?, '/ws/ws1', ?, 'active', 'ws1', ?, ?, 1, 3)",
+			).run(id, id, created, created);
+		}
+		db.prepare(
+			"INSERT INTO workflows (workflow_id, collab_id, workflow_type, spec_path, role_bindings, status, current_phase_index, created_at, updated_at) VALUES ('wf1', 'older', 'spec-driven-development', '/spec.md', '{}', 'running', 0, '2026-05-25T00:00:00Z', '2026-05-25T00:00:00Z')",
+		).run();
+
+		applyMigrations(db);
+
+		const active = (
+			db
+				.prepare(
+					"SELECT collab_id FROM collab WHERE workspace_id = 'ws1' AND status = 'active'",
+				)
+				.all() as Array<{ collab_id: string }>
+		).map((r) => r.collab_id);
+		expect(active).toEqual(["older"]); // workflow-owning collab survives
+	});
+
+	function seedConflict(db: ReturnType<typeof openDatabase>) {
+		// Pre-index state with two active collabs that each own a running workflow.
+		db.exec("DROP INDEX IF EXISTS idx_collab_one_active_per_workspace");
+		for (const [id, created] of [
+			["a", "2026-05-24T23:16:00Z"],
+			["b", "2026-05-24T23:30:00Z"],
+		] as const) {
+			db.prepare(
+				"INSERT INTO collab (collab_id, workspace_root, display_name, status, workspace_id, created_at, updated_at, orchestrator_enabled, orchestrator_max_rounds) VALUES (?, '/ws/ws1', ?, 'active', 'ws1', ?, ?, 1, 3)",
+			).run(id, id, created, created);
+		}
+		for (const [wf, c] of [
+			["wfa", "a"],
+			["wfb", "b"],
+		] as const) {
+			db.prepare(
+				"INSERT INTO workflows (workflow_id, collab_id, workflow_type, spec_path, role_bindings, status, current_phase_index, created_at, updated_at) VALUES (?, ?, 'spec-driven-development', '/spec.md', '{}', 'running', 0, '2026-05-25T00:00:00Z', '2026-05-25T00:00:00Z')",
+			).run(wf, c);
+		}
+	}
+
+	function indexPresent(db: ReturnType<typeof openDatabase>): boolean {
+		return (
+			db
+				.prepare(
+					"SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_collab_one_active_per_workspace'",
+				)
+				.get() !== undefined
+		);
+	}
+
+	it("startup does not crash on an irreducible conflict: both stay active, index skipped, warning emitted", () => {
+		const db = freshDb2();
+		applyMigrations(db); // schema + index
+		seedConflict(db); // drops index, seeds two running-workflow collabs
+
+		const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			// applyMigrations IS the daemon-startup path. It must not throw on an
+			// irreducible duplicate (a CREATE UNIQUE INDEX would otherwise blow up
+			// startup), must leave both running-workflow collabs active, and must
+			// skip the table-wide index until the conflict is resolved.
+			expect(() => applyMigrations(db)).not.toThrow();
+
+			const active = (
+				db
+					.prepare(
+						"SELECT collab_id FROM collab WHERE workspace_id = 'ws1' AND status = 'active' ORDER BY collab_id",
+					)
+					.all() as Array<{ collab_id: string }>
+			).map((r) => r.collab_id);
+			expect(active).toEqual(["a", "b"]); // neither running workflow orphaned
+			expect(indexPresent(db)).toBe(false); // index skipped table-wide
+
+			const warned = warnSpy.mock.calls.flat().join("\n");
+			expect(warned).toContain("a");
+			expect(warned).toContain("b");
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("creates the index on a later applyMigrations once the operator resolves the conflict", () => {
+		const db = freshDb2();
+		applyMigrations(db);
+		seedConflict(db);
+
+		const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		applyMigrations(db); // conflict → no index
+		warnSpy.mockRestore();
+		expect(indexPresent(db)).toBe(false);
+
+		// Operator stops the extra collab manually, then the daemon restarts.
+		db.prepare("UPDATE collab SET status = 'stopped' WHERE collab_id = 'b'").run();
+		applyMigrations(db);
+
+		expect(indexPresent(db)).toBe(true);
+		const active = (
+			db
+				.prepare(
+					"SELECT collab_id FROM collab WHERE workspace_id = 'ws1' AND status = 'active'",
+				)
+				.all() as Array<{ collab_id: string }>
+		).map((r) => r.collab_id);
+		expect(active).toEqual(["a"]);
 	});
 });

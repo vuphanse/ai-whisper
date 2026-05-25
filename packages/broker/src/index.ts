@@ -15,6 +15,7 @@ export {
 	type IsAliveResult,
 } from "./runtime/broker-daemon-sweep.js";
 export { applyMigrations } from "./storage/apply-migrations.js";
+export { enforceOneActiveCollabPerWorkspace } from "./storage/enforce-one-active-collab.js";
 export { openDatabase } from "./storage/open-database.js";
 export { getBrokerState } from "./storage/repositories/broker-state-repository.js";
 export {
