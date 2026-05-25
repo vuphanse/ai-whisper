@@ -136,6 +136,42 @@ describe("captureHandbackText — interference ladder", () => {
 	});
 });
 
+describe("captureHandbackText — genuine empty capture (no clipboard change)", () => {
+	it("returns captured/null (NOT degraded) when capture is empty and changeCount is clean", async () => {
+		const db = freshDb();
+		const cc = 10; // no change → delta 0, not interference
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			recaptureAttempts: 2,
+			recaptureBackoffMs: 1,
+			sleep: async () => {},
+			readChangeCount: async () => cc,
+			runCapture: async () => null, // provider produced no clipboard output
+		});
+		// Genuine no-output → relay applies existing no_response_* behavior, no PTY degrade.
+		expect(result.status).toBe("captured");
+		expect(result.text).toBeNull();
+		expect(result.interferenceDetected).toBe(false);
+	});
+
+	it("returns captured/null when capture is empty and changeCount is unavailable", async () => {
+		const db = freshDb();
+		const result = await captureHandbackText({
+			db,
+			...baseDeps,
+			recaptureAttempts: 2,
+			recaptureBackoffMs: 1,
+			sleep: async () => {},
+			readChangeCount: async () => null, // helper unavailable
+			runCapture: async () => "", // empty
+		});
+		expect(result.status).toBe("captured");
+		expect(result.text).toBeNull();
+		expect(result.interferenceDetected).toBe(false);
+	});
+});
+
 describe("captureHandbackText — changeCount helper absent", () => {
 	it("skips the ownership check and accepts a clean long capture when readChangeCount returns null", async () => {
 		const db = freshDb();

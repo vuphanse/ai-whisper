@@ -99,13 +99,23 @@ export async function captureHandbackText(
 			const clip = await input.runCapture();
 			const cn = await input.readChangeCount();
 
-			if (clip === null || clip.trim().length === 0) {
-				// Genuine empty capture — nothing to accept; let PTY-only handle it.
-				continue;
-			}
-
 			// changeCount unavailable on either read → skip the ownership check.
 			const checkAvailable = c0 !== null && cn !== null;
+			const interfered = checkAvailable && cn - c0 > 1;
+
+			if (clip === null || clip.trim().length === 0) {
+				// Empty capture. If interference was detected, a foreign write may have
+				// clobbered our /copy before it landed — re-capture under the held lease.
+				// Otherwise (no interference, or check unavailable) this is a genuine
+				// "no clipboard change": return captured/null so the relay applies the
+				// existing no_response_captured* behavior, NOT a PTY-text degrade.
+				if (interfered) {
+					interferenceDetected = true;
+					continue;
+				}
+				return { status: "captured", text: null, interferenceDetected };
+			}
+
 			const clean = checkAvailable ? cn - c0 === 1 : true;
 
 			if (clean) {
