@@ -1,12 +1,13 @@
 import type Database from "better-sqlite3";
 import { enforceOneActiveCollabPerWorkspace } from "./enforce-one-active-collab.js";
+import { sweepStaleCaptureLease } from "./clipboard-capture-lease.js";
 
 // Bump this whenever runMigrationBody gains new schema (tables/columns/indexes).
 // The body is fully idempotent (CREATE ... IF NOT EXISTS + PRAGMA-guarded
 // ALTERs), so a persisted DB at an older user_version safely re-runs it and
 // picks up the additions. Forgetting to bump means a persisted DB never gets
 // the new schema (it only worked for freshly-created DBs).
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const initMigrationSql = `
 CREATE TABLE IF NOT EXISTS broker_state (
@@ -294,6 +295,13 @@ CREATE TABLE IF NOT EXISTS recovery_state (
   recovered_at         TEXT
 );
 
+CREATE TABLE IF NOT EXISTS clipboard_capture_lease (
+  id                INTEGER PRIMARY KEY CHECK (id = 1),
+  holder_collab_id  TEXT,
+  holder_pid        INTEGER,
+  acquired_at       TEXT
+);
+
 `;
 
 function ensureBrokerStateRow(db: Database.Database): void {
@@ -325,6 +333,9 @@ export function applyMigrations(db: Database.Database): void {
 	// residual duplicate is resolved. Kept out of runMigrationBody because the
 	// unique index can fail on pre-existing duplicate rows.
 	enforceOneActiveCollabPerWorkspace(db);
+	// Idempotent startup sweep: clears a lease left held by a crashed mount
+	// (dead holder pid or TTL-exceeded). A clean/free row is a no-op.
+	sweepStaleCaptureLease(db);
 }
 
 function runMigrationBody(db: Database.Database): void {
@@ -486,6 +497,7 @@ function runMigrationBody(db: Database.Database): void {
 			clip_sample TEXT,
 			turn_sample TEXT,
 			aborted_by_race_guard INTEGER NOT NULL DEFAULT 0,
+			interference_detected INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_collab_created
@@ -497,6 +509,18 @@ function runMigrationBody(db: Database.Database): void {
 		CREATE INDEX IF NOT EXISTS idx_relay_capture_diagnostics_status
 			ON relay_capture_diagnostics (capture_status);
 	`);
+
+	// CREATE TABLE IF NOT EXISTS above does not alter a persisted DB, so add the
+	// interference_detected column for DBs created before schema v5. Placed after
+	// the relay_capture_diagnostics CREATE so the table is guaranteed to exist.
+	const captureDiagColumns = db
+		.prepare("PRAGMA table_info(relay_capture_diagnostics)")
+		.all() as Array<{ name: string }>;
+	if (!captureDiagColumns.some((column) => column.name === "interference_detected")) {
+		db.exec(
+			"ALTER TABLE relay_capture_diagnostics ADD COLUMN interference_detected INTEGER NOT NULL DEFAULT 0",
+		);
+	}
 
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS relay_evaluator_diagnostics (
