@@ -50,6 +50,7 @@ type BrokerLike = {
 			clipSample: string | null;
 			turnSample: string | null;
 			abortedByRaceGuard: boolean;
+			interferenceDetected?: boolean;
 			now: string;
 		}): { captureId: string };
 		getWorkflow?(id: string): { status: string } | null;

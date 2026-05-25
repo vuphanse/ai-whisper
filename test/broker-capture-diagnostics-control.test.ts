@@ -40,6 +40,61 @@ describe("broker.control capture diagnostics", () => {
 		}
 	});
 
+	it("persists interferenceDetected=true and reads it back", () => {
+		const broker = newBroker();
+		try {
+			broker.control.recordCaptureDiagnostic({
+				handoffId: "handoff_x",
+				collabId: "collab_x",
+				chainId: null,
+				workflowId: null,
+				targetProvider: "claude",
+				captureStatus: "no_response_captured_confidently",
+				clipLen: 0,
+				turnLen: 42,
+				turnConfidence: "high",
+				jaccardScore: null,
+				containmentScore: null,
+				clipSample: null,
+				turnSample: null,
+				abortedByRaceGuard: false,
+				interferenceDetected: true,
+				now: "2026-05-25T00:00:00.000Z",
+			});
+			const rows = broker.control.listCaptureDiagnosticsByCollab("collab_x", null);
+			expect(rows[0]?.interferenceDetected).toBe(true);
+		} finally {
+			void broker.stop();
+		}
+	});
+
+	it("defaults interferenceDetected to false when omitted", () => {
+		const broker = newBroker();
+		try {
+			broker.control.recordCaptureDiagnostic({
+				handoffId: "handoff_y",
+				collabId: "collab_y",
+				chainId: null,
+				workflowId: null,
+				targetProvider: "codex",
+				captureStatus: "ok",
+				clipLen: 150,
+				turnLen: 0,
+				turnConfidence: "low",
+				jaccardScore: null,
+				containmentScore: null,
+				clipSample: null,
+				turnSample: null,
+				abortedByRaceGuard: false,
+				now: "2026-05-25T00:00:01.000Z",
+			});
+			const rows = broker.control.listCaptureDiagnosticsByCollab("collab_y", null);
+			expect(rows[0]?.interferenceDetected).toBe(false);
+		} finally {
+			void broker.stop();
+		}
+	});
+
 	it("sweepCaptureDiagnostics returns the deleted-row count", () => {
 		const broker = newBroker();
 		try {
