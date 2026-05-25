@@ -5,6 +5,47 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-25
+
+### Fixed
+
+- **Stranded autonomous runs from duplicate active collabs.** A single workspace
+  could accumulate more than one `active` collab; a workflow would then bind to
+  one collab while the live mounted agents and the running daemon belonged to
+  another, so its first handoff was created but never delivered or evaluated —
+  the run hung forever at its first step while every operator surface
+  (`status`, `inspect`, dashboard) reported "healthy". `ai-whisper` now enforces
+  **one active collab per workspace** as an invariant: `mount` transparently
+  re-adopts the existing active collab — including re-adopting one whose daemon
+  has died, via `recover` — instead of creating a duplicate; a partial unique
+  index makes the invariant impossible to violate from any code path; and a
+  migration dedups any pre-existing duplicate active collabs (by survivor rules)
+  before the index is created, re-run on every `applyMigrations`.
+- **Clipboard capture race across concurrent collabs.** The relay captures an
+  agent's handback by injecting `/copy` and reading the macOS system clipboard;
+  with multiple collabs (or a human ⌘C) active on one host, a collab could read
+  *another* collab's response and deliver it into the wrong workflow — worsened
+  by the ≥100-char fast-path that trusts any substantial clipboard without a
+  similarity check. A new **host-global capture lease** (a singleton row in the
+  shared SQLite DB) now serializes every `/copy`→read window cross-process, so
+  each read is provably this collab's own output. The lease reclaims stale
+  holders (dead pid / TTL), releases on disconnect, and is swept on broker
+  startup. `classifyCapture` and its load-bearing ≥100-char fast-path are
+  unchanged — the lease removes the race that made the fast-path unsafe.
+
+### Added
+
+- **`changeCount` interference check** for the held capture window: snapshots
+  `NSPasteboard.changeCount` before and after `/copy` (via a tiny `swiftc`-built
+  native helper) to catch a human ⌘C that the lease cannot serialize. On
+  interference it runs a bounded ladder — re-capture under the still-held lease
+  → accept only on content similarity/identity (bypassing the ≥100-char
+  fast-path) → degrade to the PTY turn text — and never blocks the turn. The
+  helper degrades to a skipped check when unavailable (non-macOS or build
+  failure), so capture still proceeds on the lease alone.
+- `interference_detected` flag on relay capture diagnostics, recording when a
+  foreign clipboard write was detected during a held capture window.
+
 ## [0.2.0] - 2026-05-25
 
 ### Added
@@ -92,6 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.2.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.0
 [0.1.4]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.1.3
