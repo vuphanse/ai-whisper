@@ -4,6 +4,7 @@ import {
 	applyMigrations,
 	createBrokerRuntime,
 	openDatabase,
+	upsertRecoveryState,
 	upsertSessionAttachment,
 } from "@ai-whisper/broker";
 import {
@@ -22,6 +23,7 @@ import {
 	getStateRoot,
 } from "../../runtime/state-root.js";
 import { waitForBrokerReady } from "../../runtime/wait-for-broker-ready.js";
+import { runCollabRecover } from "./recover.js";
 import { runCollabStart } from "./start.js";
 
 function defaultIsPidAlive(pid: number): boolean {
@@ -93,6 +95,21 @@ export async function runCollabMount(input: {
 	 * "bound" binding has a live owner. Defaults to defaultIsPidAlive.
 	 */
 	isPidAlive?: (pid: number) => boolean;
+	/**
+	 * Test seam: override the daemon-revive call used to transparently re-adopt
+	 * an existing active collab whose daemon is dead. Defaults to runCollabRecover.
+	 */
+	runRecoverFn?: typeof runCollabRecover;
+	/**
+	 * Test seam: liveness probe for the resolved collab's DAEMON pid. The
+	 * resolver treats any non-null pid as "live" (it does not call
+	 * process.kill), so a stale non-null pid left behind by a crashed/restarted
+	 * daemon would otherwise be reused as if healthy. mount probes the daemon
+	 * pid here and, when dead, transparently re-adopts via recover. Defaults to
+	 * defaultIsPidAlive. NOTE: distinct from `isPidAlive`, which probes the
+	 * mounted session-attachment owner pid.
+	 */
+	isDaemonPidAlive?: (pid: number) => boolean;
 }) {
 	// Ensure the shared SQLite file exists with all tables before any
 	// resolve attempt. Without this, the initial resolveCollab in a
@@ -126,18 +143,79 @@ export async function runCollabMount(input: {
 		}
 	};
 
+	const isDaemonAlive = input.isDaemonPidAlive ?? defaultIsPidAlive;
+
+	// Single revive code path: bring the collab's daemon back through the
+	// existing recover machinery (not a reimplementation), reset recovery_state
+	// to "normal" (this mount re-binds the target agent now, replacing any
+	// remembered binding, so the recovery gate below must not demand a separate
+	// `whisper collab reconnect`), then re-resolve to the now-live daemon.
+	const reviveViaRecover = async () => {
+		await (input.runRecoverFn ?? runCollabRecover)({
+			cwd: input.workspaceRoot,
+			now: () => new Date().toISOString(),
+			isPortFreeOs: (port: number) => isPortFree(port),
+			spawnBroker: ({ collabId, host, port, sqlitePath }) =>
+				spawnBrokerDaemon(sqlitePath, host, port, collabId),
+			waitForReady: ({ host, port, collabId, timeoutMs }) =>
+				waitForBrokerReady({ host, port, collabId, timeoutMs }),
+			signalProcess: (pid, signal) => {
+				try {
+					process.kill(pid, signal);
+				} catch {
+					// ignore
+				}
+			},
+		});
+		const db = openDatabase(getSharedSqlitePath());
+		try {
+			const r = resolveCollab({ db, cwd: input.workspaceRoot });
+			upsertRecoveryState(db, {
+				collabId: r.collabId,
+				state: "normal",
+				idleAfterRecovery: false,
+				recoveredAt: null,
+			});
+		} finally {
+			db.close();
+		}
+		return tryResolve();
+	};
+
 	const resolveOrCreate = async () => {
 		try {
-			return tryResolve();
+			const resolved = tryResolve();
+			// Stale non-null dead PID: the resolver reported a daemon (pid !== null)
+			// but the recorded process is gone. Re-adopt by reviving, rather than
+			// binding the agent into a dead daemon (the silent-hang failure). Only
+			// for the cwd path — an explicit --collab override is left untouched.
+			if (
+				input.collabIdOverride === undefined &&
+				resolved.daemon !== null &&
+				!isDaemonAlive(resolved.daemon.pid)
+			) {
+				return await reviveViaRecover();
+			}
+			return resolved;
 		} catch (err) {
+			// Transparent re-adopt of a missing/null-pid daemon: an active collab
+			// exists for this workspace but its daemon is dead (post-restart).
+			// Revive through recover instead of erroring "Run `whisper collab
+			// recover`".
+			if (
+				err instanceof CollabResolverError &&
+				err.kind === "NoLiveDaemonForCollab" &&
+				input.collabIdOverride === undefined
+			) {
+				return await reviveViaRecover();
+			}
 			// Auto-create a fresh collab when the workspace has none
 			// (NoCollabFoundForCwd) OR when its only collab was already stopped
 			// (CollabAlreadyStopped — e.g. after `whisper collab stop`; without
 			// this the user could never re-mount in a workspace they'd stopped).
 			// lookupByCwd prefers an active collab, so the new one wins on
 			// re-resolve and the stopped row is harmlessly ignored.
-			// NoLiveDaemonForCollab + WorkspaceUnreadable must still propagate:
-			// the first is a recover scenario, the second a real fs error.
+			// WorkspaceUnreadable must still propagate: it is a real fs error.
 			if (
 				!(
 					err instanceof CollabResolverError &&
