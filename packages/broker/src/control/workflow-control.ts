@@ -32,6 +32,7 @@ import {
 	getHandoffWithWorkflowMetaById,
 	updateEvaluatorBookkeeping,
 	structuredVerdictToLegacy,
+	hasInFlightAcceptedHandoffForWorkflow,
 } from "../storage/repositories/relay-handoff-repository.js";
 import { upsertRelayTurnState } from "../storage/repositories/relay-turn-state-repository.js";
 import {
@@ -55,6 +56,13 @@ import type {
 export interface WorkflowControlDeps {
 	db: Database.Database;
 	events: BrokerEventBus;
+	/** Captures a workspace snapshot ref for the given workflow, or null when unavailable.
+	 *  SYNCHRONOUS by contract — supplied by the broker runtime, which resolves the
+	 *  workflow's collab.workspaceRoot and calls captureWorkspaceSnapshotSync(...). */
+	captureSnapshotRef?: (workflowId: string) => string | null;
+	/** Diffs operator-changed files for the workflow against pauseSnapshotRef; [] when
+	 *  unavailable. SYNCHRONOUS so resumeWorkflow stays synchronous. */
+	diffChangedFilesSinceSnapshot?: (workflowId: string, sinceRef: string) => string[];
 }
 
 const SHA_REGEX = /^[0-9a-f]{7,40}$/;
@@ -1127,6 +1135,63 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 	}
 
+	/**
+	 * Capture the quiesce-boundary snapshot iff the workflow is paused, not yet
+	 * snapshotted, and has no in-flight accepted handoff. Synchronous: the ref is
+	 * persisted before this returns, so a resume right after the boundary always
+	 * sees the captured ref (when git is available).
+	 */
+	function maybeCaptureQuiesceSnapshot(input: { workflowId: string; now: string }): void {
+		const wf = getWorkflowById(db, input.workflowId);
+		if (!wf || wf.status !== "paused") return;
+		if ((wf.workflowContext as { pauseSnapshotRef?: unknown }).pauseSnapshotRef !== undefined) {
+			return; // already captured
+		}
+		if (hasInFlightAcceptedHandoffForWorkflow(db, input.workflowId)) return; // not at boundary yet
+		const ref = deps.captureSnapshotRef ? deps.captureSnapshotRef(input.workflowId) : null;
+		updateWorkflowContext(db, {
+			workflowId: input.workflowId,
+			patch: { pauseSnapshotRef: ref },
+			now: input.now,
+		});
+	}
+
+	function pauseWorkflow(input: { workflowId: string; now: string }): void {
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`pauseWorkflow: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status !== "running") {
+			throw new Error(
+				`pauseWorkflow: workflow ${input.workflowId} is ${workflow.status}, only running workflows can be paused`,
+			);
+		}
+
+		const tx = db.transaction(() => {
+			const current = getWorkflowById(db, input.workflowId);
+			if (!current || current.status !== "running") return; // race no-op
+			setWorkflowStatus(db, {
+				workflowId: input.workflowId,
+				status: "paused",
+				haltReason: null,
+				now: input.now,
+			});
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: { pausedAt: input.now },
+				now: input.now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.paused", { workflowId: input.workflowId });
+		// Synchronous boundary snapshot: when no accepted handoff is in flight, the
+		// baseline is captured and persisted NOW, before pauseWorkflow returns — so a
+		// subsequent resume always sees a non-null ref (when git is available). The
+		// in-flight case no-ops here and is captured later at handback (Task 8).
+		maybeCaptureQuiesceSnapshot({ workflowId: input.workflowId, now: input.now });
+	}
+
 	function resumeWorkflow(input: { workflowId: string; now: string }): void {
 		const workflow = getWorkflowById(db, input.workflowId);
 		if (!workflow) {
@@ -1294,6 +1359,8 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		beginPhaseRun,
 		applyOrchestratorVerdict,
 		haltWorkflow,
+		pauseWorkflow,
+		maybeCaptureQuiesceSnapshot,
 		resumeWorkflow,
 		cancelWorkflow,
 		getHandoffWithWorkflowMeta,

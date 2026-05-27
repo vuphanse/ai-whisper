@@ -39,6 +39,11 @@ import {
 	insertCollab,
 	getCollab,
 } from "../storage/repositories/collab-repository.js";
+import { getWorkflowById } from "../storage/repositories/workflow-repository.js";
+import {
+	captureWorkspaceSnapshotSync,
+	diffChangedFilesSince,
+} from "../runtime/workspace-snapshot.js";
 import {
 	insertReply,
 	listRepliesForThread,
@@ -158,7 +163,27 @@ function buildEventId(
 }
 
 export function createControlService(db: Database.Database, events: BrokerEventBus) {
-	const workflowControl = createWorkflowControl({ db, events });
+	// Resolve a workflow's collab workspace root, then snapshot/diff it. Both hooks
+	// are synchronous so pause/resume control methods persist their result before
+	// returning (no race with an immediate resume). Resolved via `db` directly to
+	// avoid a circular reference on `workflowControl` (constructed just below).
+	const resolveWorkspaceRoot = (workflowId: string): string | null => {
+		const wf = getWorkflowById(db, workflowId);
+		if (!wf) return null;
+		return getCollab(db, wf.collabId)?.workspaceRoot ?? null;
+	};
+	const workflowControl = createWorkflowControl({
+		db,
+		events,
+		captureSnapshotRef: (workflowId: string) => {
+			const root = resolveWorkspaceRoot(workflowId);
+			return root ? captureWorkspaceSnapshotSync(root) : null;
+		},
+		diffChangedFilesSinceSnapshot: (workflowId: string, sinceRef: string) => {
+			const root = resolveWorkspaceRoot(workflowId);
+			return root ? diffChangedFilesSince(root, sinceRef) : [];
+		},
+	});
 	return Object.assign({
 		startCollab(input: {
 			collabId: string;

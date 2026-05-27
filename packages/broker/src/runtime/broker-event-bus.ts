@@ -36,6 +36,7 @@ export type BrokerEventMap = {
 	"workflow.canceled": { workflowId: string; reason: string };
 	"workflow.done": { workflowId: string };
 	"workflow.resumed": { workflowId: string; phaseIndex: number };
+	"workflow.paused": { workflowId: string };
 };
 
 export type BrokerEventName = keyof BrokerEventMap;

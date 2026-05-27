@@ -471,6 +471,19 @@ export function failRelayHandoffOnDisconnectTxn(
 	})();
 }
 
+/** True when the workflow has an accepted-but-not-yet-handed-back handoff (an agent is mid-turn). */
+export function hasInFlightAcceptedHandoffForWorkflow(
+	db: Database.Database,
+	workflowId: string,
+): boolean {
+	const row = db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM relay_handoff WHERE workflow_id = ? AND status = 'accepted'",
+		)
+		.get(workflowId) as { n: number };
+	return row.n > 0;
+}
+
 export function claimRelayHandoffForOrchestrationTxn(
 	db: Database.Database,
 	input: { handoffId: string; claimedAt: string },

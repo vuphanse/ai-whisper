@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 
-function setup() {
+function setup(workspaceRoot = "/tmp") {
 	const broker = createBrokerRuntime({
 		sqlitePath: ":memory:",
 		host: "127.0.0.1",
@@ -9,7 +13,7 @@ function setup() {
 	});
 	broker.control.startCollab({
 		collabId: "collab_c1",
-		workspaceRoot: "/tmp",
+		workspaceRoot,
 		displayName: "c1",
 		orchestratorEnabled: true,
 		orchestratorMaxRounds: 3,
@@ -33,6 +37,43 @@ function setup() {
 	});
 	return { broker, workflowId };
 }
+
+// Track temp git dirs created for snapshot tests so they can be cleaned up.
+const tempGitDirs: string[] = [];
+
+/** A broker whose collab workspace root is a real temp git repo, so the
+ *  synchronous snapshot capture returns a real commit SHA (non-null). */
+function setupWithGitWorkspace() {
+	const dir = mkdtempSync(join(tmpdir(), "aiw-wf-git-"));
+	tempGitDirs.push(dir);
+	const git = (...args: string[]) =>
+		execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+	git("init", "-q");
+	git("config", "user.email", "t@t");
+	git("config", "user.name", "t");
+	writeFileSync(join(dir, "spec.md"), "v1\n");
+	git("add", ".");
+	git("commit", "-q", "-m", "init");
+	return { ...setup(dir), dir };
+}
+
+/** Flip a workflow to a terminal status the public control API can't reach. */
+function forceStatus(
+	broker: ReturnType<typeof createBrokerRuntime>,
+	workflowId: string,
+	status: string,
+	now: string,
+) {
+	broker.db
+		.prepare("UPDATE workflows SET status = ?, updated_at = ? WHERE workflow_id = ?")
+		.run(status, now, workflowId);
+}
+
+afterEach(() => {
+	while (tempGitDirs.length) {
+		rmSync(tempGitDirs.pop()!, { recursive: true, force: true });
+	}
+});
 
 // helper for tests that need an active phase run
 function setupWithPhase() {
@@ -100,6 +141,73 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 				now: "2026-04-21T00:07:00Z",
 			}),
 		).toThrow(/already (running|active)/);
+	});
+
+	it("pauseWorkflow transitions running → paused, sets pausedAt, emits workflow.paused", () => {
+		const { broker, workflowId } = setup();
+		const paused: unknown[] = [];
+		broker.events.on("workflow.paused", (e) => paused.push(e));
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("paused");
+		expect(wf.workflowContext.pausedAt).toBe("2026-05-27T00:02:00Z");
+		expect(paused).toEqual([{ workflowId }]);
+	});
+
+	it("pauseWorkflow with no in-flight accepted handoff captures pauseSnapshotRef SYNCHRONOUSLY before returning", () => {
+		const { broker, workflowId } = setup(); // workspaceRoot /tmp is not a git repo → ref null but KEY present
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		// No await, no tick: the snapshot must already be persisted the instant pause returns.
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(Object.prototype.hasOwnProperty.call(wf.workflowContext, "pauseSnapshotRef")).toBe(true);
+	});
+
+	it("pause-then-immediate-resume on an already-quiesced workflow has a non-racing baseline", () => {
+		const { broker, workflowId } = setupWithGitWorkspace(); // real git repo → real SHA
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		const ref = (
+			broker.control.getWorkflow(workflowId)!.workflowContext as { pauseSnapshotRef?: string | null }
+		).pauseSnapshotRef;
+		expect(ref).toMatch(/^[0-9a-f]{7,40}$/); // captured, non-null, with zero awaits
+	});
+
+	// Spec §"Error handling": pause on done / canceled / halted / already-paused must
+	// reject with a clear message AND make NO state change.
+	it("pauseWorkflow rejects a halted workflow and leaves it halted", () => {
+		const { broker, workflowId } = setup();
+		broker.control.haltWorkflow({ workflowId, reason: "escalated", now: "2026-05-27T00:01:00Z" });
+		expect(() => broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" }))
+			.toThrow(/only running workflows can be paused/);
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("halted");
+		expect(Object.prototype.hasOwnProperty.call(wf.workflowContext, "pausedAt")).toBe(false);
+	});
+
+	it("pauseWorkflow rejects a canceled workflow and leaves it canceled", () => {
+		const { broker, workflowId } = setup();
+		broker.control.cancelWorkflow({ workflowId, now: "2026-05-27T00:01:00Z" });
+		expect(() => broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" }))
+			.toThrow(/only running workflows can be paused/);
+		expect(broker.control.getWorkflow(workflowId)!.status).toBe("canceled");
+	});
+
+	it("pauseWorkflow rejects a done workflow and leaves it done", () => {
+		const { broker, workflowId } = setup();
+		forceStatus(broker, workflowId, "done", "2026-05-27T00:01:00Z");
+		expect(() => broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" }))
+			.toThrow(/only running workflows can be paused/);
+		expect(broker.control.getWorkflow(workflowId)!.status).toBe("done");
+	});
+
+	it("pauseWorkflow rejects an already-paused workflow and does not re-stamp pausedAt", () => {
+		const { broker, workflowId } = setup();
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		const firstPausedAt = broker.control.getWorkflow(workflowId)!.workflowContext.pausedAt;
+		expect(() => broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:03:00Z" }))
+			.toThrow(/is paused, only running workflows can be paused/);
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("paused");
+		expect(wf.workflowContext.pausedAt).toBe(firstPausedAt);
 	});
 
 	it("createWorkflow rejects a second workflow while the first is paused (active-set guard)", () => {
