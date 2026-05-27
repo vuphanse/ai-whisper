@@ -259,6 +259,70 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		).toThrow(/already active/);
 	});
 
+	it("resume paused diffs the real workspace against pauseSnapshotRef and stores a changed-files notice", () => {
+		const { broker, workflowId, dir } = setupWithGitWorkspace();
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		// real SHA baseline captured synchronously:
+		expect(
+			(broker.control.getWorkflow(workflowId)!.workflowContext as { pauseSnapshotRef?: string })
+				.pauseSnapshotRef,
+		).toMatch(/^[0-9a-f]{7,40}$/);
+		// operator edits a tracked file during the pause:
+		writeFileSync(join(dir, "spec.md"), "v2 — corrected\n");
+		broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z" });
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("running");
+		expect(wf.workflowContext.resumeNotice).toContain("While paused, the operator modified these files:");
+		expect(wf.workflowContext.resumeNotice).toContain("- spec.md");
+		// baseline cleared on resume so a later pause starts fresh:
+		expect(wf.workflowContext.pauseSnapshotRef ?? null).toBeNull();
+	});
+
+	it("resume paused merges changed files AND the operator message into one notice", () => {
+		const { broker, workflowId, dir } = setupWithGitWorkspace();
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		writeFileSync(join(dir, "spec.md"), "v2\n");
+		broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z", message: "see spec" });
+		const notice = broker.control.getWorkflow(workflowId)!.workflowContext.resumeNotice as string;
+		expect(notice).toContain("- spec.md");
+		expect(notice).toContain("Operator note: see spec");
+	});
+
+	it("resume paused → running stores a message-only notice when snapshot was unavailable", () => {
+		const { broker, workflowId } = setup(); // /tmp is not a git repo → pauseSnapshotRef null
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		expect(broker.control.getWorkflow(workflowId)!.workflowContext.pauseSnapshotRef).toBeNull();
+		broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z", message: "re-read the spec" });
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("running");
+		expect(wf.workflowContext.resumeNotice).toContain("Operator note: re-read the spec");
+		expect(wf.workflowContext.resumeNotice).not.toContain("modified these files");
+	});
+
+	it("resume paused with no changes and no message does a plain resume (no notice)", () => {
+		const { broker, workflowId } = setupWithGitWorkspace(); // git repo, but operator changes nothing
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z" });
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("running");
+		expect(wf.workflowContext.resumeNotice ?? null).toBeNull();
+	});
+
+	it("resume rejects a running workflow", () => {
+		const { broker, workflowId } = setup();
+		expect(() => broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z" }))
+			.toThrow(/is running, only paused or halted workflows can be resumed/);
+		expect(broker.control.getWorkflow(workflowId)!.status).toBe("running");
+	});
+
+	it("resume rejects a done workflow", () => {
+		const { broker, workflowId } = setup();
+		forceStatus(broker, workflowId, "done", "2026-05-27T00:01:00Z");
+		expect(() => broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:06:00Z" }))
+			.toThrow(/is done, only paused or halted workflows can be resumed/);
+		expect(broker.control.getWorkflow(workflowId)!.status).toBe("done");
+	});
+
 	it("resumeWorkflow flips halted → running and emits workflow.resumed", () => {
 		const { broker, workflowId } = setup();
 		broker.control.haltWorkflow({

@@ -106,6 +106,31 @@ export function safeDerivePlanPath(specPath: string, createdAt: string): string 
 	}
 }
 
+/**
+ * Compose the one-time resume notice prepended to the next outgoing request when
+ * a paused workflow resumes. Returns `null` when there is nothing to say (no
+ * changed files and no operator message) → a plain resume with no notice.
+ */
+export function composeResumeNotice(input: {
+	changedFiles: string[];
+	message: string | null;
+}): string | null {
+	const hasFiles = input.changedFiles.length > 0;
+	const hasMessage = !!input.message && input.message.trim().length > 0;
+	if (!hasFiles && !hasMessage) return null;
+	const lines: string[] = [];
+	if (hasFiles) {
+		lines.push("While paused, the operator modified these files:");
+		for (const f of input.changedFiles) lines.push(`  - ${f}`);
+		lines.push("Re-read them before continuing.");
+	}
+	if (hasMessage) lines.push(`Operator note: ${input.message!.trim()}`);
+	lines.push(
+		"Re-evaluate whether your current direction still holds; correct course before proceeding.",
+	);
+	return lines.join("\n");
+}
+
 export function createWorkflowControl(deps: WorkflowControlDeps) {
 	const { db, events } = deps;
 
@@ -1192,21 +1217,70 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		maybeCaptureQuiesceSnapshot({ workflowId: input.workflowId, now: input.now });
 	}
 
-	function resumeWorkflow(input: { workflowId: string; now: string }): void {
+	// Existing halted → running resume, extracted VERBATIM so the legacy path is
+	// provably unchanged (regression guard). Only paused resume is new.
+	function resumeHaltedWorkflow(workflow: WorkflowRecord, now: string): void {
+		const tx = db.transaction(() => {
+			const others = listWorkflowsRepo(db, { collabId: workflow.collabId }).filter(
+				(w) =>
+					w.workflowId !== workflow.workflowId &&
+					(w.status === "running" || w.status === "paused"),
+			);
+			if (others.length > 0) {
+				throw new Error(
+					`resumeWorkflow: another workflow is already active on collab ${workflow.collabId}`,
+				);
+			}
+			setWorkflowStatus(db, {
+				workflowId: workflow.workflowId,
+				status: "running",
+				haltReason: null,
+				now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.resumed", {
+			workflowId: workflow.workflowId,
+			phaseIndex: workflow.currentPhaseIndex,
+		});
+	}
+
+	function resumeWorkflow(input: {
+		workflowId: string;
+		now: string;
+		message?: string;
+	}): void {
 		const workflow = getWorkflowById(db, input.workflowId);
 		if (!workflow) {
 			throw new Error(`resumeWorkflow: unknown workflowId ${input.workflowId}`);
 		}
-		if (workflow.status === "canceled") {
+		if (workflow.status === "halted") {
+			resumeHaltedWorkflow(workflow, input.now); // unchanged path
+			return;
+		}
+		if (workflow.status !== "paused") {
 			throw new Error(
-				`resumeWorkflow: workflow ${input.workflowId} is canceled and cannot be resumed`,
+				`resumeWorkflow: workflow ${input.workflowId} is ${workflow.status}, only paused or halted workflows can be resumed`,
 			);
 		}
-		if (workflow.status !== "halted") {
-			throw new Error(
-				`resumeWorkflow: workflow ${input.workflowId} is not halted (status=${workflow.status})`,
-			);
-		}
+
+		// ── paused → running ──────────────────────────────────────────────────
+		// Diff the workspace against the quiesce-boundary baseline; because the
+		// baseline post-dates the last agent write (§3/§4), every change is the
+		// operator's. A null ref (snapshot unavailable, or resumed before quiesce)
+		// yields an empty changed-file set → message-only notice.
+		const ref =
+			(workflow.workflowContext as { pauseSnapshotRef?: string | null })
+				.pauseSnapshotRef ?? null;
+		const changedFiles =
+			ref && deps.diffChangedFilesSinceSnapshot
+				? deps.diffChangedFilesSinceSnapshot(input.workflowId, ref)
+				: [];
+		const notice = composeResumeNotice({
+			changedFiles,
+			message: input.message ?? null,
+		});
 
 		const tx = db.transaction(() => {
 			const others = listWorkflowsRepo(db, { collabId: workflow.collabId }).filter(
@@ -1223,6 +1297,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 				workflowId: input.workflowId,
 				status: "running",
 				haltReason: null,
+				now: input.now,
+			});
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: { resumeNotice: notice, pausedAt: null, pauseSnapshotRef: null },
 				now: input.now,
 			});
 		});
