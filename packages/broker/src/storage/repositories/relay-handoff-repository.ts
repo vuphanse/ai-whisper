@@ -516,9 +516,11 @@ export function listRelayHandoffsPendingOrchestration(
 			        c.orchestrator_max_rounds AS max_rounds
 			 FROM relay_handoff h
 			 JOIN collab c ON c.collab_id = h.collab_id
+			 LEFT JOIN workflows w ON w.workflow_id = h.workflow_id
 			 WHERE h.collab_id = ?
 			   AND h.status = 'handed_back'
-			   AND h.orchestrator_status = 'idle'`,
+			   AND h.orchestrator_status = 'idle'
+			   AND (w.status IS NULL OR w.status <> 'paused')`,
 		)
 		.all(collabId) as Array<{
 		handoff_id: string;

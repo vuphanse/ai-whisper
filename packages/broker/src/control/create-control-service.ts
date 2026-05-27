@@ -184,7 +184,19 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return root ? diffChangedFilesSince(root, sinceRef) : [];
 		},
 	});
+
+	// The single delivery chokepoint: true when a handoff belongs to a paused
+	// workflow. Legacy / non-workflow handoffs are never suspended (keep flowing
+	// exactly as today). Defined as a local const so the claim/accept wrappers and
+	// the exported method share one implementation without `this`-binding fragility.
+	const isWorkflowDeliverySuspended = (handoffId: string): boolean => {
+		const meta = workflowControl.getHandoffWithWorkflowMeta(handoffId);
+		if (!meta?.workflowId) return false;
+		return workflowControl.getWorkflow(meta.workflowId)?.status === "paused";
+	};
+
 	return Object.assign({
+		isWorkflowDeliverySuspended,
 		startCollab(input: {
 			collabId: string;
 			workspaceRoot: string;
