@@ -52,6 +52,55 @@ describe("mounted turn-owned relay", () => {
 		expect(openComposer).not.toHaveBeenCalled();
 	});
 
+	it("does NOT inject a pending handoff while its workflow is paused (delivery suspended)", async () => {
+		const injected: string[] = [];
+		const acceptRelayHandoff = vi.fn();
+		const broker = {
+			control: {
+				getRelayTurnState: vi.fn(() => ({
+					collabId: "collab_turn",
+					turnOwner: "claude" as const,
+					waitingAgent: "codex" as const,
+					unresolvedHandoffId: "handoff_1",
+					handoffState: "pending" as const,
+					handoffAgeMs: 1_000,
+				})),
+				getRelayHandoff: vi.fn(() => ({
+					handoffId: "handoff_1",
+					collabId: "collab_turn",
+					senderAgent: "codex" as const,
+					targetAgent: "claude" as const,
+					requestText: "Implement the approved plan",
+					status: "pending" as const,
+				})),
+				acceptRelayHandoff,
+				declineRelayHandoff: vi.fn(),
+				deferRelayHandoff: vi.fn(),
+				// The owning workflow is paused → delivery suspended.
+				isWorkflowDeliverySuspended: vi.fn(() => true),
+			},
+		};
+
+		const relay = createMountedTurnOwnedRelay({
+			broker,
+			collabId: "collab_turn",
+			currentAgent: "claude",
+			writeLocalMessage: () => {},
+			writeUserInput: (text: string) => { injected.push(text); },
+			openComposer: vi.fn(),
+		});
+
+		await relay.acceptPendingHandoff();
+		// No text injected into the agent, and the broker accept is not even reached.
+		expect(injected).toEqual([]);
+		expect(acceptRelayHandoff).not.toHaveBeenCalled();
+
+		// checkIdleActions must likewise not auto-accept while paused.
+		await relay.checkIdleActions();
+		expect(injected).toEqual([]);
+		expect(acceptRelayHandoff).not.toHaveBeenCalled();
+	});
+
 	it("renders pending handoff cards with distinct multiline local styling", () => {
 		const writes: string[] = [];
 		const broker = {

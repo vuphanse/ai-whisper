@@ -365,6 +365,61 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		).toBeNull();
 	});
 
+	it("resume bakes the notice into a handoff already pending accept (consumed, not left on context)", () => {
+		const { broker, workflowId, handoffId } = setupWithPhase(); // initial handoff is 'pending'
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		broker.control.resumeWorkflow({
+			workflowId,
+			now: "2026-05-27T00:03:00Z",
+			message: "re-read spec.md",
+		});
+		// The pending request the mount will inject raw must already carry the notice.
+		const pending = broker.control.getRelayHandoff(handoffId)!;
+		expect(pending.status).toBe("pending");
+		expect(pending.requestText).toContain("Operator note: re-read spec.md");
+		expect(pending.requestText).toContain("Review the spec at docs/spec.md."); // original preserved after notice
+		// Consumed into the pending handoff → NOT left on the context (no double-delivery).
+		expect(broker.control.getWorkflow(workflowId)!.workflowContext.resumeNotice ?? null).toBeNull();
+	});
+
+	it("resume releases a handback the orchestrator claimed-but-could-not-evaluate while paused", () => {
+		const { broker, workflowId, handoffId } = setupWithPhase();
+		broker.control.acceptRelayHandoff({ handoffId, acceptedAt: "2026-05-27T00:01:00Z" });
+		broker.control.handoffBackRelay({
+			handoffId,
+			nextHandoffId: "ho_hb2",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "reviewed",
+			now: "2026-05-27T00:01:30Z",
+		});
+		// Orchestrator claims it (workflow still running) → orchestrator_status='pending'.
+		expect(
+			broker.control.claimRelayHandoffForOrchestration({ handoffId, claimedAt: "2026-05-27T00:01:45Z" }),
+		).not.toBeNull();
+		// Pause lands before the verdict is applied.
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		// Applying the verdict while paused throws (workflow not running) → handoff stranded.
+		expect(() =>
+			broker.control.applyOrchestratorVerdict({
+				handoffId,
+				verdict: "findings",
+				confidence: 1,
+				reason: "x",
+				now: "2026-05-27T00:02:30Z",
+			}),
+		).toThrow();
+		// While paused it is excluded from the pending list (delivery suspended).
+		expect(
+			broker.control.listRelayHandoffsPendingOrchestration("collab_c1").map((h) => h.handoffId),
+		).not.toContain(handoffId);
+		// Resume releases the stranded claim back to idle so the orchestrator re-lists it.
+		broker.control.resumeWorkflow({ workflowId, now: "2026-05-27T00:03:00Z" });
+		expect(
+			broker.control.listRelayHandoffsPendingOrchestration("collab_c1").map((h) => h.handoffId),
+		).toContain(handoffId);
+	});
+
 	it("resumeWorkflow flips halted → running and emits workflow.resumed", () => {
 		const { broker, workflowId } = setup();
 		broker.control.haltWorkflow({

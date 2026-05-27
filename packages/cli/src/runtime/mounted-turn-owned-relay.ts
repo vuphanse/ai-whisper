@@ -58,6 +58,7 @@ type BrokerLike = {
 		getWorkflow?(id: string): { status: string } | null;
 		getRelayChain?(id: string): { status: string } | null;
 		applyOrchestratorVerdict?(input: { handoffId: string; verdict: string; confidence: number; reason: string; now: string }): void;
+		isWorkflowDeliverySuspended?(handoffId: string): boolean;
 	};
 };
 
@@ -304,6 +305,15 @@ export function createMountedTurnOwnedRelay(input: {
 		if (!handoff) return null;
 		if (handoff.status !== "pending" && handoff.status !== "deferred") return null;
 		if (handoff.targetAgent !== input.currentAgent) return null;
+		// Workflow-pause delivery gate: while the owning workflow is paused, the broker
+		// suspends delivery. The mount must not surface (and therefore must not inject)
+		// a paused workflow's pending request — the broker-side acceptRelayHandoff gate
+		// alone is too late, since the mount injects the request text before calling it.
+		// Auto-handback (getAcceptedHandoff) is intentionally NOT gated: recording an
+		// in-flight handback while paused is allowed and drives the quiesce boundary.
+		if (input.broker.control.isWorkflowDeliverySuspended?.(handoff.handoffId)) {
+			return null;
+		}
 		return handoff;
 	}
 

@@ -130,7 +130,17 @@ describe("whisper workflow commands", () => {
 		});
 		const wf = broker.control.getWorkflow(workflowId)!;
 		expect(wf.status).toBe("running");
-		expect(wf.workflowContext.resumeNotice).toContain("Operator note: re-read the spec");
+		// The CLI forwarded --message; the broker delivered it via whichever path applies.
+		// This fresh workflow has a pending kickoff handoff, so the notice is baked into
+		// that handoff's request text (consumed off the context). Either way, the operator
+		// note must be present in a deliverable surface for this workflow.
+		const noticeOnContext = (wf.workflowContext as { resumeNotice?: string | null }).resumeNotice ?? "";
+		const bakedHandoff = broker.db
+			.prepare(
+				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? AND request_text LIKE '%Operator note: re-read the spec%' LIMIT 1",
+			)
+			.get(workflowId) as { request_text: string } | undefined;
+		expect(noticeOnContext.includes("Operator note: re-read the spec") || !!bakedHandoff).toBe(true);
 		// Drain the workflow.resumed driver kickoff (a no-op given the open phase run)
 		// before closing the db, so its setImmediate doesn't fire post-stop.
 		await new Promise((r) => setImmediate(r));

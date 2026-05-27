@@ -33,6 +33,8 @@ import {
 	updateEvaluatorBookkeeping,
 	structuredVerdictToLegacy,
 	hasInFlightAcceptedHandoffForWorkflow,
+	resetStrandedOrchestrationForWorkflow,
+	prependToPendingHandoffRequestText,
 } from "../storage/repositories/relay-handoff-repository.js";
 import { upsertRelayTurnState } from "../storage/repositories/relay-turn-state-repository.js";
 import {
@@ -1321,6 +1323,24 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 					`resumeWorkflow: another workflow is already active on collab ${workflow.collabId}`,
 				);
 			}
+			// Release any handback the orchestrator claimed but couldn't evaluate because
+			// the pause landed mid-evaluation — otherwise it stays orchestrator_status=
+			// 'pending' and the pending list (idle-only) never picks it back up on resume.
+			resetStrandedOrchestrationForWorkflow(db, input.workflowId);
+
+			// Resume-notice delivery (spec §5): if a handoff is ALREADY pending accept
+			// (the mount injects its stored request text raw), bake the notice into that
+			// request now and treat the notice as consumed. Otherwise leave it on the
+			// context for the next orchestrator-created handoff to consume.
+			let bakedIntoPending = false;
+			if (notice) {
+				bakedIntoPending = prependToPendingHandoffRequestText(db, {
+					workflowId: input.workflowId,
+					prefix: notice,
+					now: input.now,
+				});
+			}
+
 			setWorkflowStatus(db, {
 				workflowId: input.workflowId,
 				status: "running",
@@ -1329,7 +1349,11 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			});
 			updateWorkflowContext(db, {
 				workflowId: input.workflowId,
-				patch: { resumeNotice: notice, pausedAt: null, pauseSnapshotRef: null },
+				patch: {
+					resumeNotice: bakedIntoPending ? null : notice,
+					pausedAt: null,
+					pauseSnapshotRef: null,
+				},
 				now: input.now,
 			});
 		});
