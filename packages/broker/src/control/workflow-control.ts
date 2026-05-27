@@ -6,7 +6,7 @@ import {
 	insertWorkflow,
 	getWorkflowById,
 	listWorkflows as listWorkflowsRepo,
-	countRunningWorkflowsForCollab,
+	countActiveWorkflowsForCollab,
 	updateWorkflowContext,
 	setWorkflowStatus,
 	incrementCurrentPhaseIndex,
@@ -139,9 +139,13 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		const workflowId = `wf_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
 		const tx = db.transaction(() => {
-			if (countRunningWorkflowsForCollab(db, input.collabId) > 0) {
+			if (countActiveWorkflowsForCollab(db, input.collabId) > 0) {
+				const active = listWorkflowsRepo(db, { collabId: input.collabId }).find(
+					(w) => w.status === "running" || w.status === "paused",
+				);
 				throw new Error(
-					`another workflow is already running on this collab (${input.collabId})`,
+					`another workflow is already active on this collab (${input.collabId})` +
+						(active ? `: ${active.workflowId} (${active.status})` : ""),
 				);
 			}
 			insertWorkflow(db, {
@@ -1140,9 +1144,14 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		}
 
 		const tx = db.transaction(() => {
-			if (countRunningWorkflowsForCollab(db, workflow.collabId) > 0) {
+			const others = listWorkflowsRepo(db, { collabId: workflow.collabId }).filter(
+				(w) =>
+					w.workflowId !== input.workflowId &&
+					(w.status === "running" || w.status === "paused"),
+			);
+			if (others.length > 0) {
 				throw new Error(
-					`resumeWorkflow: another workflow is already running on collab ${workflow.collabId}`,
+					`resumeWorkflow: another workflow is already active on collab ${workflow.collabId}`,
 				);
 			}
 			setWorkflowStatus(db, {

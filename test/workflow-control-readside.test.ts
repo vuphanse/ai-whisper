@@ -110,7 +110,7 @@ describe("workflow-control (read + create)", () => {
 				roleBindings: { implementer: "claude", reviewer: "codex" },
 				now: "2026-04-21T00:00:01Z",
 			}),
-		).toThrow(/already running/);
+		).toThrow(/already (running|active)/);
 	});
 
 	it("getRelayChain returns null for unknown chain", () => {

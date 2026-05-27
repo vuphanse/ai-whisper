@@ -99,7 +99,25 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 				workflowId,
 				now: "2026-04-21T00:07:00Z",
 			}),
-		).toThrow(/already running/);
+		).toThrow(/already (running|active)/);
+	});
+
+	it("createWorkflow rejects a second workflow while the first is paused (active-set guard)", () => {
+		const { broker, workflowId } = setup();
+		// Flip the existing workflow to paused directly (pauseWorkflow lands in a later task);
+		// the active-set guard must still count it as occupying the collab slot.
+		broker.db
+			.prepare("UPDATE workflows SET status = 'paused' WHERE workflow_id = ?")
+			.run(workflowId);
+		expect(() =>
+			broker.control.createWorkflow({
+				collabId: "collab_c1",
+				workflowType: "spec-driven-development",
+				specPath: "docs/spec2.md",
+				roleBindings: { implementer: "claude", reviewer: "codex" },
+				now: "2026-05-27T00:03:00Z",
+			}),
+		).toThrow(/already active/);
 	});
 
 	it("resumeWorkflow flips halted → running and emits workflow.resumed", () => {
