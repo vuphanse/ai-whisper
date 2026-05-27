@@ -5,6 +5,7 @@ import {
 	listWorkflowTypes,
 	renderTemplate,
 	SPEC_DRIVEN_DEVELOPMENT,
+	WORKFLOW_OPERATOR_CONTROL,
 } from "../packages/broker/src/runtime/workflow-registry.ts";
 
 describe("workflow-registry", () => {
@@ -90,5 +91,24 @@ describe("derivePlanPath", () => {
 		expect(() =>
 			derivePlanPath("docs/superpowers/specs/foo-design.md", "not-a-date"),
 		).toThrow(/must start with YYYY-MM-DD/);
+	});
+
+	it("WORKFLOW_OPERATOR_CONTROL carries the CLI pause instruction and the Codex Ctrl+C gotcha", () => {
+		expect(WORKFLOW_OPERATOR_CONTROL).toContain("whisper workflow pause");
+		expect(WORKFLOW_OPERATOR_CONTROL).toContain("whisper workflow list");
+		expect(WORKFLOW_OPERATOR_CONTROL).toMatch(/Ctrl\+C/);
+		expect(WORKFLOW_OPERATOR_CONTROL).toMatch(/idle prompt/i);
+	});
+
+	it("every workflow's kickoff templates embed the operator-control fragment", () => {
+		for (const type of listWorkflowTypes()) {
+			const def = getWorkflowDefinition(type)!;
+			for (const phase of def.phases) {
+				expect(
+					phase.kickoffTemplate.includes("whisper workflow pause"),
+					`${type}/${phase.name} kickoffTemplate missing operator-control fragment`,
+				).toBe(true);
+			}
+		}
 	});
 });
