@@ -323,6 +323,48 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		expect(broker.control.getWorkflow(workflowId)!.status).toBe("done");
 	});
 
+	it("resume notice is prepended to the next orchestrator-created handoff exactly once, then cleared", () => {
+		const { broker, workflowId, handoffId } = setupWithPhase();
+		broker.control.acceptRelayHandoff({ handoffId, acceptedAt: "2026-05-27T00:01:30Z" });
+		broker.control.handoffBackRelay({
+			handoffId,
+			nextHandoffId: "ho_hb",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "reviewed",
+			now: "2026-05-27T00:02:00Z",
+		});
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:30Z" });
+		broker.control.resumeWorkflow({
+			workflowId,
+			now: "2026-05-27T00:03:00Z",
+			message: "re-read spec.md",
+		});
+		expect(broker.control.getWorkflow(workflowId)!.workflowContext.resumeNotice).toContain(
+			"Operator note: re-read spec.md",
+		);
+
+		// The orchestrator now evaluates the deferred handback and creates the next
+		// (fix) handoff — the real delivery surface. Its request text must carry the notice.
+		const result = broker.control.applyOrchestratorVerdict({
+			handoffId,
+			verdict: "findings",
+			confidence: 1,
+			reason: "address these",
+			followUpMessage: "fix the thing",
+			now: "2026-05-27T00:03:30Z",
+		});
+		const next = broker.control.getRelayHandoff(result.nextHandoffId!)!;
+		expect(next.requestText).toContain("Operator note: re-read spec.md");
+		expect(next.requestText).toContain("fix the thing"); // original request preserved after the notice
+
+		// Consumed once → cleared; a second consume yields null.
+		expect(broker.control.getWorkflow(workflowId)!.workflowContext.resumeNotice ?? null).toBeNull();
+		expect(
+			broker.control.consumeResumeNotice({ workflowId, now: "2026-05-27T00:04:00Z" }),
+		).toBeNull();
+	});
+
 	it("resumeWorkflow flips halted → running and emits workflow.resumed", () => {
 		const { broker, workflowId } = setup();
 		broker.control.haltWorkflow({

@@ -431,6 +431,30 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 	}
 
+	/**
+	 * Reads and atomically clears the one-time resume notice for a workflow.
+	 * Returns the notice (to prepend to the next outgoing request) or null.
+	 */
+	function consumeResumeNotice(input: { workflowId: string; now: string }): string | null {
+		const wf = getWorkflowById(db, input.workflowId);
+		const notice =
+			(wf?.workflowContext as { resumeNotice?: string | null })?.resumeNotice ?? null;
+		if (notice) {
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: { resumeNotice: null },
+				now: input.now,
+			});
+		}
+		return notice;
+	}
+
+	/** Prepend a pending resume notice to an outgoing request text, consuming it once. */
+	function withResumeNotice(workflowId: string, requestText: string, now: string): string {
+		const notice = consumeResumeNotice({ workflowId, now });
+		return notice ? `${notice}\n\n${requestText}` : requestText;
+	}
+
 	function createContinuationHandoff(input: {
 		workflow: WorkflowRecord;
 		chain: RelayChainRecord;
@@ -448,7 +472,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			collabId: input.workflow.collabId,
 			senderAgent: input.sender,
 			targetAgent: input.target,
-			requestText: input.requestText,
+			// Prepend the one-time resume notice (if any) to the FIRST outgoing request
+			// after a resume, then it is cleared — so the agent re-reads changed files.
+			requestText: withResumeNotice(input.workflow.workflowId, input.requestText, input.now),
 			chainId: input.chain.chainId,
 			roundNumber: input.incrementRound
 				? input.chain.currentRound + 1
@@ -532,7 +558,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			collabId: input.workflow.collabId,
 			senderAgent: sender,
 			targetAgent: target,
-			requestText: kickoffText,
+			// Prepend a pending resume notice (consumed once) so a phase-advance kickoff
+			// after a resume also carries the operator's change notice.
+			requestText: withResumeNotice(input.workflow.workflowId, kickoffText, input.now),
 			chainId,
 			roundNumber: 1,
 			maxRounds: phase.maxRounds,
@@ -1440,6 +1468,7 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		haltWorkflow,
 		pauseWorkflow,
 		maybeCaptureQuiesceSnapshot,
+		consumeResumeNotice,
 		resumeWorkflow,
 		cancelWorkflow,
 		getHandoffWithWorkflowMeta,
