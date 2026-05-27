@@ -210,6 +210,37 @@ describe("workflow lifecycle (halt/resume/cancel)", () => {
 		expect(wf.workflowContext.pausedAt).toBe(firstPausedAt);
 	});
 
+	it("pause during an in-flight turn defers the snapshot; recording the handback reaches the boundary and captures it", () => {
+		const { broker, workflowId, handoffId } = setupWithPhase();
+		// Accept the handoff → an agent is mid-turn (status 'accepted').
+		broker.control.acceptRelayHandoff({ handoffId, acceptedAt: "2026-05-27T00:01:30Z" });
+		// Pause while in flight: snapshot must NOT be captured yet (no quiesce boundary).
+		broker.control.pauseWorkflow({ workflowId, now: "2026-05-27T00:02:00Z" });
+		expect(
+			Object.prototype.hasOwnProperty.call(
+				broker.control.getWorkflow(workflowId)!.workflowContext,
+				"pauseSnapshotRef",
+			),
+		).toBe(false);
+		// The in-flight handback must still be RECORDED (not refused) even while paused.
+		broker.control.handoffBackRelay({
+			handoffId,
+			nextHandoffId: "ho_next_x",
+			senderAgent: "codex",
+			targetAgent: "claude",
+			requestText: "done with the turn",
+			now: "2026-05-27T00:03:00Z",
+		});
+		expect(broker.control.getRelayHandoff(handoffId)!.status).toBe("handed_back");
+		// Boundary reached → snapshot key now present (ref null under /tmp, but evaluated).
+		expect(
+			Object.prototype.hasOwnProperty.call(
+				broker.control.getWorkflow(workflowId)!.workflowContext,
+				"pauseSnapshotRef",
+			),
+		).toBe(true);
+	});
+
 	it("createWorkflow rejects a second workflow while the first is paused (active-set guard)", () => {
 		const { broker, workflowId } = setup();
 		// Flip the existing workflow to paused directly (pauseWorkflow lands in a later task);

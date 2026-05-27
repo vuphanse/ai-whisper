@@ -1161,7 +1161,18 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 			now: string;
 		}) {
-			return handoffBackRelayTxn(db, input);
+			// Recording ALWAYS proceeds (spec §3): an in-flight turn's handback must be
+			// persisted even while paused so the workflow can reach the quiesce boundary.
+			const result = handoffBackRelayTxn(db, input);
+			// If this completed the last in-flight turn of a paused workflow, we are now
+			// at the quiesce boundary → capture the snapshot synchronously (durable before
+			// return, so a resume right after still sees the ref). Orchestration of this
+			// handback stays deferred because the pending list excludes paused workflows.
+			const meta = workflowControl.getHandoffWithWorkflowMeta(input.handoffId);
+			if (meta?.workflowId && workflowControl.getWorkflow(meta.workflowId)?.status === "paused") {
+				workflowControl.maybeCaptureQuiesceSnapshot({ workflowId: meta.workflowId, now: input.now });
+			}
+			return result;
 		},
 		failRelayHandoffOnDisconnect(input: { handoffId: string; now: string }) {
 			return failRelayHandoffOnDisconnectTxn(db, input);
