@@ -226,8 +226,9 @@ CREATE TABLE IF NOT EXISTS workflows (
   updated_at TEXT NOT NULL
 );
 
+DROP INDEX IF EXISTS workflows_one_running_per_collab;
 CREATE UNIQUE INDEX IF NOT EXISTS workflows_one_running_per_collab
-  ON workflows(collab_id) WHERE status = 'running';
+  ON workflows(collab_id) WHERE status IN ('running', 'paused');
 
 CREATE TABLE IF NOT EXISTS workflow_phases (
   phase_run_id TEXT PRIMARY KEY,
