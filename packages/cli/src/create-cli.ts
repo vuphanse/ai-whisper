@@ -502,7 +502,7 @@ export function createCli(): Command {
 						broker,
 						workflowId,
 						now: new Date().toISOString(),
-						message: opts.message,
+						...(opts.message !== undefined ? { message: opts.message } : {}),
 					});
 					console.log(`Workflow resumed: ${workflowId}`);
 				} finally {

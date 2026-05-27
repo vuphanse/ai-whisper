@@ -1,4 +1,4 @@
-export type WorkflowStatus = "running" | "halted" | "done" | "canceled";
+export type WorkflowStatus = "running" | "paused" | "halted" | "done" | "canceled";
 
 export type WorkflowRecord = {
 	workflowId: string;

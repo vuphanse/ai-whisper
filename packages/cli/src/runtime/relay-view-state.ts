@@ -141,7 +141,7 @@ export type RelayViewSnapshot = {
 		workflowId: string;
 		workflowType: string;
 		name: string | null;
-		status: "running" | "done" | "halted" | "canceled";
+		status: "running" | "paused" | "done" | "halted" | "canceled";
 		createdAt: string;
 		haltReason?: string | null;
 	} | null;
