@@ -98,4 +98,33 @@ describe("workflow pause delivery gate", () => {
 		const c2 = broker.control.listRelayHandoffsPendingOrchestration("collab_c2").map((h) => h.handoffId);
 		expect(c2).not.toContain("ho_paused");
 	});
+
+	it("claimRelayHandoffForOrchestration refuses (null) a paused workflow's handoff, claims a running one", () => {
+		const broker = makeRuntime();
+		seedCollab(broker, "collab_c1");
+		seedCollab(broker, "collab_c2");
+		seedWorkflow(broker, "wf_run", "collab_c1", "running");
+		seedWorkflow(broker, "wf_pause", "collab_c2", "paused");
+		seedHandoff(broker, "ho_running", "collab_c1", { status: "handed_back", workflowId: "wf_run" });
+		seedHandoff(broker, "ho_paused", "collab_c2", { status: "handed_back", workflowId: "wf_pause" });
+
+		expect(broker.control.claimRelayHandoffForOrchestration({ handoffId: "ho_paused", claimedAt: NOW })).toBeNull();
+		expect(broker.control.claimRelayHandoffForOrchestration({ handoffId: "ho_running", claimedAt: NOW })).not.toBeNull();
+	});
+
+	it("acceptRelayHandoff refuses to deliver a paused workflow's pending handoff, accepts a running one", () => {
+		const broker = makeRuntime();
+		seedCollab(broker, "collab_c1");
+		seedCollab(broker, "collab_c2");
+		seedWorkflow(broker, "wf_run", "collab_c1", "running");
+		seedWorkflow(broker, "wf_pause", "collab_c2", "paused");
+		seedHandoff(broker, "ho_paused_pending", "collab_c2", { status: "pending", workflowId: "wf_pause" });
+		seedHandoff(broker, "ho_running_pending", "collab_c1", { status: "pending", workflowId: "wf_run" });
+
+		broker.control.acceptRelayHandoff({ handoffId: "ho_paused_pending", acceptedAt: NOW });
+		expect(broker.control.getRelayHandoff("ho_paused_pending")!.status).toBe("pending"); // unchanged
+
+		broker.control.acceptRelayHandoff({ handoffId: "ho_running_pending", acceptedAt: NOW });
+		expect(broker.control.getRelayHandoff("ho_running_pending")!.status).toBe("accepted");
+	});
 });

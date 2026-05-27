@@ -1140,6 +1140,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return createRelayHandoffTxn(db, input);
 		},
 		acceptRelayHandoff(input: { handoffId: string; acceptedAt: string }) {
+			if (isWorkflowDeliverySuspended(input.handoffId)) return; // refuse delivery while paused
 			return acceptRelayHandoffTxn(db, input);
 		},
 		deferRelayHandoff(input: { handoffId: string; deferredAt: string }) {
@@ -1172,6 +1173,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return queryLatestHandedBackHandoff(db, collabId);
 		},
 		claimRelayHandoffForOrchestration(input: { handoffId: string; claimedAt: string }) {
+			// Re-check inside the wrapper so the list→claim race is closed even if a
+			// workflow is paused between the orchestrator's list and its claim.
+			if (isWorkflowDeliverySuspended(input.handoffId)) return null;
 			return claimRelayHandoffForOrchestrationTxn(db, input);
 		},
 		listRelayHandoffsPendingOrchestration(collabId: string) {
