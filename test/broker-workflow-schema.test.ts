@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBrokerRuntime } from "../packages/broker/src/index.ts";
+import { applyMigrations } from "../packages/broker/src/storage/apply-migrations.ts";
 
 describe("workflow schema migrations", () => {
 	it("creates workflows, workflow_phases, relay_chains tables", () => {
@@ -46,6 +47,35 @@ describe("workflow schema migrations", () => {
 				 VALUES ('wf_2', 'c1', 't', NULL, '/s', '{}', 'running', 0, NULL, '{}', '2026-04-21T00:00:00Z', '2026-04-21T00:00:00Z')`,
 			).run(),
 		).toThrow(/UNIQUE/);
+	});
+
+	it("widened unique index forbids a second active workflow when one is paused, and is idempotent", () => {
+		const broker = createBrokerRuntime({
+			sqlitePath: ":memory:",
+			host: "127.0.0.1",
+			port: 4321,
+		});
+		const db = broker.db;
+		const now = "2026-05-27T00:00:00Z";
+		db.prepare(
+			`INSERT INTO collab (collab_id, workspace_root, display_name, status, created_at, updated_at)
+			 VALUES ('c1', '/tmp', 'c1', 'active', ?, ?)`,
+		).run(now, now);
+		const ins = (id: string, status: string) =>
+			db.prepare(
+				`INSERT INTO workflows (workflow_id, collab_id, workflow_type, name, spec_path,
+				 role_bindings, status, current_phase_index, halt_reason, workflow_context, created_at, updated_at)
+				 VALUES (?, 'c1', 'spec-driven-development', NULL, 's.md', '{}', ?, 0, NULL, '{}', ?, ?)`,
+			).run(id, status, now, now);
+
+		ins("wf_paused", "paused");
+		expect(() => ins("wf_running", "running")).toThrow(/UNIQUE/i);
+
+		// Idempotent re-run must not throw even though a paused workflow already exists.
+		expect(() => applyMigrations(db)).not.toThrow();
+		// A done workflow does NOT occupy the slot.
+		ins("wf_done", "done");
+		expect(db.prepare("SELECT COUNT(*) AS n FROM workflows WHERE collab_id='c1'").get()).toEqual({ n: 2 });
 	});
 
 	it("adds evaluator bookkeeping columns to relay_handoff", () => {

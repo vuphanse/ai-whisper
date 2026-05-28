@@ -64,7 +64,7 @@ export type WorkflowHistoryItem = {
 	workflowId: string;
 	workflowType: string;
 	name: string | null;
-	status: "running" | "done" | "halted" | "canceled";
+	status: "running" | "paused" | "done" | "halted" | "canceled";
 	currentPhaseIndex: number;
 	createdAt: string;
 	selected: boolean;

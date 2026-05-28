@@ -471,6 +471,69 @@ export function failRelayHandoffOnDisconnectTxn(
 	})();
 }
 
+/** True when the workflow has an accepted-but-not-yet-handed-back handoff (an agent is mid-turn). */
+export function hasInFlightAcceptedHandoffForWorkflow(
+	db: Database.Database,
+	workflowId: string,
+): boolean {
+	const row = db
+		.prepare(
+			"SELECT COUNT(*) AS n FROM relay_handoff WHERE workflow_id = ? AND status = 'accepted'",
+		)
+		.get(workflowId) as { n: number };
+	return row.n > 0;
+}
+
+/**
+ * Release handoffs that the orchestrator CLAIMED but could not evaluate because a
+ * pause landed mid-evaluation (so `applyOrchestratorVerdict` threw "not running"
+ * and left them `orchestrator_status='pending'` with no verdict). Resetting them
+ * to `'idle'` lets the pending-orchestration list pick them up again on resume —
+ * otherwise the handback would be stranded. Returns the number released.
+ */
+export function resetStrandedOrchestrationForWorkflow(
+	db: Database.Database,
+	workflowId: string,
+): number {
+	const result = db
+		.prepare(
+			`UPDATE relay_handoff
+			    SET orchestrator_status = 'idle', orchestrator_claimed_at = NULL
+			  WHERE workflow_id = ?
+			    AND status = 'handed_back'
+			    AND orchestrator_status = 'pending'
+			    AND evaluator_verdict IS NULL`,
+		)
+		.run(workflowId);
+	return result.changes;
+}
+
+/**
+ * Prepend `prefix` to the request text of a workflow's not-yet-accepted (`pending`)
+ * handoff, if one exists — covering the spec's "a handoff already pending accept"
+ * resume-notice case (the mount injects this stored request text raw, so the notice
+ * must already be baked in). Returns true when a pending handoff was updated.
+ */
+export function prependToPendingHandoffRequestText(
+	db: Database.Database,
+	input: { workflowId: string; prefix: string; now: string },
+): boolean {
+	const row = db
+		.prepare(
+			`SELECT handoff_id, request_text FROM relay_handoff
+			  WHERE workflow_id = ? AND status = 'pending'
+			  ORDER BY created_at DESC LIMIT 1`,
+		)
+		.get(input.workflowId) as
+		| { handoff_id: string; request_text: string }
+		| undefined;
+	if (!row) return false;
+	db.prepare(
+		"UPDATE relay_handoff SET request_text = ?, last_activity_at = ? WHERE handoff_id = ?",
+	).run(`${input.prefix}\n\n${row.request_text}`, input.now, row.handoff_id);
+	return true;
+}
+
 export function claimRelayHandoffForOrchestrationTxn(
 	db: Database.Database,
 	input: { handoffId: string; claimedAt: string },
@@ -503,9 +566,11 @@ export function listRelayHandoffsPendingOrchestration(
 			        c.orchestrator_max_rounds AS max_rounds
 			 FROM relay_handoff h
 			 JOIN collab c ON c.collab_id = h.collab_id
+			 LEFT JOIN workflows w ON w.workflow_id = h.workflow_id
 			 WHERE h.collab_id = ?
 			   AND h.status = 'handed_back'
-			   AND h.orchestrator_status = 'idle'`,
+			   AND h.orchestrator_status = 'idle'
+			   AND (w.status IS NULL OR w.status <> 'paused')`,
 		)
 		.all(collabId) as Array<{
 		handoff_id: string;

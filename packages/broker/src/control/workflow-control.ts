@@ -6,7 +6,7 @@ import {
 	insertWorkflow,
 	getWorkflowById,
 	listWorkflows as listWorkflowsRepo,
-	countRunningWorkflowsForCollab,
+	countActiveWorkflowsForCollab,
 	updateWorkflowContext,
 	setWorkflowStatus,
 	incrementCurrentPhaseIndex,
@@ -32,6 +32,9 @@ import {
 	getHandoffWithWorkflowMetaById,
 	updateEvaluatorBookkeeping,
 	structuredVerdictToLegacy,
+	hasInFlightAcceptedHandoffForWorkflow,
+	resetStrandedOrchestrationForWorkflow,
+	prependToPendingHandoffRequestText,
 } from "../storage/repositories/relay-handoff-repository.js";
 import { upsertRelayTurnState } from "../storage/repositories/relay-turn-state-repository.js";
 import {
@@ -55,6 +58,13 @@ import type {
 export interface WorkflowControlDeps {
 	db: Database.Database;
 	events: BrokerEventBus;
+	/** Captures a workspace snapshot ref for the given workflow, or null when unavailable.
+	 *  SYNCHRONOUS by contract — supplied by the broker runtime, which resolves the
+	 *  workflow's collab.workspaceRoot and calls captureWorkspaceSnapshotSync(...). */
+	captureSnapshotRef?: (workflowId: string) => string | null;
+	/** Diffs operator-changed files for the workflow against pauseSnapshotRef; [] when
+	 *  unavailable. SYNCHRONOUS so resumeWorkflow stays synchronous. */
+	diffChangedFilesSinceSnapshot?: (workflowId: string, sinceRef: string) => string[];
 }
 
 const SHA_REGEX = /^[0-9a-f]{7,40}$/;
@@ -98,6 +108,31 @@ export function safeDerivePlanPath(specPath: string, createdAt: string): string 
 	}
 }
 
+/**
+ * Compose the one-time resume notice prepended to the next outgoing request when
+ * a paused workflow resumes. Returns `null` when there is nothing to say (no
+ * changed files and no operator message) → a plain resume with no notice.
+ */
+export function composeResumeNotice(input: {
+	changedFiles: string[];
+	message: string | null;
+}): string | null {
+	const hasFiles = input.changedFiles.length > 0;
+	const hasMessage = !!input.message && input.message.trim().length > 0;
+	if (!hasFiles && !hasMessage) return null;
+	const lines: string[] = [];
+	if (hasFiles) {
+		lines.push("While paused, the operator modified these files:");
+		for (const f of input.changedFiles) lines.push(`  - ${f}`);
+		lines.push("Re-read them before continuing.");
+	}
+	if (hasMessage) lines.push(`Operator note: ${input.message!.trim()}`);
+	lines.push(
+		"Re-evaluate whether your current direction still holds; correct course before proceeding.",
+	);
+	return lines.join("\n");
+}
+
 export function createWorkflowControl(deps: WorkflowControlDeps) {
 	const { db, events } = deps;
 
@@ -139,9 +174,13 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		const workflowId = `wf_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 
 		const tx = db.transaction(() => {
-			if (countRunningWorkflowsForCollab(db, input.collabId) > 0) {
+			if (countActiveWorkflowsForCollab(db, input.collabId) > 0) {
+				const active = listWorkflowsRepo(db, { collabId: input.collabId }).find(
+					(w) => w.status === "running" || w.status === "paused",
+				);
 				throw new Error(
-					`another workflow is already running on this collab (${input.collabId})`,
+					`another workflow is already active on this collab (${input.collabId})` +
+						(active ? `: ${active.workflowId} (${active.status})` : ""),
 				);
 			}
 			insertWorkflow(db, {
@@ -394,6 +433,30 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 	}
 
+	/**
+	 * Reads and atomically clears the one-time resume notice for a workflow.
+	 * Returns the notice (to prepend to the next outgoing request) or null.
+	 */
+	function consumeResumeNotice(input: { workflowId: string; now: string }): string | null {
+		const wf = getWorkflowById(db, input.workflowId);
+		const notice =
+			(wf?.workflowContext as { resumeNotice?: string | null })?.resumeNotice ?? null;
+		if (notice) {
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: { resumeNotice: null },
+				now: input.now,
+			});
+		}
+		return notice;
+	}
+
+	/** Prepend a pending resume notice to an outgoing request text, consuming it once. */
+	function withResumeNotice(workflowId: string, requestText: string, now: string): string {
+		const notice = consumeResumeNotice({ workflowId, now });
+		return notice ? `${notice}\n\n${requestText}` : requestText;
+	}
+
 	function createContinuationHandoff(input: {
 		workflow: WorkflowRecord;
 		chain: RelayChainRecord;
@@ -411,7 +474,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			collabId: input.workflow.collabId,
 			senderAgent: input.sender,
 			targetAgent: input.target,
-			requestText: input.requestText,
+			// Prepend the one-time resume notice (if any) to the FIRST outgoing request
+			// after a resume, then it is cleared — so the agent re-reads changed files.
+			requestText: withResumeNotice(input.workflow.workflowId, input.requestText, input.now),
 			chainId: input.chain.chainId,
 			roundNumber: input.incrementRound
 				? input.chain.currentRound + 1
@@ -495,7 +560,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 			collabId: input.workflow.collabId,
 			senderAgent: sender,
 			targetAgent: target,
-			requestText: kickoffText,
+			// Prepend a pending resume notice (consumed once) so a phase-advance kickoff
+			// after a resume also carries the operator's change notice.
+			requestText: withResumeNotice(input.workflow.workflowId, kickoffText, input.now),
 			chainId,
 			roundNumber: 1,
 			maxRounds: phase.maxRounds,
@@ -1123,32 +1190,170 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		});
 	}
 
-	function resumeWorkflow(input: { workflowId: string; now: string }): void {
+	/**
+	 * Capture the quiesce-boundary snapshot iff the workflow is paused, not yet
+	 * snapshotted, and has no in-flight accepted handoff. Synchronous: the ref is
+	 * persisted before this returns, so a resume right after the boundary always
+	 * sees the captured ref (when git is available).
+	 */
+	function maybeCaptureQuiesceSnapshot(input: { workflowId: string; now: string }): void {
+		const wf = getWorkflowById(db, input.workflowId);
+		if (!wf || wf.status !== "paused") return;
+		if ((wf.workflowContext as { pauseSnapshotRef?: unknown }).pauseSnapshotRef !== undefined) {
+			return; // already captured
+		}
+		if (hasInFlightAcceptedHandoffForWorkflow(db, input.workflowId)) return; // not at boundary yet
+		const ref = deps.captureSnapshotRef ? deps.captureSnapshotRef(input.workflowId) : null;
+		updateWorkflowContext(db, {
+			workflowId: input.workflowId,
+			patch: { pauseSnapshotRef: ref },
+			now: input.now,
+		});
+	}
+
+	function pauseWorkflow(input: { workflowId: string; now: string }): void {
 		const workflow = getWorkflowById(db, input.workflowId);
 		if (!workflow) {
-			throw new Error(`resumeWorkflow: unknown workflowId ${input.workflowId}`);
+			throw new Error(`pauseWorkflow: unknown workflowId ${input.workflowId}`);
 		}
-		if (workflow.status === "canceled") {
+		if (workflow.status !== "running") {
 			throw new Error(
-				`resumeWorkflow: workflow ${input.workflowId} is canceled and cannot be resumed`,
-			);
-		}
-		if (workflow.status !== "halted") {
-			throw new Error(
-				`resumeWorkflow: workflow ${input.workflowId} is not halted (status=${workflow.status})`,
+				`pauseWorkflow: workflow ${input.workflowId} is ${workflow.status}, only running workflows can be paused`,
 			);
 		}
 
 		const tx = db.transaction(() => {
-			if (countRunningWorkflowsForCollab(db, workflow.collabId) > 0) {
+			const current = getWorkflowById(db, input.workflowId);
+			if (!current || current.status !== "running") return; // race no-op
+			setWorkflowStatus(db, {
+				workflowId: input.workflowId,
+				status: "paused",
+				haltReason: null,
+				now: input.now,
+			});
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: { pausedAt: input.now },
+				now: input.now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.paused", { workflowId: input.workflowId });
+		// Synchronous boundary snapshot: when no accepted handoff is in flight, the
+		// baseline is captured and persisted NOW, before pauseWorkflow returns — so a
+		// subsequent resume always sees a non-null ref (when git is available). The
+		// in-flight case no-ops here and is captured later at handback (Task 8).
+		maybeCaptureQuiesceSnapshot({ workflowId: input.workflowId, now: input.now });
+	}
+
+	// Existing halted → running resume, extracted VERBATIM so the legacy path is
+	// provably unchanged (regression guard). Only paused resume is new.
+	function resumeHaltedWorkflow(workflow: WorkflowRecord, now: string): void {
+		const tx = db.transaction(() => {
+			const others = listWorkflowsRepo(db, { collabId: workflow.collabId }).filter(
+				(w) =>
+					w.workflowId !== workflow.workflowId &&
+					(w.status === "running" || w.status === "paused"),
+			);
+			if (others.length > 0) {
 				throw new Error(
-					`resumeWorkflow: another workflow is already running on collab ${workflow.collabId}`,
+					`resumeWorkflow: another workflow is already active on collab ${workflow.collabId}`,
 				);
 			}
+			setWorkflowStatus(db, {
+				workflowId: workflow.workflowId,
+				status: "running",
+				haltReason: null,
+				now,
+			});
+		});
+		tx.immediate();
+
+		events.emit("workflow.resumed", {
+			workflowId: workflow.workflowId,
+			phaseIndex: workflow.currentPhaseIndex,
+		});
+	}
+
+	function resumeWorkflow(input: {
+		workflowId: string;
+		now: string;
+		message?: string;
+	}): void {
+		const workflow = getWorkflowById(db, input.workflowId);
+		if (!workflow) {
+			throw new Error(`resumeWorkflow: unknown workflowId ${input.workflowId}`);
+		}
+		if (workflow.status === "halted") {
+			resumeHaltedWorkflow(workflow, input.now); // unchanged path
+			return;
+		}
+		if (workflow.status !== "paused") {
+			throw new Error(
+				`resumeWorkflow: workflow ${input.workflowId} is ${workflow.status}, only paused or halted workflows can be resumed`,
+			);
+		}
+
+		// ── paused → running ──────────────────────────────────────────────────
+		// Diff the workspace against the quiesce-boundary baseline; because the
+		// baseline post-dates the last agent write (§3/§4), every change is the
+		// operator's. A null ref (snapshot unavailable, or resumed before quiesce)
+		// yields an empty changed-file set → message-only notice.
+		const ref =
+			(workflow.workflowContext as { pauseSnapshotRef?: string | null })
+				.pauseSnapshotRef ?? null;
+		const changedFiles =
+			ref && deps.diffChangedFilesSinceSnapshot
+				? deps.diffChangedFilesSinceSnapshot(input.workflowId, ref)
+				: [];
+		const notice = composeResumeNotice({
+			changedFiles,
+			message: input.message ?? null,
+		});
+
+		const tx = db.transaction(() => {
+			const others = listWorkflowsRepo(db, { collabId: workflow.collabId }).filter(
+				(w) =>
+					w.workflowId !== input.workflowId &&
+					(w.status === "running" || w.status === "paused"),
+			);
+			if (others.length > 0) {
+				throw new Error(
+					`resumeWorkflow: another workflow is already active on collab ${workflow.collabId}`,
+				);
+			}
+			// Release any handback the orchestrator claimed but couldn't evaluate because
+			// the pause landed mid-evaluation — otherwise it stays orchestrator_status=
+			// 'pending' and the pending list (idle-only) never picks it back up on resume.
+			resetStrandedOrchestrationForWorkflow(db, input.workflowId);
+
+			// Resume-notice delivery (spec §5): if a handoff is ALREADY pending accept
+			// (the mount injects its stored request text raw), bake the notice into that
+			// request now and treat the notice as consumed. Otherwise leave it on the
+			// context for the next orchestrator-created handoff to consume.
+			let bakedIntoPending = false;
+			if (notice) {
+				bakedIntoPending = prependToPendingHandoffRequestText(db, {
+					workflowId: input.workflowId,
+					prefix: notice,
+					now: input.now,
+				});
+			}
+
 			setWorkflowStatus(db, {
 				workflowId: input.workflowId,
 				status: "running",
 				haltReason: null,
+				now: input.now,
+			});
+			updateWorkflowContext(db, {
+				workflowId: input.workflowId,
+				patch: {
+					resumeNotice: bakedIntoPending ? null : notice,
+					pausedAt: null,
+					pauseSnapshotRef: null,
+				},
 				now: input.now,
 			});
 		});
@@ -1285,6 +1490,9 @@ export function createWorkflowControl(deps: WorkflowControlDeps) {
 		beginPhaseRun,
 		applyOrchestratorVerdict,
 		haltWorkflow,
+		pauseWorkflow,
+		maybeCaptureQuiesceSnapshot,
+		consumeResumeNotice,
 		resumeWorkflow,
 		cancelWorkflow,
 		getHandoffWithWorkflowMeta,

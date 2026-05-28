@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export type WorkflowStatus = "running" | "halted" | "done" | "canceled";
+export type WorkflowStatus = "running" | "paused" | "halted" | "done" | "canceled";
 
 export type WorkflowRecord = {
 	workflowId: string;
@@ -154,14 +154,17 @@ export function incrementCurrentPhaseIndex(
 	).run(input.now, input.workflowId);
 }
 
-export function countRunningWorkflowsForCollab(
+export function countActiveWorkflowsForCollab(
 	db: Database.Database,
 	collabId: string,
 ): number {
 	const row = db
 		.prepare(
-			"SELECT COUNT(*) AS n FROM workflows WHERE collab_id = ? AND status = 'running'",
+			"SELECT COUNT(*) AS n FROM workflows WHERE collab_id = ? AND status IN ('running', 'paused')",
 		)
 		.get(collabId) as { n: number };
 	return row.n;
 }
+
+/** @deprecated use countActiveWorkflowsForCollab — kept until all callers migrate. */
+export const countRunningWorkflowsForCollab = countActiveWorkflowsForCollab;

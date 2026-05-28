@@ -134,3 +134,21 @@ whisper workflow cancel <workflowId>
 ```
 
 Same fire-and-forget shape: invoke, report one line, exit.
+
+## Pausing the workflow (operator control)
+
+If the user interrupts you mid-workflow and asks to pause it (e.g. "pause the workflow, I need to fix X"):
+
+1. Find the active workflow id: `whisper workflow list`.
+2. Run `whisper workflow pause <workflowId>`.
+3. Acknowledge and **stop working** — do not start the next change.
+
+The operator edits artifacts while paused, then resumes:
+
+```bash
+whisper workflow resume <workflowId> --message "what I changed and why"
+```
+
+On resume the agents receive a notice listing the changed files plus the operator note, and must re-read those files before continuing.
+
+Provider gotcha: the Codex CLI **exits its session** on Ctrl+C at an idle prompt (a mid-task Ctrl+C only interrupts the running task). The user typically interrupts a *busy* agent before issuing the pause instruction — do not assume Ctrl+C is a safe no-op.

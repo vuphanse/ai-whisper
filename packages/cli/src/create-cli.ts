@@ -27,6 +27,7 @@ import { parseCallerAgent, runWorkflowStart } from "./commands/workflow/start.js
 import { runWorkflowList } from "./commands/workflow/list.js";
 import { runWorkflowInspect } from "./commands/workflow/inspect.js";
 import { runWorkflowResume } from "./commands/workflow/resume.js";
+import { runWorkflowPause } from "./commands/workflow/pause.js";
 import { runWorkflowCancel } from "./commands/workflow/cancel.js";
 import { runWorkflowTypes } from "./commands/workflow/types.js";
 import { runSkillInstall } from "./commands/skill/install.js";
@@ -473,19 +474,42 @@ export function createCli(): Command {
 		});
 
 	workflow
-		.command("resume")
-		.description("Resume a halted workflow")
+		.command("pause")
+		.description("Pause a running workflow")
 		.argument("<workflowId>", "Workflow ID")
 		.option("--workspace <path>", "Workspace root", process.cwd())
 		.action(async (workflowId: string, opts: WorkspaceOpts) => {
 			const { broker } = await connectToWorkspaceBroker({ cwd: opts.workspace });
 			try {
-				await runWorkflowResume({ broker, workflowId, now: new Date().toISOString() });
-				console.log(`Workflow resumed: ${workflowId}`);
+				await runWorkflowPause({ broker, workflowId, now: new Date().toISOString() });
+				console.log(`Workflow paused: ${workflowId}`);
 			} finally {
 				await broker.stop();
 			}
 		});
+
+	workflow
+		.command("resume")
+		.description("Resume a paused or halted workflow")
+		.argument("<workflowId>", "Workflow ID")
+		.option("--workspace <path>", "Workspace root", process.cwd())
+		.option("--message <note>", "Operator note delivered to the agents on resume")
+		.action(
+			async (workflowId: string, opts: WorkspaceOpts & { message?: string }) => {
+				const { broker } = await connectToWorkspaceBroker({ cwd: opts.workspace });
+				try {
+					await runWorkflowResume({
+						broker,
+						workflowId,
+						now: new Date().toISOString(),
+						...(opts.message !== undefined ? { message: opts.message } : {}),
+					});
+					console.log(`Workflow resumed: ${workflowId}`);
+				} finally {
+					await broker.stop();
+				}
+			},
+		);
 
 	workflow
 		.command("cancel")

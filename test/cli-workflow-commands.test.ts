@@ -3,6 +3,7 @@ import { createBrokerRuntime } from "../packages/broker/src/index.ts";
 import { runWorkflowStart } from "../packages/cli/src/commands/workflow/start.ts";
 import { runWorkflowList } from "../packages/cli/src/commands/workflow/list.ts";
 import { runWorkflowResume } from "../packages/cli/src/commands/workflow/resume.ts";
+import { runWorkflowPause } from "../packages/cli/src/commands/workflow/pause.ts";
 import { runWorkflowCancel } from "../packages/cli/src/commands/workflow/cancel.ts";
 import { runWorkflowTypes } from "../packages/cli/src/commands/workflow/types.ts";
 
@@ -87,6 +88,62 @@ describe("whisper workflow commands", () => {
 		await expect(
 			runWorkflowResume({ broker, workflowId, now: "2026-04-21T00:00:02Z" }),
 		).rejects.toThrow(/canceled/);
+		await broker.stop();
+	});
+
+	it("pause flips a running workflow to paused", async () => {
+		const broker = boot();
+		const { workflowId } = await runWorkflowStart({
+			broker,
+			collabId: "collab_c1",
+			workflowType: "spec-driven-development",
+			specPath: "docs/spec.md",
+			implementer: "claude",
+			reviewer: "codex",
+			now: "2026-04-21T00:00:00Z",
+		});
+		await new Promise((r) => setImmediate(r));
+		await runWorkflowPause({ broker, workflowId, now: "2026-05-27T00:01:00Z" });
+		expect(broker.control.getWorkflow(workflowId)!.status).toBe("paused");
+		await new Promise((r) => setImmediate(r));
+		await broker.stop();
+	});
+
+	it("resume forwards --message into the resume notice", async () => {
+		const broker = boot();
+		const { workflowId } = await runWorkflowStart({
+			broker,
+			collabId: "collab_c1",
+			workflowType: "spec-driven-development",
+			specPath: "docs/spec.md",
+			implementer: "claude",
+			reviewer: "codex",
+			now: "2026-04-21T00:00:00Z",
+		});
+		await new Promise((r) => setImmediate(r));
+		await runWorkflowPause({ broker, workflowId, now: "2026-05-27T00:01:00Z" });
+		await runWorkflowResume({
+			broker,
+			workflowId,
+			now: "2026-05-27T00:02:00Z",
+			message: "re-read the spec",
+		});
+		const wf = broker.control.getWorkflow(workflowId)!;
+		expect(wf.status).toBe("running");
+		// The CLI forwarded --message; the broker delivered it via whichever path applies.
+		// This fresh workflow has a pending kickoff handoff, so the notice is baked into
+		// that handoff's request text (consumed off the context). Either way, the operator
+		// note must be present in a deliverable surface for this workflow.
+		const noticeOnContext = (wf.workflowContext as { resumeNotice?: string | null }).resumeNotice ?? "";
+		const bakedHandoff = broker.db
+			.prepare(
+				"SELECT request_text FROM relay_handoff WHERE workflow_id = ? AND request_text LIKE '%Operator note: re-read the spec%' LIMIT 1",
+			)
+			.get(workflowId) as { request_text: string } | undefined;
+		expect(noticeOnContext.includes("Operator note: re-read the spec") || !!bakedHandoff).toBe(true);
+		// Drain the workflow.resumed driver kickoff (a no-op given the open phase run)
+		// before closing the db, so its setImmediate doesn't fire post-stop.
+		await new Promise((r) => setImmediate(r));
 		await broker.stop();
 	});
 });

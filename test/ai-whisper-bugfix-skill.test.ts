@@ -16,6 +16,15 @@ describe("ai-whisper-bugfix skill", () => {
 		expect(skill).toMatch(/fire-and-forget/i);
 	});
 
+	it("documents the operator pause-control flow with the Codex Ctrl+C gotcha", () => {
+		for (const name of ["ai-whisper-sdd", "ai-whisper-ralph", "ai-whisper-bugfix"]) {
+			const md = readFileSync(`packages/cli/skills/${name}/SKILL.md`, "utf8");
+			expect(md, `${name} missing pause section`).toContain("whisper workflow pause");
+			expect(md, `${name} missing resume --message`).toContain("whisper workflow resume");
+			expect(md, `${name} missing Ctrl+C gotcha`).toMatch(/Ctrl\+C/);
+		}
+	});
+
 	it("does NOT duplicate the canonical diagnosis review protocol (single source of truth)", () => {
 		// Distinctive protocol marker lines must not be copied into the skill.
 		expect(skill).not.toContain("ai-whisper diagnosis review protocol");

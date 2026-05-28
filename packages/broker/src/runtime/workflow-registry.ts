@@ -108,6 +108,15 @@ Non-blocking risks:
 - <quality risk that does NOT block this gate, or "None.">
 --- end protocol ---`;
 
+export const WORKFLOW_OPERATOR_CONTROL = `--- ai-whisper operator control ---
+If the operator interrupts you and asks to pause the workflow (e.g. "pause the workflow, I need to fix X"):
+1. Find the active workflow id: run \`whisper workflow list\`.
+2. Run \`whisper workflow pause <id>\`.
+3. Acknowledge and STOP working — do not start the next change.
+The operator will edit artifacts and later run \`whisper workflow resume <id> [--message "..."]\`; you will then receive a notice of what changed and must re-read those files before continuing.
+Provider note: the Codex CLI EXITS its session on Ctrl+C at an idle prompt (a mid-task Ctrl+C only interrupts the running task). The operator typically interrupts you while you are BUSY before issuing this instruction; do not assume Ctrl+C is a safe no-op.
+--- end operator control ---`;
+
 export const WORKFLOW_DIAGNOSIS_PROTOCOL = `--- ai-whisper diagnosis review protocol ---
 You are the gatekeeper for an ai-whisper complex-bug-fixing DIAGNOSIS gate. No human is in the loop. Do NOT trust the implementer's diagnosis — verify it yourself. The gate stays shut until YOU independently agree on the root cause and that the fix is net-safe.
 
@@ -390,10 +399,27 @@ export const COMPLEX_BUG_FIXING: WorkflowDefinition = {
 	],
 };
 
+/**
+ * Append the operator-control fragment to every phase's kickoff template so the
+ * mid-workflow "pause the workflow" guidance rides the handoff prompt the agent
+ * already receives at each phase/round start. Done once here (DRY) rather than on
+ * each template literal. This is the primary, reliable channel; the bundled
+ * kickoff skills carry the same guidance for discoverability (see §6).
+ */
+function withOperatorControl(def: WorkflowDefinition): WorkflowDefinition {
+	return {
+		...def,
+		phases: def.phases.map((p) => ({
+			...p,
+			kickoffTemplate: `${p.kickoffTemplate}\n\n${WORKFLOW_OPERATOR_CONTROL}`,
+		})),
+	};
+}
+
 const REGISTRY: Record<string, WorkflowDefinition> = {
-	[SPEC_DRIVEN_DEVELOPMENT.type]: SPEC_DRIVEN_DEVELOPMENT,
-	[RALPH_LOOP.type]: RALPH_LOOP,
-	[COMPLEX_BUG_FIXING.type]: COMPLEX_BUG_FIXING,
+	[SPEC_DRIVEN_DEVELOPMENT.type]: withOperatorControl(SPEC_DRIVEN_DEVELOPMENT),
+	[RALPH_LOOP.type]: withOperatorControl(RALPH_LOOP),
+	[COMPLEX_BUG_FIXING.type]: withOperatorControl(COMPLEX_BUG_FIXING),
 };
 
 export function ralphRunDir(workspaceRoot: string, workflowId: string): string {

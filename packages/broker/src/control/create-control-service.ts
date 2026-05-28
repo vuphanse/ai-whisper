@@ -39,6 +39,11 @@ import {
 	insertCollab,
 	getCollab,
 } from "../storage/repositories/collab-repository.js";
+import { getWorkflowById } from "../storage/repositories/workflow-repository.js";
+import {
+	captureWorkspaceSnapshotSync,
+	diffChangedFilesSince,
+} from "../runtime/workspace-snapshot.js";
 import {
 	insertReply,
 	listRepliesForThread,
@@ -158,8 +163,40 @@ function buildEventId(
 }
 
 export function createControlService(db: Database.Database, events: BrokerEventBus) {
-	const workflowControl = createWorkflowControl({ db, events });
+	// Resolve a workflow's collab workspace root, then snapshot/diff it. Both hooks
+	// are synchronous so pause/resume control methods persist their result before
+	// returning (no race with an immediate resume). Resolved via `db` directly to
+	// avoid a circular reference on `workflowControl` (constructed just below).
+	const resolveWorkspaceRoot = (workflowId: string): string | null => {
+		const wf = getWorkflowById(db, workflowId);
+		if (!wf) return null;
+		return getCollab(db, wf.collabId)?.workspaceRoot ?? null;
+	};
+	const workflowControl = createWorkflowControl({
+		db,
+		events,
+		captureSnapshotRef: (workflowId: string) => {
+			const root = resolveWorkspaceRoot(workflowId);
+			return root ? captureWorkspaceSnapshotSync(root) : null;
+		},
+		diffChangedFilesSinceSnapshot: (workflowId: string, sinceRef: string) => {
+			const root = resolveWorkspaceRoot(workflowId);
+			return root ? diffChangedFilesSince(root, sinceRef) : [];
+		},
+	});
+
+	// The single delivery chokepoint: true when a handoff belongs to a paused
+	// workflow. Legacy / non-workflow handoffs are never suspended (keep flowing
+	// exactly as today). Defined as a local const so the claim/accept wrappers and
+	// the exported method share one implementation without `this`-binding fragility.
+	const isWorkflowDeliverySuspended = (handoffId: string): boolean => {
+		const meta = workflowControl.getHandoffWithWorkflowMeta(handoffId);
+		if (!meta?.workflowId) return false;
+		return workflowControl.getWorkflow(meta.workflowId)?.status === "paused";
+	};
+
 	return Object.assign({
+		isWorkflowDeliverySuspended,
 		startCollab(input: {
 			collabId: string;
 			workspaceRoot: string;
@@ -1103,6 +1140,7 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return createRelayHandoffTxn(db, input);
 		},
 		acceptRelayHandoff(input: { handoffId: string; acceptedAt: string }) {
+			if (isWorkflowDeliverySuspended(input.handoffId)) return; // refuse delivery while paused
 			return acceptRelayHandoffTxn(db, input);
 		},
 		deferRelayHandoff(input: { handoffId: string; deferredAt: string }) {
@@ -1123,7 +1161,18 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			captureStatus?: "ok" | "no_response_captured_confidently" | "no_response_captured" | null;
 			now: string;
 		}) {
-			return handoffBackRelayTxn(db, input);
+			// Recording ALWAYS proceeds (spec §3): an in-flight turn's handback must be
+			// persisted even while paused so the workflow can reach the quiesce boundary.
+			const result = handoffBackRelayTxn(db, input);
+			// If this completed the last in-flight turn of a paused workflow, we are now
+			// at the quiesce boundary → capture the snapshot synchronously (durable before
+			// return, so a resume right after still sees the ref). Orchestration of this
+			// handback stays deferred because the pending list excludes paused workflows.
+			const meta = workflowControl.getHandoffWithWorkflowMeta(input.handoffId);
+			if (meta?.workflowId && workflowControl.getWorkflow(meta.workflowId)?.status === "paused") {
+				workflowControl.maybeCaptureQuiesceSnapshot({ workflowId: meta.workflowId, now: input.now });
+			}
+			return result;
 		},
 		failRelayHandoffOnDisconnect(input: { handoffId: string; now: string }) {
 			return failRelayHandoffOnDisconnectTxn(db, input);
@@ -1135,6 +1184,9 @@ export function createControlService(db: Database.Database, events: BrokerEventB
 			return queryLatestHandedBackHandoff(db, collabId);
 		},
 		claimRelayHandoffForOrchestration(input: { handoffId: string; claimedAt: string }) {
+			// Re-check inside the wrapper so the list→claim race is closed even if a
+			// workflow is paused between the orchestrator's list and its claim.
+			if (isWorkflowDeliverySuspended(input.handoffId)) return null;
 			return claimRelayHandoffForOrchestrationTxn(db, input);
 		},
 		listRelayHandoffsPendingOrchestration(collabId: string) {

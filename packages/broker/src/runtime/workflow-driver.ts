@@ -10,7 +10,7 @@ import {
 import { ensureRalphWorkspace } from "./ralph-setup.js";
 import { ensureBugfixWorkspace } from "./bugfix-setup.js";
 
-type WorkflowStatus = "running" | "halted" | "done" | "canceled";
+type WorkflowStatus = "running" | "paused" | "halted" | "done" | "canceled";
 type WorkflowRecordLike = {
 	workflowId: string;
 	collabId: string;

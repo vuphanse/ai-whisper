@@ -7,6 +7,7 @@ import {
 	setWorkflowStatus,
 	updateWorkflowContext,
 	incrementCurrentPhaseIndex,
+	countActiveWorkflowsForCollab,
 } from "../packages/broker/src/storage/repositories/workflow-repository.ts";
 
 function bootstrap() {
@@ -127,5 +128,27 @@ describe("workflow-repository", () => {
 		});
 		incrementCurrentPhaseIndex(db, { workflowId: "wf_1", now: "2026-04-21T00:01:00Z" });
 		expect(getWorkflowById(db, "wf_1")?.currentPhaseIndex).toBe(1);
+	});
+
+	it("countActiveWorkflowsForCollab counts both running and paused", () => {
+		const { db } = bootstrap();
+		db.prepare(
+			`INSERT INTO collab (collab_id, workspace_root, display_name, status, created_at, updated_at)
+			 VALUES ('c2','/tmp','c2','active','2026-04-21T00:00:00Z','2026-04-21T00:00:00Z')`,
+		).run();
+		const now = "2026-05-27T00:00:00Z";
+		insertWorkflow(db, {
+			workflowId: "wf_run", collabId: "c1", workflowType: "spec-driven-development",
+			name: null, specPath: "s.md", roleBindings: { implementer: "claude", reviewer: "codex" },
+			status: "running", currentPhaseIndex: 0, workflowContext: {}, now,
+		});
+		insertWorkflow(db, {
+			workflowId: "wf_pause", collabId: "c2", workflowType: "spec-driven-development",
+			name: null, specPath: "s.md", roleBindings: { implementer: "claude", reviewer: "codex" },
+			status: "paused", currentPhaseIndex: 0, workflowContext: {}, now,
+		});
+		expect(countActiveWorkflowsForCollab(db, "c1")).toBe(1);
+		expect(countActiveWorkflowsForCollab(db, "c2")).toBe(1);
+		expect(countActiveWorkflowsForCollab(db, "c3")).toBe(0);
 	});
 });
