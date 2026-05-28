@@ -350,3 +350,93 @@ describe("Wall — stuck card variant (Task 10)", () => {
 		expect(out).not.toMatch(/\bpass\b/);
 	});
 });
+
+describe("Wall — compact card (Task 11)", () => {
+	it("compact DONE card uses ✓ glyph, status word, elapsed; no event rows", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "d1",
+							statusKey: "done",
+							label: "donelabel",
+							workflowType: "spec-driven-development",
+							round: null,
+							progress: { current: 5, total: 5 },
+							elapsed: "4m12s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("✓ donelabel");
+		expect(out).toContain("spec-driven-development");
+		expect(out).toContain("P5/5");
+		expect(out).toContain("done");
+		expect(out).toContain("4m12s");
+	});
+
+	it("compact CANCELED card uses ✖ glyph in err color", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "x1",
+							statusKey: "canceled",
+							label: "cancellabel",
+							workflowType: "complex-bug-fixing",
+							round: null,
+							progress: { current: 3, total: 5 },
+							elapsed: "2m08s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("✖");
+		// Err color guard: the raw frame must contain a red SGR (any encoding).
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m/);
+	});
+
+	it("compact HALTED card uses ⚠ glyph in err color", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "halted",
+					panes: [
+						mkPane({
+							collabId: "h1",
+							statusKey: "stuck",
+							label: "haltlabel",
+							workflowType: "spec-driven-development",
+							round: null,
+							progress: { current: 2, total: 4 },
+							elapsed: "5m00s",
+							cardKind: "compact",
+							stuckWhy: null,
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("⚠");
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m/);
+	});
+});
