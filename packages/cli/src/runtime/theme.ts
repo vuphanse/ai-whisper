@@ -1,7 +1,8 @@
 // Borrowed from ~/Dev/ai-cortex/src/tui/theme.ts so both TUIs share the
 // terracotta palette. Hex values match upstream exactly.
 export const THEME = {
-	accent: "#D97757", // Claude terracotta
+	accent: "#D97757", // Claude terracotta — Inspector active-tab marker / brand
+	select: "#7FB069", // ai-cortex palette green — card-selection chevron + border
 	ok: "green",
 	warn: "yellow",
 	err: "red",

@@ -90,7 +90,7 @@ function FullCard(props: {
 		workflowStatus: statusKeyToWorkflowStatus(pane.statusKey),
 		stuck: false,
 	});
-	const borderColor = props.selected ? THEME.accent : THEME.muted;
+	const borderColor = props.selected ? THEME.select : THEME.muted;
 	const progressText = pane.progress
 		? `P${pane.progress.current}/${pane.progress.total}`
 		: "—";
@@ -113,7 +113,7 @@ function FullCard(props: {
 			<Text
 				wrap="truncate"
 				bold
-				{...(props.selected ? { color: THEME.accent as string } : {})}
+				{...(props.selected ? { color: THEME.select as string } : {})}
 			>
 				{chevron}
 				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
@@ -176,7 +176,7 @@ function CompactCard(props: {
 		pane.statusKey === "stuck" || pane.statusKey === "canceled"
 			? THEME.err
 			: props.selected
-				? THEME.accent
+				? THEME.select
 				: THEME.muted;
 	const chevron = props.selected ? "▸ " : "  ";
 	const progressText = pane.progress
@@ -192,7 +192,7 @@ function CompactCard(props: {
 			<Text
 				wrap="truncate"
 				bold
-				{...(props.selected ? { color: THEME.accent as string } : {})}
+				{...(props.selected ? { color: THEME.select as string } : {})}
 			>
 				{chevron}
 				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
