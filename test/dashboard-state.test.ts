@@ -447,3 +447,55 @@ describe("buildInspectorState — evidence", () => {
 		expect(ok.evidence.items).toEqual([]);
 	});
 });
+
+describe("buildWallState — terminal-card elapsed is frozen across polls", () => {
+	function buildAt(now: string, status: "running" | "done" | "halted" | "canceled") {
+		const summaries: CollabSummary[] = [
+			sum({
+				collabId: "c1",
+				workflowStatus: status,
+				workflowCreatedAt: "2026-05-20T00:00:00.000Z",
+				lastActivityAt: "2026-05-20T00:04:12.000Z", // 4m12s run
+				chainStatus:
+					status === "running" ? "active" : status === "done" ? "done" : "abandoned",
+			}),
+		];
+		return buildWallState({
+			summaries,
+			now,
+			idleThresholdMs: 60_000,
+			cols: 80,
+			rows: 30,
+			page: 0,
+			selected: 0,
+			snapshots: { c1: { handoffs: [], phaseRuns: [], totalPhases: 5 } },
+		});
+	}
+
+	function paneOf(state: ReturnType<typeof buildAt>) {
+		return state.sections[0]!.panes[0]!;
+	}
+
+	it("done card elapsed is identical at two different polling timestamps", () => {
+		const t1 = "2026-05-20T00:05:00.000Z"; // 48s after run ended
+		const t2 = "2026-05-20T01:00:00.000Z"; // 55m after run ended — clock long past
+		const a = paneOf(buildAt(t1, "done"));
+		const b = paneOf(buildAt(t2, "done"));
+		expect(a.elapsed).toBe(b.elapsed);
+		expect(a.elapsed).toBe("4m12s"); // frozen at the actual run duration
+	});
+
+	it("canceled and halted also freeze elapsed at lastActivityAt - workflowCreatedAt", () => {
+		const t = "2026-05-20T12:00:00.000Z";
+		expect(paneOf(buildAt(t, "canceled")).elapsed).toBe("4m12s");
+		expect(paneOf(buildAt(t, "halted")).elapsed).toBe("4m12s");
+	});
+
+	it("running card elapsed advances as `now` advances (NOT frozen)", () => {
+		const a = paneOf(buildAt("2026-05-20T00:05:00.000Z", "running")); // 5m
+		const b = paneOf(buildAt("2026-05-20T00:10:00.000Z", "running")); // 10m
+		expect(a.elapsed).not.toBe(b.elapsed);
+		expect(a.elapsed).toBe("5m00s");
+		expect(b.elapsed).toBe("10m00s");
+	});
+});

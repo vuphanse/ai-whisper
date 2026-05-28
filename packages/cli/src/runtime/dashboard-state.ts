@@ -621,11 +621,20 @@ function projectPane(
 		.reverse() // newest first
 		.map((l) => parseEventText(l.text));
 	const cardKind: "full" | "compact" = glyph.key === "running" ? "full" : "compact";
-	const nowMs = Date.parse(now);
 	const baseMs = s.workflowCreatedAt != null ? Date.parse(s.workflowCreatedAt) : NaN;
+	// Freeze elapsed at the actual run duration once a workflow is terminal —
+	// done/canceled/halted clocks keep ticking otherwise (just noise on a card
+	// that will never advance again). Use the latest handoff time as the
+	// run's effective end; fall back to `now` only while still running.
+	const isTerminal =
+		s.workflowStatus === "done" ||
+		s.workflowStatus === "halted" ||
+		s.workflowStatus === "canceled";
+	const endIso = isTerminal && s.lastActivityAt ? s.lastActivityAt : now;
+	const endMs = Date.parse(endIso);
 	const elapsed =
-		Number.isFinite(nowMs) && Number.isFinite(baseMs)
-			? fmtDur(nowMs - baseMs)
+		Number.isFinite(endMs) && Number.isFinite(baseMs)
+			? fmtDur(Math.max(0, endMs - baseMs))
 			: "—";
 
 	return {
