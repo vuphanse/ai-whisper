@@ -129,10 +129,28 @@ The dashboard is the inspection surface — every handoff, every evaluator verdi
 
 Runs are durable, not fire-and-forget — but how you pick a run back up depends on *what* interrupted it:
 
-- **A halted workflow** (it escalated, or you halted it) resumes directly: `whisper workflow resume <workflowId>`. `resume` only acts on a halted workflow; it will reject anything else.
+- **A halted workflow** (it escalated, or you halted it) resumes directly: `whisper workflow resume <workflowId>`.
 - **An interrupted broker or session** (the daemon died, you stopped for the day, a mounted session dropped) is a recovery case, not a resume case: `whisper collab recover`, then `whisper collab reconnect <codex|claude>` for each agent, then check `whisper collab status` / the dashboard. The workflow continues from its durable state once the collab is healthy again.
 
 To stop a run for good: `whisper workflow cancel <workflowId>` (canceled workflows cannot be resumed).
+
+### Pausing a healthy run to fix an artifact
+
+Sometimes a run is healthy but heading the wrong way — a glitch in the spec, plan, or source has steered both agents, and you want to step in *without* the escalation semantics of `halt`. Pause it:
+
+```bash
+whisper workflow pause <workflowId>
+```
+
+Pause freezes the whole loop at the next safe boundary: the in-flight turn is never killed — it finishes and its handback is recorded — but no new turn is delivered while paused. The workflow keeps the collab's active slot, so you cannot accidentally start a second run on top of it. Edit the artifact while the daemon keeps running in the background, then continue:
+
+```bash
+whisper workflow resume <workflowId> --message "what I changed and why"
+```
+
+On resume the agents receive a one-time notice listing the files you changed while paused (diffed against a snapshot taken at the moment the run quiesced, so your edits are never confused with the agent's own) plus your `--message`, and are told to re-read those files before continuing — so they re-evaluate instead of pressing ahead on stale context. `--message` is optional; with no operator edits and no message, resume just continues the run.
+
+`resume` acts on both **paused** and **halted** workflows (and rejects anything else); `pause` acts only on a **running** workflow. You can also ask a mounted agent to pause for you mid-task ("pause the workflow, I need to fix X") — it knows to look up the id, run `whisper workflow pause`, and stop. (Trigger is CLI-only; on the Codex CLI, note that Ctrl+C at an idle prompt exits the session, so interrupt a *busy* agent before asking.)
 
 When the evaluator cannot resolve a chain — the round budget is exhausted, the agent reports it is blocked, or confidence is too low — the chain **escalates**: the loop stops and ownership returns to you. Escalation is a designed exit, not a crash. For round budgets, verdict vocabulary, and the full state machine, see [Relay & handoff flows](relay-handoff-flows.md); for the evaluator credentials and model, see [Evaluator configuration](evaluator-configuration.md).
 

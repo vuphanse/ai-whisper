@@ -268,6 +268,8 @@ pending  ─[accept]──► accepted  ─[hand back]──► handed_back
    └─[defer]──► still pending; auto-accept disarmed until manual `a`
 ```
 
+**Workflow pause gate.** While the owning workflow is `paused` (`whisper workflow pause <id>`; see [Workflows](workflows.md)), the broker suspends delivery at a single chokepoint: pending handoffs are excluded from orchestration, claims and auto-accept are refused, and the mount injects nothing — so none of the transitions above advance. The one exception is **recording** an already-accepted turn's handback (`accepted → handed_back`), which is allowed so the loop can quiesce; its orchestration is deferred until `resume`. Legacy (non-workflow) handoffs are never gated.
+
 ---
 
 ## Knobs
