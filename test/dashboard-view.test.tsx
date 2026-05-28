@@ -315,3 +315,38 @@ describe("Wall — full ACTIVE card (Task 9)", () => {
 		expect(raw).toMatch(/\x1b\[(32|92|38;5;\d+|38;2;[\d;]+)m[^\x1b]*●/);
 	});
 });
+
+describe("Wall — stuck card variant (Task 10)", () => {
+	it("stuck card uses ⚠ glyph, red border, and suppresses event rows even when events are present", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "stuck",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 3, max: 3 },
+							stuckWhy: "STUCK 6m12s — round 3/3 max reached → escalated",
+							events: [
+								{ step: "review", route: "codex→claude", verdict: "pass" },
+								{ step: "execute", route: "claude→codex", verdict: "-" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("⚠");
+		expect(out).toContain("STUCK 6m12s");
+		expect(out).not.toMatch(/codex→claude/);
+		expect(out).not.toMatch(/claude→codex/);
+		expect(out).not.toMatch(/\breview\b/);
+		expect(out).not.toMatch(/\bexecute\b/);
+		expect(out).not.toMatch(/\bpass\b/);
+	});
+});
