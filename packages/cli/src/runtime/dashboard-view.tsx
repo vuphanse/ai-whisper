@@ -1,13 +1,17 @@
 import { Box, Text, useInput, useStdin } from "ink";
 import type { ReactElement, ReactNode } from "react";
-import type { LogLine } from "./relay-view-state.js";
 import type { WallState, WallPaneState } from "./dashboard-state.js";
 import { RelayView, type Viewport } from "./relay-view.js";
 import { fmtDur } from "./relay-view-state.js";
 import type { InspectorState } from "./dashboard-state.js";
+import { THEME, AGENT_COLOR } from "./theme.js";
+import { statusGlyph } from "./dashboard-glyph.js";
 
 const MIN_PANE_COLS = 40;
 const MIN_PANE_ROWS = 5;
+const NARROW_PANE_COLS = 48;
+const BAR_FILLED = "▰";
+const BAR_EMPTY = "▱";
 
 export function gridCapacity(cols: number, rows: number): number {
 	const c = Math.max(1, Math.floor(cols / MIN_PANE_COLS));
@@ -15,78 +19,186 @@ export function gridCapacity(cols: number, rows: number): number {
 	return c * r;
 }
 
-function tailText(l: LogLine): string {
-	return l.text;
+function progressBar(progress: { current: number; total: number }): string {
+	const total = Math.max(1, progress.total);
+	const current = Math.max(0, Math.min(total, progress.current));
+	return BAR_FILLED.repeat(current) + BAR_EMPTY.repeat(total - current);
 }
 
-// Per-agent accent colors used throughout the dashboard so codex/claude
-// tokens read at a glance instead of all-gray. Stuck/escalated state still
-// overrides to red — escalation is the dominant signal.
-const AGENT_COLOR = { codex: "cyan", claude: "magenta" } as const;
-
-// Split a string on the literal tokens `codex` / `claude` (case-sensitive,
-// whole-word boundary) and emit a flat array of React nodes with each
-// agent token wrapped in its accent color. Plain segments inherit the
-// surrounding <Text>'s color, so we only override when we mean to.
-function colorAgents(text: string, baseKey: string): ReactNode[] {
-	const re = /\b(codex|claude)\b/g;
-	const out: ReactNode[] = [];
-	let last = 0;
-	let m: RegExpExecArray | null;
-	let n = 0;
-	while ((m = re.exec(text)) !== null) {
-		if (m.index > last) out.push(text.slice(last, m.index));
-		const agent = m[0] as keyof typeof AGENT_COLOR;
-		out.push(
-			<Text key={`${baseKey}-${n}`} color={AGENT_COLOR[agent]}>
-				{agent}
-			</Text>,
-		);
-		last = m.index + agent.length;
-		n += 1;
-	}
-	if (last < text.length) out.push(text.slice(last));
-	return out;
+function dotForHealth(h: "healthy" | "degraded" | "dead"): {
+	glyph: string;
+	color: string;
+} {
+	return h === "healthy"
+		? { glyph: "●", color: THEME.ok }
+		: h === "degraded"
+			? { glyph: "◐", color: THEME.warn }
+			: { glyph: "○", color: THEME.err };
 }
 
-function WallPane(props: {
+function padRight(s: string, n: number): string {
+	return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
+}
+
+function statusKeyToWorkflowStatus(
+	key: WallPaneState["statusKey"],
+): "running" | "done" | "halted" | "canceled" | null {
+	if (key === "idle") return null;
+	if (key === "stuck") return "running"; // stuck-while-running default
+	return key;
+}
+
+function FullCard(props: {
 	pane: WallPaneState;
 	selected: boolean;
 	width: number;
 }): ReactElement {
 	const { pane } = props;
-	const borderColor = pane.stuck ? "red" : props.selected ? "cyan" : "gray";
-	// Selected-card indicator: a clear chevron in the header, with matching
-	// whitespace on unselected cards so column alignment doesn't shift.
-	const marker = props.selected ? "▸ " : "  ";
-	// Stuck overrides agent coloring — when escalated the whole health line
-	// reads red and we skip the per-token coloring (escalation is louder).
-	const healthChildren = pane.stuck
-		? pane.healthLine
-		: colorAgents(pane.healthLine, "h");
+	const chevron = props.selected ? "▸ " : "  ";
+
+	if (pane.statusKey === "stuck") {
+		// Stuck card: red border + ⚠ glyph, why text dominant.
+		const why = pane.stuckWhy ?? "";
+		const splitAt = Math.max(0, props.width - 4);
+		return (
+			<Box
+				flexDirection="column"
+				width={props.width}
+				borderStyle="single"
+				borderColor={THEME.err}
+			>
+				<Text wrap="truncate" bold>
+					{chevron}
+					<Text color={THEME.err}>⚠</Text> {pane.label}
+					{pane.workflowType ? (
+						<Text color={THEME.muted}> {pane.workflowType}</Text>
+					) : null}
+				</Text>
+				<Text wrap="truncate" color={THEME.err}>
+					{"  "}
+					{why.slice(0, splitAt)}
+				</Text>
+				<Text wrap="truncate" color={THEME.err}>
+					{"  "}
+					{why.slice(splitAt)}
+				</Text>
+			</Box>
+		);
+	}
+
+	const glyph = statusGlyph({
+		workflowStatus: statusKeyToWorkflowStatus(pane.statusKey),
+		stuck: false,
+	});
+	const borderColor = props.selected ? THEME.accent : THEME.muted;
+	const progressText = pane.progress
+		? `P${pane.progress.current}/${pane.progress.total}`
+		: "—";
+	const showBar = pane.progress != null && props.width >= NARROW_PANE_COLS;
+	const roundText =
+		pane.round != null ? `  R${pane.round.current}/${pane.round.max}` : "";
+
 	return (
 		<Box
 			flexDirection="column"
 			width={props.width}
-			borderStyle="round"
+			borderStyle="single"
 			borderColor={borderColor}
 		>
 			<Text
 				wrap="truncate"
 				bold
-				{...(props.selected ? { color: "cyan" as const } : {})}
+				{...(props.selected ? { color: THEME.accent as string } : {})}
 			>
-				{marker}
-				{pane.header}
+				{chevron}
+				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
+				{pane.workflowType ? (
+					<Text color={THEME.muted}> {pane.workflowType}</Text>
+				) : null}
+				{roundText ? <Text color={THEME.muted}>{roundText}</Text> : null}
 			</Text>
-			<Text wrap="truncate" {...(pane.stuck ? { color: "red" as const } : {})}>
-				{healthChildren}
+			<Text wrap="truncate">
+				{"  "}
+				<Text color={THEME.muted}>{progressText}</Text>{" "}
+				{showBar ? <Text color={THEME.muted}>{progressBar(pane.progress!)}</Text> : null}
+				{pane.agentHealth.map((ah, i) => {
+					const d = dotForHealth(ah.health);
+					return (
+						<Text key={i}>
+							{"  "}
+							<Text color={AGENT_COLOR[ah.agent]}>{ah.agent}</Text>
+							<Text color={d.color}>{d.glyph}</Text>
+						</Text>
+					);
+				})}
 			</Text>
-			{pane.logTail.map((l, i) => (
-				<Text key={i} wrap="truncate" color="gray">
-					{colorAgents(tailText(l), `l${i}`)}
+			{pane.events.slice(0, 2).map((e, i) => (
+				<Text key={i} wrap="truncate" color={THEME.muted}>
+					{"  "}
+					{padRight(e.step, 9)} {padRight(e.route, 13)} {padRight(e.verdict, 9)}
 				</Text>
 			))}
+		</Box>
+	);
+}
+
+function CompactCard(props: {
+	pane: WallPaneState;
+	selected: boolean;
+	width: number;
+}): ReactElement {
+	const { pane } = props;
+	const statusWord =
+		pane.statusKey === "done"
+			? "done"
+			: pane.statusKey === "canceled"
+				? "canceled"
+				: pane.statusKey === "stuck"
+					? "halted"
+					: pane.statusKey === "idle"
+						? "idle"
+						: "running";
+	const glyph = statusGlyph({
+		workflowStatus:
+			pane.statusKey === "idle"
+				? null
+				: pane.statusKey === "stuck"
+					? "halted"
+					: pane.statusKey,
+		stuck: false,
+	});
+	const borderColor =
+		pane.statusKey === "stuck" || pane.statusKey === "canceled"
+			? THEME.err
+			: props.selected
+				? THEME.accent
+				: THEME.muted;
+	const chevron = props.selected ? "▸ " : "  ";
+	const progressText = pane.progress
+		? `P${pane.progress.current}/${pane.progress.total}`
+		: "—";
+	return (
+		<Box
+			flexDirection="column"
+			width={props.width}
+			borderStyle="single"
+			borderColor={borderColor}
+		>
+			<Text
+				wrap="truncate"
+				bold
+				{...(props.selected ? { color: THEME.accent as string } : {})}
+			>
+				{chevron}
+				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
+				{pane.workflowType ? (
+					<Text color={THEME.muted}> {pane.workflowType}</Text>
+				) : null}
+			</Text>
+			<Text wrap="truncate" color={THEME.muted}>
+				{"  "}
+				{progressText} · {statusWord} · {pane.elapsed}
+			</Text>
 		</Box>
 	);
 }
@@ -97,38 +209,59 @@ export function Wall(props: {
 	rows: number;
 }): ReactElement {
 	const { state } = props;
-	if (state.panes.length === 0) {
+	if (state.sections.length === 0) {
 		return (
 			<Box width={props.cols} flexDirection="column">
-				<Text color="gray">no active collabs (last 30m)</Text>
+				<Text color={THEME.muted}>no active collabs (last 30m)</Text>
 			</Box>
 		);
 	}
 	const colsCount = Math.max(1, Math.floor(props.cols / MIN_PANE_COLS));
 	const paneWidth = Math.floor(props.cols / colsCount);
-	const rowsOfPanes: WallPaneState[][] = [];
-	for (let i = 0; i < state.panes.length; i += colsCount) {
-		rowsOfPanes.push(state.panes.slice(i, i + colsCount));
-	}
+	let globalIdx = 0;
 	return (
 		<Box flexDirection="column" width={props.cols}>
-			{rowsOfPanes.map((rowPanes, ri) => (
-				<Box key={ri} flexDirection="row">
-					{rowPanes.map((p, ci) => {
-						const idx = ri * colsCount + ci;
-						return (
-							<WallPane
-								key={p.collabId}
-								pane={p}
-								selected={idx === state.selected}
-								width={paneWidth}
-							/>
-						);
-					})}
-				</Box>
-			))}
-			<Text color="gray">
-				{`page ${state.page + 1}/${Math.max(1, state.pageCount)} · ${state.totalRuns} runs · ↑↓/jk select · ↵ inspect · [ ] page · q quit`}
+			{state.sections.map((sec) => {
+				const rows: WallPaneState[][] = [];
+				for (let i = 0; i < sec.panes.length; i += colsCount) {
+					rows.push(sec.panes.slice(i, i + colsCount));
+				}
+				return (
+					<Box key={sec.group} flexDirection="column">
+						<Text color={THEME.muted}>{sec.label}</Text>
+						{rows.map((row, ri) => (
+							<Box key={ri} flexDirection="row">
+								{row.map((pane) => {
+									const idx = globalIdx++;
+									const selected = idx === state.selected;
+									return sec.cardKind === "full" ? (
+										<FullCard
+											key={pane.collabId}
+											pane={pane}
+											selected={selected}
+											width={paneWidth}
+										/>
+									) : (
+										<CompactCard
+											key={pane.collabId}
+											pane={pane}
+											selected={selected}
+											width={paneWidth}
+										/>
+									);
+								})}
+							</Box>
+						))}
+					</Box>
+				);
+			})}
+			<Text color={THEME.muted}>
+				{`page ${state.page + 1}/${Math.max(1, state.pageCount)} · ${
+					state.totalRuns
+				} runs · ↑↓/jk select · ↵ inspect · [ ] page · q quit`}
+			</Text>
+			<Text color={THEME.muted}>
+				● running ⚠ stuck/halted ✓ done ✖ canceled ◌ idle
 			</Text>
 		</Box>
 	);
@@ -136,10 +269,33 @@ export function Wall(props: {
 
 export type InspectorSection = "live" | "timeline" | "evidence" | "cost";
 
-function tabBar(active: InspectorSection): string {
-	const t = (k: InspectorSection, n: string) =>
-		k === active ? `[${n}]` : ` ${n} `;
-	return `${t("live", "1 Live")}${t("timeline", "2 Timeline")}${t("evidence", "3 Evidence")}${t("cost", "4 Cost")}`;
+function TabBar(props: { active: InspectorSection }): ReactElement {
+	const t = (k: InspectorSection, n: string): ReactNode => {
+		const text = k === props.active ? `[${n}]` : ` ${n} `;
+		return k === props.active ? (
+			<Text key={k} color={THEME.accent} bold>
+				{text}
+			</Text>
+		) : (
+			<Text key={k} color={THEME.muted}>
+				{text}
+			</Text>
+		);
+	};
+	return (
+		<Text wrap="truncate">
+			{t("live", "1 Live")}
+			{t("timeline", "2 Timeline")}
+			{t("evidence", "3 Evidence")}
+			{t("cost", "4 Cost")}
+		</Text>
+	);
+}
+
+function outcomeColor(outcome: string | null): string | undefined {
+	if (!outcome) return undefined;
+	if (/escalat|halt|fail|cancel/i.test(outcome)) return THEME.err;
+	return THEME.ok;
 }
 
 export function Inspector(props: {
@@ -150,19 +306,28 @@ export function Inspector(props: {
 	rows: number;
 	label: string;
 	workflowType: string | null;
+	workflowStatus?: "running" | "done" | "halted" | "canceled" | null;
 }): ReactElement {
 	const s = props.state;
-	const head = `${props.label} · ${props.workflowType ?? "manual relay"}`;
+	const headGlyph = statusGlyph({
+		workflowStatus: props.workflowStatus ?? null,
+		stuck: props.state.live.stuck,
+	});
 	const innerRows = Math.max(3, props.rows - 2);
 	return (
 		<Box flexDirection="column" width={props.cols}>
 			<Text wrap="truncate" bold>
-				{head}
+				<Text color={headGlyph.color}>{headGlyph.glyph}</Text> {props.label}
+				{" · "}
+				<Text color={THEME.muted}>{props.workflowType ?? "manual relay"}</Text>
 			</Text>
-			<Text wrap="truncate" color="gray">
-				{`${tabBar(props.section)}   1-4 section${
-					props.section === "live" ? " · ↑↓/g/G/f scroll" : ""
-				} · Esc wall · q quit`}
+			<Text wrap="truncate">
+				<TabBar active={props.section} />
+				<Text color={THEME.muted}>
+					{`   1-4 section${
+						props.section === "live" ? " · ↑↓/g/G/f scroll" : ""
+					} · Esc wall · q quit`}
+				</Text>
 			</Text>
 			{props.section === "live" ? (
 				<RelayView
@@ -175,72 +340,87 @@ export function Inspector(props: {
 				<Box flexDirection="column">
 					{s.workflowHistory.length > 0 ? (
 						<Box flexDirection="column">
-							<Text wrap="truncate" color="gray">
+							<Text wrap="truncate" color={THEME.muted}>
 								{`WORKFLOW HISTORY (${s.workflowHistory.length})`}
 							</Text>
-							{s.workflowHistory.map((w) => (
-								<Text
-									key={w.workflowId}
-									wrap="truncate"
-									bold={w.selected}
-									color={w.selected ? "white" : "gray"}
-								>
-									{`${w.selected ? "▸" : " "} ${w.workflowId.slice(0, 12)}  ${
-										w.workflowType
-									}  ${w.status}  ${w.createdAt}`}
-								</Text>
-							))}
+							{s.workflowHistory.map((w) => {
+								// Paused is excluded from this phase — broker types forbid it
+								// from reaching here. Other statuses go through statusGlyph.
+								const wfStatus =
+									w.status === "paused"
+										? null // defensive: should never happen
+										: w.status;
+								const g = statusGlyph({ workflowStatus: wfStatus, stuck: false });
+								return (
+									<Text
+										key={w.workflowId}
+										wrap="truncate"
+										bold={w.selected}
+										color={w.selected ? undefined : THEME.muted}
+									>
+										{`${w.selected ? "▸" : " "} `}
+										<Text color={g.color}>{g.glyph}</Text>
+										{` ${w.workflowId.slice(0, 12)}  ${w.workflowType}  ${w.status}  ${w.createdAt}`}
+									</Text>
+								);
+							})}
 						</Box>
 					) : null}
-					<Text wrap="truncate" color="gray">
-						PHASE ROUNDS TIME ~TOK OUTCOME
+					<Text wrap="truncate" color={THEME.muted}>
+						{`${padRight("PHASE", 18)}  ${padRight("R/MAX", 5)}  ${padRight(
+							"TIME",
+							6,
+						)}  ${padRight("~TOK", 9)}  OUTCOME`}
 					</Text>
 					{s.timeline.map((p) => (
 						<Text key={p.phaseIndex} wrap="truncate">
-							{`${p.phaseName}  ${p.roundsUsed}/${p.maxRounds}  ${
-								p.durationMs == null ? "–" : fmtDur(p.durationMs)
-							}  ≈${p.estInTokens + p.estOutTokens}  ${p.outcome ?? "⋯"}`}
+							{`${padRight(p.phaseName, 18)}  ${padRight(
+								`${p.roundsUsed}/${p.maxRounds}`,
+								5,
+							)}  ${padRight(
+								p.durationMs == null ? "–" : fmtDur(p.durationMs),
+								6,
+							)}  ${padRight(`≈${p.estInTokens + p.estOutTokens}`, 9)}  `}
+							<Text color={outcomeColor(p.outcome)}>{p.outcome ?? "⋯"}</Text>
 						</Text>
 					))}
 					<Text wrap="truncate" bold>
-						{`TOTAL  ≈${
-							s.cost.estInputTokens + s.cost.estOutputTokens
-						}  ${fmtDur(s.cost.totalMs)}`}
+						{`TOTAL  ≈${s.cost.estInputTokens + s.cost.estOutputTokens}  ${fmtDur(
+							s.cost.totalMs,
+						)}`}
 					</Text>
 				</Box>
 			) : props.section === "evidence" ? (
 				<Box flexDirection="column">
-					<Text wrap="truncate" color="gray">
+					<Text wrap="truncate" color={THEME.muted}>
 						{`${s.evidence.phase ?? "—"} · chain ${s.evidence.chainId ?? "—"}`}
 					</Text>
 					{s.evidence.items.map((it, i) => (
 						<Text key={i} wrap="truncate">
-							{`R${it.round ?? "-"} ${it.step ?? "-"} ${it.sender}→${it.target} ${
-								it.verdict ?? "-"
-							} ${it.confidence ?? "-"} ${it.reasonExcerpt}`}
+							{`R${it.round ?? "-"} ${it.step ?? "-"} ${it.sender}→${it.target} `}
+							<Text color={outcomeColor(it.verdict)}>{it.verdict ?? "-"}</Text>
+							{` ${it.confidence ?? "-"} ${it.reasonExcerpt}`}
 						</Text>
 					))}
 					{s.evidence.diagnostics.map((d, i) => (
-						<Text key={`d${i}`} wrap="truncate" color="gray">
+						<Text key={`d${i}`} wrap="truncate" color={THEME.muted}>
 							{`${d.kind}: ${d.text}`}
 						</Text>
 					))}
-					<Text wrap="truncate" color="yellow">
+					<Text wrap="truncate" color={THEME.warn}>
 						{`▸ ${s.evidence.likelyCause}`}
 					</Text>
 				</Box>
 			) : (
 				<Box flexDirection="column">
 					<Text wrap="truncate">
-						{`total ${fmtDur(s.cost.totalMs)} · in ≈${
-							s.cost.estInputTokens
-						} · out ≈${s.cost.estOutputTokens}  (est, not metered)`}
+						{`total ${fmtDur(s.cost.totalMs)} · in ≈${s.cost.estInputTokens} · out ≈${s.cost.estOutputTokens}  (est, not metered)`}
 					</Text>
 					{s.cost.perPhase.map((p, i) => (
-						<Text key={i} wrap="truncate" color="gray">
-							{`${p.phaseName}  in ≈${p.estInTokens}  out ≈${
-								p.estOutTokens
-							}  ${p.durationMs == null ? "–" : fmtDur(p.durationMs)}`}
+						<Text key={i} wrap="truncate" color={THEME.muted}>
+							{`${p.phaseName}  in ≈${p.estInTokens}  out ≈${p.estOutTokens}  ${
+								p.durationMs == null ? "–" : fmtDur(p.durationMs)
+							}`}
 						</Text>
 					))}
 				</Box>
@@ -260,11 +440,6 @@ type KeyEv = {
 // lets us mount it conditionally without breaking the rules of hooks — the
 // same pattern as relay-view-input's InputCapture, but dashboard-owned so
 // relay-view-input.tsx stays untouched (spec §8 / F4).
-//
-// Esc is forwarded as its own boolean (not `inputCh === ""`) because Ink
-// collapses many non-printable keys (Esc, Left/Right arrows, Tab, PageUp,
-// Home, etc.) to the same empty `inputCh`. Without this, Left/Right arrows
-// in Inspector would silently bounce to Wall.
 function DashInput(props: {
 	onKey: (ev: KeyEv) => void;
 	children: ReactNode;
