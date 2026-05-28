@@ -346,8 +346,23 @@ export function createCli(): Command {
 	collab
 		.command("dashboard")
 		.description("Full-screen dashboard: live wall of recently-active runs + per-run inspector")
-		.action(async () => {
-			await runCollabDashboard();
+		.option(
+			"--window <duration>",
+			"Eligible-collab activity window. Accepts ms or Ns/Nm/Nh/Nd (e.g. 45s, 30m, 2h, 1d), or 'all' for no limit. Default: 30m.",
+		)
+		.action(async (opts: { window?: string }) => {
+			const { parseDashboardWindow } = await import("./runtime/dashboard.js");
+			const windowMs =
+				opts.window != null ? parseDashboardWindow(opts.window) : null;
+			if (opts.window != null && windowMs == null) {
+				console.error(
+					`Invalid --window value: ${JSON.stringify(opts.window)}. Use e.g. 30m, 2h, 1d, 1800000, or 'all'.`,
+				);
+				process.exit(2);
+			}
+			await runCollabDashboard(
+				windowMs != null ? { windowMs } : undefined,
+			);
 		});
 
 	collab

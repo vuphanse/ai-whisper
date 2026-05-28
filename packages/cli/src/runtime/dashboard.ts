@@ -62,7 +62,35 @@ export function buildMountAliveByAgent(
 }
 
 const DEFAULT_WINDOW_MS = 1_800_000;
-function resolveDashboardWindowMs(): number {
+
+// Parse a human-friendly duration ("30m", "2h", "1d", "45s", "all", or raw ms).
+// Returns null if the input is unparseable so the caller can fall back.
+export function parseDashboardWindow(input: string | undefined): number | null {
+	if (input == null) return null;
+	const s = input.trim().toLowerCase();
+	if (s === "") return null;
+	if (s === "all" || s === "max" || s === "∞") {
+		// Effectively "no window" — collabs with any activity ever are eligible.
+		return Number.MAX_SAFE_INTEGER;
+	}
+	const m = /^(\d+(?:\.\d+)?)(ms|s|m|h|d)?$/.exec(s);
+	if (!m) return null;
+	const value = Number.parseFloat(m[1]!);
+	if (!Number.isFinite(value) || value <= 0) return null;
+	const unit = m[2] ?? "ms";
+	const mult =
+		unit === "ms" ? 1
+		: unit === "s"  ? 1_000
+		: unit === "m"  ? 60_000
+		: unit === "h"  ? 3_600_000
+		: /* "d" */       86_400_000;
+	return Math.floor(value * mult);
+}
+
+function resolveDashboardWindowMs(override?: number): number {
+	if (typeof override === "number" && Number.isFinite(override) && override > 0) {
+		return override;
+	}
 	const raw = process.env.AI_WHISPER_DASHBOARD_WINDOW_MS;
 	if (raw === undefined) return DEFAULT_WINDOW_MS;
 	const n = Number(raw);
@@ -76,6 +104,9 @@ export function createDashboardRuntime(input: {
 	dashboardId: string;
 	stdout: NodeJS.WritableStream;
 	pollIntervalMs?: number;
+	/** Override the eligible-collab window (ms). When set, this beats the
+	 * AI_WHISPER_DASHBOARD_WINDOW_MS env var and the 30-minute default. */
+	windowMs?: number;
 	/** Recycle (unmount+remount) the ink instance every N actual renders to
 	 * hard-bound ink's per-rerender memory retention. Test seam; default 750. */
 	__recycleEveryRenders?: number;
@@ -99,7 +130,7 @@ export function createDashboardRuntime(input: {
 	const loopDone = new Promise<void>((r) => (loopResolve = r));
 	const cols = (input.stdout as { columns?: number }).columns ?? 120;
 	const rows = (input.stdout as { rows?: number }).rows ?? 40;
-	const windowMs = resolveDashboardWindowMs();
+	const windowMs = resolveDashboardWindowMs(input.windowMs);
 	// Memory-leak controls. ink.rerender() retains ~KB per call (ink 7.0.3), so
 	// the 250ms poll OOM'd overnight. (1) skip ink.rerender when the rendered
 	// frame is byte-identical to the last (no visual change → no leak); and

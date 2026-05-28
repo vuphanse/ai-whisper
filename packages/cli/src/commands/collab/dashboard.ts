@@ -12,6 +12,8 @@ type RuntimeLike = {
 
 export async function runCollabDashboard(input?: {
 	stdout?: NodeJS.WritableStream;
+	/** Eligible-collab window in ms (overrides env + default). */
+	windowMs?: number;
 	__createBroker?: () => BrokerLike;
 	__createRuntime?: (
 		broker: BrokerLike,
@@ -39,6 +41,7 @@ export async function runCollabDashboard(input?: {
 			broker: broker as never,
 			dashboardId,
 			stdout,
+			...(input?.windowMs != null ? { windowMs: input.windowMs } : {}),
 		}) as unknown as RuntimeLike);
 
 	let stoppedBySignal = false;
