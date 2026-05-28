@@ -178,3 +178,140 @@ describe("Wall — theme migration (Task 8)", () => {
 		expect(out).not.toMatch(/[╭╮╰╯]/);
 	});
 });
+
+describe("Wall — full ACTIVE card (Task 9)", () => {
+	it("full ACTIVE card renders chevron, glyph, label, dimmed type, round, progress bar, and agent dots", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+			selected: 0,
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("▸ ● mylabel");
+		expect(out).toContain("complex-bug-fixing");
+		expect(out).toContain("R1/3");
+		expect(out).toContain("P2/5");
+		expect(out).toMatch(/[▰▱]/); // progress bar present
+		expect(out).toContain("codex");
+		expect(out).toContain("claude");
+	});
+
+	it("narrow pane drops the bar and shows P n/total text only", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+			selected: 0,
+		});
+		const { lastFrame } = render(<Wall state={state} cols={45} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("P2/5");
+		expect(out).not.toMatch(/[▰▱]/);
+	});
+
+	it("renders the degraded per-agent dot as ◐ in THEME.warn (yellow SGR 33)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "healthy" },
+								{ agent: "claude", health: "degraded" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("◐");
+		// degraded dot uses THEME.warn (yellow). Allow either SGR 33 or the 256/16M variants chalk may emit.
+		expect(raw).toMatch(/\x1b\[(33|93|38;5;\d+|38;2;[\d;]+)m[^\x1b]*◐/);
+		// claude name uses AGENT_COLOR.claude (#D97757). Allow 256-color or true-color encodings.
+		expect(raw).toMatch(/\x1b\[(38;5;\d+|38;2;217;119;87)m[^\x1b]*claude/);
+	});
+
+	it("renders the dead per-agent dot as ○ in THEME.err (red SGR 31)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "dead" },
+								{ agent: "claude", health: "healthy" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("○");
+		// dead dot uses THEME.err (red). Allow SGR 31 or 256/truecolor encodings.
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m[^\x1b]*○/);
+		// codex name uses AGENT_COLOR.codex (#5FB3C9).
+		expect(raw).toMatch(/\x1b\[(38;5;\d+|38;2;95;179;201)m[^\x1b]*codex/);
+	});
+
+	it("renders a healthy per-agent dot as ● in THEME.ok (green SGR 32)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "healthy" },
+								{ agent: "claude", health: "healthy" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		// healthy dot uses THEME.ok (green).
+		expect(raw).toMatch(/\x1b\[(32|92|38;5;\d+|38;2;[\d;]+)m[^\x1b]*●/);
+	});
+});

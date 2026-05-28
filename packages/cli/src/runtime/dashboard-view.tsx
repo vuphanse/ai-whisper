@@ -52,6 +52,7 @@ function FullCard(props: {
 	pane: WallPaneState;
 	selected: boolean;
 	width: number;
+	totalCols?: number;
 }): ReactElement {
 	const { pane } = props;
 	const chevron = props.selected ? "▸ " : "  ";
@@ -94,7 +95,12 @@ function FullCard(props: {
 	const progressText = pane.progress
 		? `P${pane.progress.current}/${pane.progress.total}`
 		: "—";
-	const showBar = pane.progress != null && props.width >= NARROW_PANE_COLS;
+	// Narrow-pane fallback uses the TERMINAL width (not the per-pane column
+	// width) so a 2-column 80-col terminal still gets the bar — a paneWidth of
+	// 40 is below NARROW_PANE_COLS by construction at 80 cols, but the spec's
+	// narrow-pane budget is about the whole TUI panel, not a single pane.
+	const narrowRef = props.totalCols ?? props.width;
+	const showBar = pane.progress != null && narrowRef >= NARROW_PANE_COLS;
 	const roundText =
 		pane.round != null ? `  R${pane.round.current}/${pane.round.max}` : "";
 
@@ -240,6 +246,7 @@ export function Wall(props: {
 											pane={pane}
 											selected={selected}
 											width={paneWidth}
+											totalCols={props.cols}
 										/>
 									) : (
 										<CompactCard
