@@ -200,6 +200,10 @@ export type RelayViewState = {
 	elapsed: string;
 	turn: string;
 	health: string;
+	agentHealth: Array<{
+		agent: "codex" | "claude";
+		health: "healthy" | "degraded" | "dead";
+	}>;
 	live: string;
 	why: string | null; // when set, render the red ⚠ why row instead of live
 	last: string;
@@ -345,16 +349,22 @@ export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
 	// Three-way health glyph (Bug A): a bound, non-offline agent must NOT read
 	// as dead. healthy → "●"; degraded (alive but impaired) → "◐(degraded)";
 	// offline / missing session → "●(dead)".
-	const dots = RELAY_AGENTS
-		.map((a) => {
-			const sess = snap.sessions.find((x) => x.agentType === a);
+	const agentHealth = RELAY_AGENTS.map((a) => {
+		const sess = snap.sessions.find((x) => x.agentType === a);
+		const health: "healthy" | "degraded" | "dead" =
+			sess?.healthState === "healthy"
+				? "healthy"
+				: sess?.healthState === "degraded"
+					? "degraded"
+					: "dead";
+		return { agent: a, health };
+	});
+
+	const dots = agentHealth
+		.map(({ agent, health }) => {
 			const glyph =
-				sess?.healthState === "healthy"
-					? "●"
-					: sess?.healthState === "degraded"
-						? "◐(degraded)"
-						: "●(dead)";
-			return `${glyph} ${a}`;
+				health === "healthy" ? "●" : health === "degraded" ? "◐(degraded)" : "●(dead)";
+			return `${glyph} ${agent}`;
 		})
 		.join("  ");
 
@@ -410,6 +420,7 @@ export function buildRelayViewState(snap: RelayViewSnapshot): RelayViewState {
 		elapsed,
 		turn,
 		health,
+		agentHealth,
 		live: liveText,
 		why,
 		last,
