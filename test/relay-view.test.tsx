@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 import { RelayView } from "../packages/cli/src/runtime/relay-view.tsx";
 import type { RelayViewState, LogLine } from "../packages/cli/src/runtime/relay-view-state.ts";
 
+// Strip ANSI SGR sequences so substring assertions don't depend on whether
+// chalk emits color codes (FORCE_COLOR=3 set by test/setup-color.ts).
+// eslint-disable-next-line no-control-regex
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+
 describe("ink toolchain", () => {
 	it("renders JSX via ink-testing-library", () => {
 		const { lastFrame } = render(<Text>hello-ink</Text>);
@@ -29,7 +34,7 @@ describe("RelayView status block", () => {
 		const { lastFrame } = render(
 			<RelayView state={state} viewport={{ offset: 0, follow: true }} rows={24} cols={100} />,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("wf │ spec-driven-development");
 		expect(f).toContain("progress │ Phase 3/4 plan-execution");
 		expect(f).toContain("elapsed │ total 7m12s");
@@ -46,7 +51,7 @@ describe("RelayView status block", () => {
 				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
 			/>,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("⚠ why │ STUCK 3m02s — round 5/5");
 		expect(f).not.toContain("live │");
 	});
@@ -58,7 +63,7 @@ describe("RelayView status block", () => {
 				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
 			/>,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("live │ idle 8s · auto-handback in 22s");
 		expect(f).not.toContain("⚠ why");
 	});
@@ -70,7 +75,7 @@ describe("RelayView status block", () => {
 				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
 			/>,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("live │ idle 8s");
 		expect(f).not.toContain("should be ignored");
 		expect(f).not.toContain("⚠ why");
@@ -83,7 +88,7 @@ describe("RelayView status block", () => {
 				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
 			/>,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("⚠ why │ STUCK 3m02s — round 5/5");
 		expect(f).not.toContain(state.live); // the live string never appears when stuck
 	});
@@ -96,7 +101,7 @@ describe("RelayView status block", () => {
 				viewport={{ offset: 0, follow: true }} rows={24} cols={100}
 			/>,
 		);
-		const f = lastFrame()!;
+		const f = stripAnsi(lastFrame()!);
 		expect(f).toContain("health │ ●(dead) codex");
 	});
 });
