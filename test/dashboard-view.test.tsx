@@ -244,6 +244,55 @@ describe("Wall — full ACTIVE card (Task 9)", () => {
 		expect(out).not.toMatch(/[▰▱]/);
 	});
 
+	it("narrow pane (80-col, 2-col grid → 40-col panes) abbreviates the workflow type so the header doesn't truncate", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "ai-whisper",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("bugfix");
+		expect(out).not.toContain("complex-bug-fixing");
+	});
+
+	it("wide pane (cols=96 → 2×48-col panes, paneWidth≥NARROW_PANE_COLS) keeps the full dimmed workflow type", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "ai-whisper",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+		});
+		// cols=96 → colsCount=floor(96/40)=2 → paneWidth=48 (≥NARROW_PANE_COLS).
+		const { lastFrame } = render(<Wall state={state} cols={96} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("complex-bug-fixing");
+		expect(out).not.toMatch(/\bbugfix\b/);
+	});
+
 	it("narrow pane drops the bar and shows P n/total text only", () => {
 		const state = mkWallState({
 			sections: [
@@ -407,10 +456,13 @@ describe("Wall — compact card (Task 11)", () => {
 				}),
 			],
 		});
+		// cols=80 → paneWidth=40 (< NARROW_PANE_COLS=48) → workflow type
+		// renders in abbreviated form. "spec-driven-development" → "sdd".
 		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
 		const out = stripAnsi(lastFrame() ?? "");
 		expect(out).toContain("✓ donelabel");
-		expect(out).toContain("spec-driven-development");
+		expect(out).toContain("sdd");
+		expect(out).not.toContain("spec-driven-development");
 		expect(out).toContain("P5/5");
 		expect(out).toContain("done");
 		expect(out).toContain("4m12s");

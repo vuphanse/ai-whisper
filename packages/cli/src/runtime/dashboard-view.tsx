@@ -13,6 +13,23 @@ const NARROW_PANE_COLS = 48;
 const BAR_FILLED = "▰";
 const BAR_EMPTY = "▱";
 
+// Map verbose workflow-type IDs to short, dimmed badges shown in the card
+// header on narrow panes (width < NARROW_PANE_COLS). The Inspector always
+// renders the full name. Unknown types fall back to the first dash-segment
+// (e.g. "code-review" → "code"), capped at 8 chars.
+const TYPE_ABBREVIATION: Record<string, string> = {
+	"complex-bug-fixing": "bugfix",
+	"spec-driven-development": "sdd",
+	"ralph-loop": "ralph",
+};
+
+export function abbreviateWorkflowType(full: string): string {
+	const known = TYPE_ABBREVIATION[full];
+	if (known) return known;
+	const head = full.split("-")[0] ?? full;
+	return head.length > 8 ? head.slice(0, 8) : head;
+}
+
 export function gridCapacity(cols: number, rows: number): number {
 	const c = Math.max(1, Math.floor(cols / MIN_PANE_COLS));
 	const r = Math.max(1, Math.floor(rows / MIN_PANE_ROWS));
@@ -55,6 +72,15 @@ function FullCard(props: {
 }): ReactElement {
 	const { pane } = props;
 	const chevron = props.selected ? "▸ " : "  ";
+	// Wide pane (≥ NARROW_PANE_COLS) shows the full workflow type dimmed.
+	// Narrow pane abbreviates so the header doesn't truncate (e.g.
+	// "complex-bug-fixing" → "bugfix"). Inspector always shows the full name.
+	const isWide = props.width >= NARROW_PANE_COLS;
+	const typeText = pane.workflowType
+		? isWide
+			? pane.workflowType
+			: abbreviateWorkflowType(pane.workflowType)
+		: null;
 
 	if (pane.statusKey === "stuck") {
 		// Stuck card: red border + ⚠ glyph, why text dominant.
@@ -70,9 +96,7 @@ function FullCard(props: {
 				<Text wrap="truncate" bold>
 					{chevron}
 					<Text color={THEME.err}>⚠</Text> {pane.label}
-					{pane.workflowType ? (
-						<Text color={THEME.muted}> {pane.workflowType}</Text>
-					) : null}
+					{typeText ? <Text color={THEME.muted}> {typeText}</Text> : null}
 				</Text>
 				<Text wrap="truncate" color={THEME.err}>
 					{"  "}
@@ -99,7 +123,7 @@ function FullCard(props: {
 	// progress bar collapses to plain `P<n>/<total>` text. Terminal-total
 	// width is irrelevant — a 2-col 80-col terminal renders 40-col panes,
 	// which are narrow, so the bar drops.
-	const showBar = pane.progress != null && props.width >= NARROW_PANE_COLS;
+	const showBar = pane.progress != null && isWide;
 	const roundText =
 		pane.round != null ? `  R${pane.round.current}/${pane.round.max}` : "";
 
@@ -117,9 +141,7 @@ function FullCard(props: {
 			>
 				{chevron}
 				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
-				{pane.workflowType ? (
-					<Text color={THEME.muted}> {pane.workflowType}</Text>
-				) : null}
+				{typeText ? <Text color={THEME.muted}> {typeText}</Text> : null}
 				{roundText ? <Text color={THEME.muted}>{roundText}</Text> : null}
 			</Text>
 			<Text wrap="truncate">
@@ -179,6 +201,12 @@ function CompactCard(props: {
 				? THEME.select
 				: THEME.muted;
 	const chevron = props.selected ? "▸ " : "  ";
+	const isWide = props.width >= NARROW_PANE_COLS;
+	const typeText = pane.workflowType
+		? isWide
+			? pane.workflowType
+			: abbreviateWorkflowType(pane.workflowType)
+		: null;
 	const progressText = pane.progress
 		? `P${pane.progress.current}/${pane.progress.total}`
 		: "—";
@@ -196,9 +224,7 @@ function CompactCard(props: {
 			>
 				{chevron}
 				<Text color={glyph.color}>{glyph.glyph}</Text> {pane.label}
-				{pane.workflowType ? (
-					<Text color={THEME.muted}> {pane.workflowType}</Text>
-				) : null}
+				{typeText ? <Text color={THEME.muted}> {typeText}</Text> : null}
 			</Text>
 			<Text wrap="truncate" color={THEME.muted}>
 				{"  "}
