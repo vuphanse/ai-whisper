@@ -440,3 +440,80 @@ describe("Wall — compact card (Task 11)", () => {
 		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m/);
 	});
 });
+
+describe("Wall — sectioned grid + footer (Task 12)", () => {
+	it("Wall renders a labeled section header with the group count for each non-empty section", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({ collabId: "a1", statusKey: "running", label: "alpha" }),
+						mkPane({ collabId: "a2", statusKey: "running", label: "beta" }),
+					],
+				}),
+				mkSection({
+					group: "halted",
+					panes: [
+						mkPane({
+							collabId: "h1",
+							statusKey: "stuck",
+							label: "halt1",
+							round: null,
+							progress: { current: 1, total: 4 },
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "d1",
+							statusKey: "done",
+							label: "donelabel",
+							round: null,
+							progress: { current: 5, total: 5 },
+							elapsed: "4m12s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("ACTIVE (2)");
+		expect(out).toContain("HALTED (1)");
+		expect(out).toContain("DONE / CANCELED (1)");
+	});
+
+	it("Wall footer includes the keybinding row and the glyph legend", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [mkPane({ collabId: "a1", statusKey: "running", label: "alpha" })],
+				}),
+			],
+			pageCount: 2,
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/page \d+\/\d+/);
+		expect(out).toContain("● running");
+		expect(out).toContain("⚠ stuck/halted");
+		expect(out).toContain("✓ done");
+		expect(out).toContain("✖ canceled");
+		expect(out).toContain("◌ idle");
+	});
+
+	it("empty Wall keeps the existing 'no active collabs' message", () => {
+		const empty = { sections: [], panes: [], page: 0, pageCount: 1, totalRuns: 0, selected: 0 } as WallState;
+		const { lastFrame } = render(<Wall state={empty} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("no active collabs");
+	});
+});
