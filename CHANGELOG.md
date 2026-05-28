@@ -5,6 +5,70 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-28
+
+### Added
+
+- **Status-first dashboard redesign.** `whisper collab dashboard` is rebuilt
+  around a single colored glyph per card (`●` running, `⚠` stuck/halted, `✓`
+  done, `✖` canceled, `◌` idle / manual relay) so state reads at a glance and
+  the screaming `Chain active · ALIVE` text is gone. The Wall is now a grouped
+  priority-fill grid with section headers and counts —
+  **ACTIVE → IDLE/MANUAL → HALTED → DONE/CANCELED** — laid out in
+  most-recently-kicked-off order within each group, with stuck-but-running
+  workflows pinned to the front of ACTIVE so escalations stay loud. ACTIVE
+  renders full 4-line cards (phase progress bar `▰▱`, per-agent health dots,
+  two latest event rows); HALTED / DONE / CANCELED / IDLE collapse to compact
+  2-line cards so the operator sees ~12 collabs at a time instead of ~3.
+  ACTIVE is never dropped to make room for DONE — lower-priority groups only
+  fill the leftover row budget — and the legend lives in the footer. The
+  Inspector adopts the same visual language: status glyph in the header,
+  terracotta-accented active tab, aligned/colored timeline + cost + evidence
+  tables, and workflow-history rows prefixed by the same glyph map.
+- **Shared `THEME` + `AGENT_COLOR` palette borrowed from ai-cortex.** A new
+  `packages/cli/src/runtime/theme.ts` centralizes all dashboard colors —
+  terracotta `#D97757` accent for brand / Inspector active tab,
+  palette-green `#7FB069` for card selection (visually distinct from the red
+  stuck / canceled border), plus `ok`/`warn`/`err`/`muted` tokens. Per-agent
+  tokens render `claude` in signature terracotta and `codex` in palette teal
+  `#5FB3C9`, replacing the legacy cyan/magenta in event lines. Card borders
+  are now `single` style to match ai-cortex.
+- **`whisper collab dashboard --window <duration>` flag.** Operator can widen
+  or shrink the eligible-collab activity window from the command line without
+  setting `AI_WHISPER_DASHBOARD_WINDOW_MS`. Accepts raw ms or human suffixes
+  (`Ns`/`Nm`/`Nh`/`Nd`, decimals fine: `1.5h`) and the literal `all` (or
+  `max` / `∞`) for unbounded — useful for inspecting historical or finished
+  collabs that fell out of the default 30-minute window. Precedence: flag >
+  env > default.
+
+### Changed
+
+- **Workflow type auto-abbreviates on narrow cards.** When a card's pane is
+  below the 48-column threshold (e.g. a 2-column grid on an 80-col terminal),
+  the dimmed workflow type renders as `bugfix` / `sdd` / `ralph` instead of
+  the full `complex-bug-fixing` / `spec-driven-development` / `ralph-loop` to
+  keep the header from truncating. Unknown types fall back to the first
+  dash-segment, capped at 8 chars. Wide panes and the Inspector always show
+  the full name.
+- **Elapsed counter freezes on terminal cards.** A `done`/`canceled`/`halted`
+  workflow's elapsed value is now computed against its `last_activity_at` end
+  time instead of `now`, so the displayed duration reflects the run's actual
+  length and stops ticking. Running workflows still advance normally.
+- **`CollabSummary.workflowCreatedAt` is now projected.** A single additive
+  nullable field on the broker's `CollabSummary` carries the bound workflow's
+  `created_at`, so the Wall can sort collabs by kickoff recency. The
+  eligible-collab query, finished backfill, and every other type/cast remain
+  untouched.
+
+### Fixed
+
+- **`--window all` no longer crashes the dashboard.** `Number.MAX_SAFE_INTEGER`
+  underflowed `Date.now() - sinceMs` below epoch and
+  `new Date(<negative>).toISOString()` threw `RangeError: Invalid time value`.
+  The eligible-collab cutoff is now clamped to ≥ 0, degenerating to
+  `1970-01-01` for unbounded windows — exactly the "any collab with activity
+  ever" semantic the operator asked for.
+
 ## [0.3.0] - 2026-05-28
 
 ### Added
@@ -169,6 +233,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.4.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.0
