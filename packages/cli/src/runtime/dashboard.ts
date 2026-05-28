@@ -4,7 +4,6 @@ import type { ReactElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
 import {
-	gridCapacity,
 	Wall,
 	Inspector,
 	DashboardApp,
@@ -13,9 +12,10 @@ import {
 import type { Viewport } from "./relay-view.js";
 import { logViewportHeight } from "./relay-view.js";
 import {
+	allocateWallSections,
 	buildWallState,
 	buildInspectorState,
-	selectWallPage,
+	partitionWallGroups,
 	type InspectorState,
 	type PhaseRunRef,
 	type RelayViewSnapshot,
@@ -313,13 +313,16 @@ export function createDashboardRuntime(input: {
 		}
 
 		const summaries = c.listActiveCollabSummaries(windowMs, isoNow);
-		const capacity = gridCapacity(cols, rows);
-		const sel = selectWallPage({
-			summaries,
-			capacity,
+		// Use the sectioned allocator to pre-decide which summaries are visible
+		// on this page so per-collab snapshot fetches stay bounded to that set.
+		const groups = partitionWallGroups(summaries);
+		const allocPreview = allocateWallSections({
+			groups,
+			cols,
+			rows,
 			page: wallPage,
-			selected: wallSelected,
 		});
+		const visibleSummaries = allocPreview.sections.flatMap((sec) => sec.cards);
 		const snapshots: Record<
 			string,
 			{
@@ -328,7 +331,7 @@ export function createDashboardRuntime(input: {
 				totalPhases: number;
 			}
 		> = {};
-		for (const s of sel.pageSummaries) {
+		for (const s of visibleSummaries) {
 			// Each pane represents ONE run on this collab — either a workflow
 			// instance (`s.workflowId`) or the manual relay slice. Scope the
 			// tail so we don't tail-mix sibling runs on the same collab.
@@ -362,7 +365,8 @@ export function createDashboardRuntime(input: {
 			summaries,
 			now: isoNow,
 			idleThresholdMs: 30_000,
-			capacity,
+			cols,
+			rows,
 			page: wallPage,
 			selected: wallSelected,
 			snapshots,

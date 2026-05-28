@@ -32,7 +32,16 @@ export type WallPaneState = {
 	elapsed: string; // for compact card line 2
 	cardKind: "full" | "compact";
 };
+export type WallStateSection = {
+	group: WallGroupKey;
+	label: string;
+	cardKind: "full" | "compact";
+	panes: WallPaneState[];
+};
 export type WallState = {
+	sections: WallStateSection[];
+	// `panes` flat view across all sections in render order — kept for callers
+	// that only need a flat list (host snapshot-fetch keys, selection cursor).
 	panes: WallPaneState[];
 	page: number;
 	pageCount: number;
@@ -167,6 +176,149 @@ export function partitionWallGroups(summaries: CollabSummary[]): WallGroups {
 	halted.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
 	doneCanceled.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
 	return { active, idleManual, halted, doneCanceled };
+}
+
+// ---- Priority-fill allocation + paging across sections ----
+
+const MIN_PANE_COLS = 40;
+const CARD_HEIGHT = { full: 6, compact: 4 } as const; // border (2) + content
+const HEADER_ROWS = 1;
+
+const GROUP_ORDER: WallGroupKey[] = ["active", "idleManual", "halted", "doneCanceled"];
+const GROUP_LABEL: Record<WallGroupKey, string> = {
+	active: "ACTIVE",
+	idleManual: "IDLE / MANUAL",
+	halted: "HALTED",
+	doneCanceled: "DONE / CANCELED",
+};
+
+export type WallSection = {
+	group: WallGroupKey;
+	label: string;
+	cardKind: "full" | "compact";
+	cards: CollabSummary[];
+};
+
+export type WallSectionsResult = {
+	sections: WallSection[];
+	page: number;
+	pageCount: number;
+	totalRuns: number;
+};
+
+function cardKindFor(group: WallGroupKey): "full" | "compact" {
+	return group === "active" ? "full" : "compact";
+}
+
+function fillOnePage(input: {
+	pools: Record<WallGroupKey, CollabSummary[]>;
+	cols: number;
+	rows: number;
+}): { sections: WallSection[]; consumed: Record<WallGroupKey, number> } {
+	const colsCount = Math.max(1, Math.floor(input.cols / MIN_PANE_COLS));
+	let rowsLeft = input.rows;
+	const consumed: Record<WallGroupKey, number> = {
+		active: 0,
+		idleManual: 0,
+		halted: 0,
+		doneCanceled: 0,
+	};
+	const sections: WallSection[] = [];
+	for (const group of GROUP_ORDER) {
+		const pool = input.pools[group];
+		if (pool.length === 0) continue;
+		if (rowsLeft <= HEADER_ROWS) break;
+		const cardKind = cardKindFor(group);
+		const cardRows = CARD_HEIGHT[cardKind];
+		const availableForCards = rowsLeft - HEADER_ROWS;
+		const cardRowsFit = Math.floor(availableForCards / cardRows);
+		if (cardRowsFit === 0) break;
+		const cap = cardRowsFit * colsCount;
+		const taken = pool.slice(0, Math.min(cap, pool.length));
+		if (taken.length === 0) break;
+		const rowsTaken = HEADER_ROWS + Math.ceil(taken.length / colsCount) * cardRows;
+		rowsLeft -= rowsTaken;
+		consumed[group] = taken.length;
+		sections.push({
+			group,
+			label: `${GROUP_LABEL[group]} (${pool.length})`,
+			cardKind,
+			cards: taken,
+		});
+	}
+	return { sections, consumed };
+}
+
+export function allocateWallSections(input: {
+	groups: WallGroups;
+	cols: number;
+	rows: number;
+	page: number;
+}): WallSectionsResult {
+	const totalRuns =
+		input.groups.active.length +
+		input.groups.idleManual.length +
+		input.groups.halted.length +
+		input.groups.doneCanceled.length;
+
+	// Walk pages forward until we reach the requested page or run out of cards.
+	let pool: Record<WallGroupKey, CollabSummary[]> = {
+		active: [...input.groups.active],
+		idleManual: [...input.groups.idleManual],
+		halted: [...input.groups.halted],
+		doneCanceled: [...input.groups.doneCanceled],
+	};
+	let page = 0;
+	let result = fillOnePage({ pools: pool, cols: input.cols, rows: input.rows });
+	let lastNonEmpty = result;
+	while (page < input.page && result.sections.length > 0) {
+		const nextPool = {
+			active: pool.active.slice(result.consumed.active),
+			idleManual: pool.idleManual.slice(result.consumed.idleManual),
+			halted: pool.halted.slice(result.consumed.halted),
+			doneCanceled: pool.doneCanceled.slice(result.consumed.doneCanceled),
+		};
+		const nextResult = fillOnePage({ pools: nextPool, cols: input.cols, rows: input.rows });
+		if (nextResult.sections.length === 0) break;
+		pool = nextPool;
+		page += 1;
+		result = nextResult;
+		lastNonEmpty = result;
+	}
+	// If the caller requested a page past the last drawable page, clamp the
+	// returned `page` to the last filled page (the existing flat-paging
+	// contract) — never an empty rendering of a higher page.
+	if (page < input.page) {
+		// stayed on the last non-empty page; expose that page index, not the request.
+	}
+	result = lastNonEmpty;
+	// pageCount: simulate forward from the original groups until pool is drained.
+	let pageCount = totalRuns === 0 ? 0 : 1;
+	{
+		let p: Record<WallGroupKey, CollabSummary[]> = {
+			active: [...input.groups.active],
+			idleManual: [...input.groups.idleManual],
+			halted: [...input.groups.halted],
+			doneCanceled: [...input.groups.doneCanceled],
+		};
+		let remaining =
+			p.active.length + p.idleManual.length + p.halted.length + p.doneCanceled.length;
+		while (remaining > 0) {
+			const r = fillOnePage({ pools: p, cols: input.cols, rows: input.rows });
+			const taken =
+				r.consumed.active + r.consumed.idleManual + r.consumed.halted + r.consumed.doneCanceled;
+			if (taken === 0) break; // guard against infinite loop on impossibly small terminals.
+			p = {
+				active: p.active.slice(r.consumed.active),
+				idleManual: p.idleManual.slice(r.consumed.idleManual),
+				halted: p.halted.slice(r.consumed.halted),
+				doneCanceled: p.doneCanceled.slice(r.consumed.doneCanceled),
+			};
+			remaining -= taken;
+			if (remaining > 0) pageCount += 1;
+		}
+	}
+	return { sections: result.sections, page, pageCount, totalRuns };
 }
 
 function attentionRank(s: CollabSummary): number {
@@ -496,7 +648,13 @@ export function buildWallState(input: {
 	summaries: CollabSummary[];
 	now: string;
 	idleThresholdMs: number;
-	capacity: number;
+	// `capacity` is retained for back-compat. When set and no `cols`/`rows` are
+	// supplied, a synthetic geometry (1 col × capacity × full-card height + 1
+	// section header) is used so a single ACTIVE section emerges with capacity
+	// cards — matching the old flat behaviour for legacy callers.
+	capacity?: number;
+	cols?: number;
+	rows?: number;
 	page: number;
 	selected: number;
 	snapshots: Record<
@@ -504,25 +662,40 @@ export function buildWallState(input: {
 		{ handoffs: RelayHandoffLogRow[]; phaseRuns: PhaseRunRef[]; totalPhases: number }
 	>;
 }): WallState {
-	const sel = selectWallPage({
-		summaries: input.summaries,
-		capacity: input.capacity,
-		page: input.page,
-		selected: input.selected,
-	});
-	const panes: WallPaneState[] = sel.pageSummaries.map((s) => {
-		const snap = input.snapshots[s.collabId] ?? {
-			handoffs: [],
-			phaseRuns: [],
-			totalPhases: 0,
-		};
-		return projectPane(s, input.now, input.idleThresholdMs, snap);
-	});
+	const groups = partitionWallGroups(input.summaries);
+	let cols: number;
+	let rows: number;
+	if (input.cols != null && input.rows != null) {
+		cols = input.cols;
+		rows = input.rows;
+	} else {
+		const cap = Math.max(1, Math.floor(input.capacity ?? 1));
+		// synthetic geometry: 1 col × enough rows for `cap` full cards + header
+		cols = MIN_PANE_COLS;
+		rows = HEADER_ROWS + cap * CARD_HEIGHT.full;
+	}
+	const alloc = allocateWallSections({ groups, cols, rows, page: input.page });
+	const sections: WallStateSection[] = alloc.sections.map((sec) => ({
+		group: sec.group,
+		label: sec.label,
+		cardKind: sec.cardKind,
+		panes: sec.cards.map((sum) => {
+			const snap = input.snapshots[sum.collabId] ?? {
+				handoffs: [],
+				phaseRuns: [],
+				totalPhases: 0,
+			};
+			return projectPane(sum, input.now, input.idleThresholdMs, snap);
+		}),
+	}));
+	const panes = sections.flatMap((sec) => sec.panes);
+	const selected = Math.min(Math.max(0, input.selected), Math.max(0, panes.length - 1));
 	return {
+		sections,
 		panes,
-		page: sel.page,
-		pageCount: sel.pageCount,
-		totalRuns: sel.totalRuns,
-		selected: sel.selected,
+		page: alloc.page,
+		pageCount: alloc.pageCount,
+		totalRuns: alloc.totalRuns,
+		selected,
 	};
 }

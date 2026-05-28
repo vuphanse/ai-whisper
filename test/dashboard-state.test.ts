@@ -32,17 +32,30 @@ function sum(p: Partial<CollabSummary>): CollabSummary {
 const emptySnap = { handoffs: [], phaseRuns: [], totalPhases: 4 };
 
 describe("buildWallState", () => {
-	it("attention-sorts stuck → active → idle → done, tiebreak lastActivity desc", () => {
+	it("sections sort ACTIVE (stuck-pinned) → IDLE/MANUAL → DONE; recency desc within each", () => {
 		const summaries = [
-			sum({ collabId: "done", workflowStatus: "done", chainStatus: "done", lastActivityAt: "2026-05-20T00:09:00.000Z" }),
-			sum({ collabId: "idle", workflowStatus: null, chainStatus: null, workflowId: null, lastActivityAt: "2026-05-20T00:08:00.000Z" }),
-			sum({ collabId: "stuckA", chainStatus: "escalated", lastActivityAt: "2026-05-20T00:01:00.000Z" }),
-			sum({ collabId: "active", workflowStatus: "running", chainStatus: "active", lastActivityAt: "2026-05-20T00:07:00.000Z" }),
-			sum({ collabId: "stuckB", chainStatus: "escalated", lastActivityAt: "2026-05-20T00:05:00.000Z" }),
+			sum({ collabId: "done", workflowStatus: "done", chainStatus: "done", workflowCreatedAt: "2026-05-20T00:09:00.000Z" }),
+			sum({ collabId: "idle", workflowStatus: null, chainStatus: null, workflowId: null, workflowCreatedAt: null, lastActivityAt: "2026-05-20T00:08:00.000Z" }),
+			sum({ collabId: "stuckA", chainStatus: "escalated", workflowCreatedAt: "2026-05-20T00:01:00.000Z" }),
+			sum({ collabId: "active", workflowStatus: "running", chainStatus: "active", workflowCreatedAt: "2026-05-20T00:07:00.000Z" }),
+			sum({ collabId: "stuckB", chainStatus: "escalated", workflowCreatedAt: "2026-05-20T00:05:00.000Z" }),
 		];
 		const snapshots = Object.fromEntries(summaries.map((s) => [s.collabId, emptySnap]));
 		const w = buildWallState({ summaries, now: "2026-05-20T00:10:00.000Z", idleThresholdMs: 30000, capacity: 10, page: 0, selected: 0, snapshots });
-		expect(w.panes.map((p) => p.collabId)).toEqual(["stuckB", "stuckA", "active", "idle", "done"]);
+		// ACTIVE: stuck-pinned first by recency desc (stuckB > stuckA), then active.
+		// IDLE/MANUAL: idle. DONE/CANCELED: done.
+		expect(w.panes.map((p) => p.collabId)).toEqual([
+			"stuckB",
+			"stuckA",
+			"active",
+			"idle",
+			"done",
+		]);
+		expect(w.sections.map((s) => s.group)).toEqual([
+			"active",
+			"idleManual",
+			"doneCanceled",
+		]);
 		expect(w.totalRuns).toBe(5);
 		expect(w.pageCount).toBe(1);
 	});
@@ -87,6 +100,27 @@ describe("buildWallState", () => {
 		expect(p.workflowType).toBeNull();
 		expect(p.statusKey).toBe("idle");
 		expect(p.round).toBeNull();
+	});
+
+	it("selected clamps across all visible sections", () => {
+		const summaries = [
+			sum({ collabId: "a", workflowStatus: "running", workflowCreatedAt: "2026-05-20T00:05:00.000Z" }),
+			sum({ collabId: "d", workflowStatus: "done", workflowCreatedAt: "2026-05-20T00:04:00.000Z" }),
+		];
+		const snapshots = Object.fromEntries(summaries.map((s) => [s.collabId, emptySnap]));
+		const w = buildWallState({
+			summaries,
+			now: "2026-05-20T00:10:00.000Z",
+			idleThresholdMs: 30000,
+			cols: 80,
+			rows: 40,
+			page: 0,
+			selected: 99,
+			snapshots,
+		});
+		// 2 panes total across two sections; clamping should pin selected to last index.
+		expect(w.panes.length).toBe(2);
+		expect(w.selected).toBe(1);
 	});
 
 	it("buildWallState emits structured WallPaneState fields per pane", () => {
