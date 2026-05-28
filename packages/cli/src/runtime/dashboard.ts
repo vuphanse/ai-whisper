@@ -89,6 +89,7 @@ export function createDashboardRuntime(input: {
 	let inspectorWorkflowId: string | null = null;
 	let inspectorType: string | null = null;
 	let inspectorLabel = "";
+	let inspectorWorkflowStatus: "running" | "done" | "halted" | "canceled" | null = null;
 	let inspectorSection: InspectorSection = "live";
 	let wallPage = 0;
 	let wallSelected = 0;
@@ -307,6 +308,7 @@ export function createDashboardRuntime(input: {
 					cols,
 					rows,
 					label: inspectorLabel,
+					workflowStatus: inspectorWorkflowStatus,
 					workflowType: inspectorType,
 				});
 			}
@@ -448,6 +450,7 @@ export function createDashboardRuntime(input: {
 					inspectorWorkflowId = s?.workflowId ?? null;
 					inspectorType = s?.workflowType ?? null;
 					inspectorLabel = s?.label ?? collabId;
+					inspectorWorkflowStatus = s?.workflowStatus ?? null;
 					inspectorSection = "live";
 					viewport.offset = 0;
 					viewport.follow = true;

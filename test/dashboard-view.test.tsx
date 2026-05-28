@@ -517,3 +517,147 @@ describe("Wall — sectioned grid + footer (Task 12)", () => {
 		expect(out).toContain("no active collabs");
 	});
 });
+
+describe("Inspector polish (Task 13)", () => {
+	it("Inspector header shows the status glyph in THEME color before the label", () => {
+		const state = mkInspectorState({ stuck: false });
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="live"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/●\s+mylabel/);
+	});
+
+	it("Inspector tab bar marks the active tab with the accent color (SGR sequence present before [2 Timeline])", () => {
+		const state = mkInspectorState({ stuck: false });
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const raw = lastFrame() ?? "";
+		expect(raw).toMatch(/\x1b\[[0-9;]*m\[2 Timeline\]/);
+	});
+
+	it("Inspector timeline outcome colors are tied to THEME tokens (ok green, fail red)", () => {
+		const state = mkInspectorState({
+			stuck: false,
+			timeline: [
+				{
+					phaseIndex: 0,
+					phaseName: "plan",
+					roundsUsed: 1,
+					maxRounds: 3,
+					durationMs: 60_000,
+					outcome: "approve",
+					estInTokens: 100,
+					estOutTokens: 50,
+				},
+				{
+					phaseIndex: 1,
+					phaseName: "implement",
+					roundsUsed: 3,
+					maxRounds: 3,
+					durationMs: 240_000,
+					outcome: "escalate",
+					estInTokens: 400,
+					estOutTokens: 200,
+				},
+			],
+		});
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const raw = lastFrame() ?? "";
+		// Approve gets the ok (green) SGR; escalate gets err (red) SGR.
+		expect(raw).toMatch(/\x1b\[(32|92|38;5;\d+|38;2;[\d;]+)m[^\x1b]*approve/);
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m[^\x1b]*escalate/);
+	});
+
+	it("Inspector workflow history colors statuses via the in-scope glyph map (no paused)", () => {
+		const state = mkInspectorState({
+			stuck: false,
+			workflowHistory: [
+				{
+					workflowId: "wf-run",
+					workflowType: "complex-bug-fixing",
+					name: null,
+					status: "running",
+					currentPhaseIndex: 1,
+					createdAt: "2026-05-28T00:00:00Z",
+					selected: true,
+				},
+				{
+					workflowId: "wf-done",
+					workflowType: "spec-driven-development",
+					name: null,
+					status: "done",
+					currentPhaseIndex: 4,
+					createdAt: "2026-05-27T00:00:00Z",
+					selected: false,
+				},
+				{
+					workflowId: "wf-halt",
+					workflowType: "complex-bug-fixing",
+					name: null,
+					status: "halted",
+					currentPhaseIndex: 2,
+					createdAt: "2026-05-26T00:00:00Z",
+					selected: false,
+				},
+				{
+					workflowId: "wf-canx",
+					workflowType: "ralph-loop",
+					name: null,
+					status: "canceled",
+					currentPhaseIndex: 0,
+					createdAt: "2026-05-25T00:00:00Z",
+					selected: false,
+				},
+			],
+		});
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/●/); // running
+		expect(out).toMatch(/✓/); // done
+		expect(out).toMatch(/⚠/); // halted
+		expect(out).toMatch(/✖/); // canceled
+		expect(out).not.toContain("⏸"); // paused deferred
+	});
+});
