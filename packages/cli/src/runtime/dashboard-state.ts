@@ -5,6 +5,7 @@ import type {
 	RelayViewState,
 } from "./relay-view-state.js";
 import { buildRelayViewState, deriveLogLines, fmtDur } from "./relay-view-state.js";
+import { statusGlyph } from "./dashboard-glyph.js";
 import type {
 	CollabSummary,
 	RelayHandoffLogRow,
@@ -12,13 +13,24 @@ import type {
 	WorkflowSummaryRow,
 } from "@ai-whisper/broker";
 
+export type WallEvent = { step: string; route: string; verdict: string };
+
 export type WallPaneState = {
 	collabId: string;
 	workflowId: string | null;
-	header: string;
-	healthLine: string;
-	stuck: boolean;
-	logTail: LogLine[];
+	statusKey: "running" | "stuck" | "done" | "canceled" | "idle";
+	label: string;
+	workflowType: string | null;
+	round: { current: number; max: number } | null;
+	progress: { current: number; total: number } | null;
+	agentHealth: Array<{
+		agent: "codex" | "claude";
+		health: "healthy" | "degraded" | "dead";
+	}>;
+	stuckWhy: string | null;
+	events: WallEvent[]; // newest first, length ≤ 2
+	elapsed: string; // for compact card line 2
+	cardKind: "full" | "compact";
 };
 export type WallState = {
 	panes: WallPaneState[];
@@ -318,6 +330,107 @@ export function buildInspectorState(input: {
 	return { live, timeline, evidence, cost, workflowHistory };
 }
 
+// deriveLogLines emits: "HH:MM:SS  P·R   sender→target  step   verdict   preview"
+// We want step / route / verdict only.
+function parseEventText(text: string): WallEvent {
+	const cols = text.split(/\s{2,}/);
+	const route = cols.find((c) => /[a-z]+→[a-z]+/i.test(c)) ?? "";
+	const tokens = cols.filter((c) => c !== route);
+	// tokens[0] = time, tokens[1] = P·R (when workflow), tokens[2] = step, tokens[3] = verdict
+	const step = tokens[2] ?? "";
+	const verdict = tokens[3] ?? "-";
+	return { step, route, verdict };
+}
+
+function projectPane(
+	s: CollabSummary,
+	now: string,
+	idleThresholdMs: number,
+	snap: { handoffs: RelayHandoffLogRow[]; phaseRuns: PhaseRunRef[]; totalPhases: number },
+): WallPaneState {
+	// Bug C / Task 8b: feed the active step into the liveness snapshot so the
+	// phase-aware budget (execute/review → larger) applies on the Wall too.
+	let wallStep: string | null = null;
+	if (s.currentPhaseRunId) {
+		for (let i = snap.handoffs.length - 1; i >= 0; i--) {
+			if (snap.handoffs[i]!.phaseRunId === s.currentPhaseRunId) {
+				wallStep = snap.handoffs[i]!.handoffStep;
+				break;
+			}
+		}
+	}
+	const rv = buildRelayViewState({
+		now,
+		idleThresholdMs,
+		workflow:
+			s.workflowId && s.workflowType
+				? {
+						workflowId: s.workflowId,
+						workflowType: s.workflowType,
+						name: s.label,
+						status: s.workflowStatus ?? "running",
+						createdAt: s.workflowCreatedAt ?? now,
+						haltReason: null,
+					}
+				: null,
+		phaseRuns: snap.phaseRuns,
+		currentPhaseRunId: s.currentPhaseRunId,
+		currentStep: wallStep, // budget input only; the pane still renders P/R
+		totalPhases: snap.totalPhases,
+		chain:
+			s.currentRound != null && s.maxRounds != null && s.chainStatus
+				? { currentRound: s.currentRound, maxRounds: s.maxRounds, status: s.chainStatus }
+				: null,
+		turn: {
+			turnOwner: s.turn.owner,
+			waitingAgent: s.turn.waiting,
+			handoffState: s.turn.handoffState,
+		},
+		sessions: s.sessions,
+		lastActivityAt: s.lastActivityAt,
+		handoffs: snap.handoffs,
+	});
+	const glyph = statusGlyph({
+		workflowStatus: s.workflowStatus,
+		stuck: rv.stuck,
+	});
+	const round =
+		s.currentRound != null && s.maxRounds != null
+			? { current: s.currentRound, max: s.maxRounds }
+			: null;
+	const progress =
+		s.phaseIndex != null && snap.totalPhases > 0
+			? { current: s.phaseIndex + 1, total: snap.totalPhases }
+			: null;
+	const events = rv.logLines
+		.filter((l) => l.kind === "event")
+		.slice(-2)
+		.reverse() // newest first
+		.map((l) => parseEventText(l.text));
+	const cardKind: "full" | "compact" = glyph.key === "running" ? "full" : "compact";
+	const nowMs = Date.parse(now);
+	const baseMs = s.workflowCreatedAt != null ? Date.parse(s.workflowCreatedAt) : NaN;
+	const elapsed =
+		Number.isFinite(nowMs) && Number.isFinite(baseMs)
+			? fmtDur(nowMs - baseMs)
+			: "—";
+
+	return {
+		collabId: s.collabId,
+		workflowId: s.workflowId,
+		statusKey: glyph.key,
+		label: s.label,
+		workflowType: s.workflowType,
+		round,
+		progress,
+		agentHealth: rv.agentHealth,
+		stuckWhy: rv.stuck ? rv.why : null,
+		events,
+		elapsed,
+		cardKind,
+	};
+}
+
 export function buildWallState(input: {
 	summaries: CollabSummary[];
 	now: string;
@@ -342,78 +455,7 @@ export function buildWallState(input: {
 			phaseRuns: [],
 			totalPhases: 0,
 		};
-		// Bug C / Task 8b: feed the active step into the liveness snapshot so the
-		// phase-aware budget (execute/review → larger) applies on the Wall too.
-		// The Wall PANE still renders P/R only (header below); this only affects
-		// the budget computeLiveness uses. Derive the step from the latest handoff
-		// of the current phase run, mirroring the Inspector host logic.
-		let wallStep: string | null = null;
-		if (s.currentPhaseRunId) {
-			for (let i = snap.handoffs.length - 1; i >= 0; i--) {
-				if (snap.handoffs[i]!.phaseRunId === s.currentPhaseRunId) {
-					wallStep = snap.handoffs[i]!.handoffStep;
-					break;
-				}
-			}
-		}
-		const rv = buildRelayViewState({
-			now: input.now,
-			idleThresholdMs: input.idleThresholdMs,
-			workflow:
-				s.workflowId && s.workflowType
-					? {
-							workflowId: s.workflowId,
-							workflowType: s.workflowType,
-							name: s.label,
-							status: s.workflowStatus ?? "running",
-							createdAt: input.now,
-							haltReason: null,
-						}
-					: null,
-			phaseRuns: snap.phaseRuns,
-			currentPhaseRunId: s.currentPhaseRunId,
-			currentStep: wallStep, // budget input only; the pane still renders P/R
-			totalPhases: snap.totalPhases,
-			chain:
-				s.currentRound != null && s.maxRounds != null && s.chainStatus
-					? { currentRound: s.currentRound, maxRounds: s.maxRounds, status: s.chainStatus }
-					: null,
-			turn: {
-				turnOwner: s.turn.owner,
-				waitingAgent: s.turn.waiting,
-				handoffState: s.turn.handoffState,
-			},
-			sessions: s.sessions,
-			lastActivityAt: s.lastActivityAt,
-			handoffs: snap.handoffs,
-		});
-		const header =
-			!s.workflowId || !s.workflowType
-				? `${s.label}  manual relay`
-				: `${s.label}  ${s.workflowType}  P${(s.phaseIndex ?? 0) + 1}/${
-						snap.totalPhases || "?"
-					}${
-						s.currentRound != null && s.maxRounds != null
-							? ` R${s.currentRound}/${s.maxRounds}`
-							: ""
-					}`;
-		const events = rv.logLines.filter((l) => l.kind === "event");
-		// Three liveness states on the Wall (Bug A/C): STUCK (⚠ why), long-running
-		// (idle past budget but mount alive — surfaced so a legitimately long step
-		// is not confused with a dead pane), else the normal health/dot line.
-		const healthLine = rv.stuck && rv.why
-			? `⚠ ${rv.why}`
-			: rv.live.startsWith("long-running")
-				? `${rv.health}  · ${rv.live}`
-				: rv.health;
-		return {
-			collabId: s.collabId,
-			workflowId: s.workflowId,
-			header,
-			healthLine,
-			stuck: rv.stuck,
-			logTail: events.slice(-2),
-		};
+		return projectPane(s, input.now, input.idleThresholdMs, snap);
 	});
 	return {
 		panes,

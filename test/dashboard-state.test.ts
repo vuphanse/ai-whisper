@@ -25,6 +25,7 @@ function sum(p: Partial<CollabSummary>): CollabSummary {
 		currentRound: 2, maxRounds: 5, chainStatus: "active",
 		turn: { owner: "codex", waiting: "claude", handoffState: "accepted" },
 		sessions: [{ agentType: "codex", healthState: "healthy" }, { agentType: "claude", healthState: "healthy" }],
+		workflowCreatedAt: "2026-05-20T00:00:00.000Z",
 		lastActivityAt: "2026-05-20T00:00:00.000Z", ...p,
 	};
 }
@@ -58,7 +59,7 @@ describe("buildWallState", () => {
 		expect(w.selected).toBe(0);
 	});
 
-	it("projects a visible pane via buildRelayViewState (header/health/logTail)", () => {
+	it("projects a visible pane via buildRelayViewState (structured fields)", () => {
 		const s = sum({ collabId: "c1", label: "oauth", workflowType: "spec-driven-development", phaseIndex: 1, currentRound: 3, maxRounds: 5 });
 		const snapshots = {
 			c1: {
@@ -71,21 +72,49 @@ describe("buildWallState", () => {
 		};
 		const w = buildWallState({ summaries: [s], now: "2026-05-20T00:00:08.000Z", idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots });
 		const p = w.panes[0]!;
-		expect(p.header).toContain("oauth");
-		expect(p.header).toContain("spec-driven-development");
-		expect(p.header).toContain("P2/4");
-		expect(p.header).toContain("R3/5");
-		expect(p.healthLine.length).toBeGreaterThan(0);
-		expect(p.logTail.length).toBeLessThanOrEqual(2);
-		expect(p.logTail.every((l) => l.kind === "event")).toBe(true);
+		expect(p.label).toBe("oauth");
+		expect(p.workflowType).toBe("spec-driven-development");
+		expect(p.progress).toEqual({ current: 2, total: 4 });
+		expect(p.round).toEqual({ current: 3, max: 5 });
+		expect(p.events.length).toBeLessThanOrEqual(2);
 	});
 
-	it("manual-relay summary → header says 'manual relay', no P/R", () => {
+	it("manual-relay summary → idle status, no round/progress", () => {
 		const s = sum({ collabId: "m", label: "Manual", workflowId: null, workflowType: null, workflowStatus: null, currentPhaseRunId: null, phaseIndex: null, phaseName: null, currentRound: null, maxRounds: null, chainStatus: null });
 		const w = buildWallState({ summaries: [s], now: "2026-05-20T00:00:01.000Z", idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots: { m: emptySnap } });
-		expect(w.panes[0]!.header).toContain("Manual");
-		expect(w.panes[0]!.header).toContain("manual relay");
-		expect(w.panes[0]!.header).not.toMatch(/P\d+\/\d+/);
+		const p = w.panes[0]!;
+		expect(p.label).toBe("Manual");
+		expect(p.workflowType).toBeNull();
+		expect(p.statusKey).toBe("idle");
+		expect(p.round).toBeNull();
+	});
+
+	it("buildWallState emits structured WallPaneState fields per pane", () => {
+		const now = "2026-05-20T00:01:00.000Z";
+		const summaries = [sum({ collabId: "c1" })];
+		const state = buildWallState({
+			summaries,
+			now,
+			idleThresholdMs: 60_000,
+			capacity: 10,
+			page: 0,
+			selected: 0,
+			snapshots: { c1: { handoffs: [], phaseRuns: [], totalPhases: 5 } },
+		});
+		const pane = state.panes[0]!;
+		expect(pane.collabId).toBe("c1");
+		expect(pane.statusKey).toBe("running");
+		expect(pane.label).toBe("lbl");
+		expect(pane.workflowType).toBe("spec-driven-development");
+		expect(pane.round).toEqual({ current: 2, max: 5 });
+		expect(pane.progress).toEqual({ current: 2, total: 5 }); // phaseIndex 1-based current
+		expect(pane.agentHealth).toEqual([
+			{ agent: "codex", health: "healthy" },
+			{ agent: "claude", health: "healthy" },
+		]);
+		expect(pane.cardKind).toBe("full"); // running → ACTIVE group → full card
+		expect(pane.events.length).toBeLessThanOrEqual(2);
+		expect(pane.stuckWhy).toBeNull();
 	});
 
 	it("empty summaries → empty wall", () => {
@@ -122,7 +151,7 @@ describe("buildWallState", () => {
 			},
 		};
 		const w = buildWallState({ summaries: [s], now, idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots });
-		expect(w.panes[0]!.stuck).toBe(false);
+		expect(w.panes[0]!.statusKey).not.toBe("stuck");
 	});
 
 	it("Wall control: non-execute step idle past baseline with dead active mount → stuck (baseline applies)", () => {
@@ -147,7 +176,7 @@ describe("buildWallState", () => {
 			},
 		};
 		const w = buildWallState({ summaries: [s], now, idleThresholdMs: 30000, capacity: 4, page: 0, selected: 0, snapshots });
-		expect(w.panes[0]!.stuck).toBe(true);
+		expect(w.panes[0]!.statusKey).toBe("stuck");
 	});
 });
 
