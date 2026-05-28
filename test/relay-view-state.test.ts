@@ -437,3 +437,50 @@ describe("computeLiveness via buildRelayViewState", () => {
 		expect(s.live).toBe("idle 0s · auto-handback in 30s");
 	});
 });
+
+describe("agentHealth structured field", () => {
+	it("exposes structured agentHealth alongside the dots string", () => {
+		const state = buildRelayViewState({
+			now: "2026-05-28T00:00:00.000Z",
+			idleThresholdMs: 60_000,
+			workflow: null,
+			phaseRuns: [],
+			currentPhaseRunId: null,
+			currentStep: null,
+			totalPhases: 0,
+			chain: null,
+			turn: { turnOwner: "none", waitingAgent: null, handoffState: "idle" },
+			sessions: [
+				{ agentType: "codex", healthState: "healthy", mountAlive: true },
+				{ agentType: "claude", healthState: "degraded", mountAlive: true },
+			],
+			lastActivityAt: null,
+			handoffs: [],
+		});
+		expect(state.agentHealth).toEqual([
+			{ agent: "codex", health: "healthy" },
+			{ agent: "claude", health: "degraded" },
+		]);
+	});
+
+	it("agentHealth treats missing session as dead", () => {
+		const state = buildRelayViewState({
+			now: "2026-05-28T00:00:00.000Z",
+			idleThresholdMs: 60_000,
+			workflow: null,
+			phaseRuns: [],
+			currentPhaseRunId: null,
+			currentStep: null,
+			totalPhases: 0,
+			chain: null,
+			turn: { turnOwner: "none", waitingAgent: null, handoffState: "idle" },
+			sessions: [],
+			lastActivityAt: null,
+			handoffs: [],
+		});
+		expect(state.agentHealth).toEqual([
+			{ agent: "codex", health: "dead" },
+			{ agent: "claude", health: "dead" },
+		]);
+	});
+});

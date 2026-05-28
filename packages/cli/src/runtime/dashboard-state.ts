@@ -5,6 +5,7 @@ import type {
 	RelayViewState,
 } from "./relay-view-state.js";
 import { buildRelayViewState, deriveLogLines, fmtDur } from "./relay-view-state.js";
+import { statusGlyph } from "./dashboard-glyph.js";
 import type {
 	CollabSummary,
 	RelayHandoffLogRow,
@@ -12,15 +13,35 @@ import type {
 	WorkflowSummaryRow,
 } from "@ai-whisper/broker";
 
+export type WallEvent = { step: string; route: string; verdict: string };
+
 export type WallPaneState = {
 	collabId: string;
 	workflowId: string | null;
-	header: string;
-	healthLine: string;
-	stuck: boolean;
-	logTail: LogLine[];
+	statusKey: "running" | "stuck" | "done" | "canceled" | "idle";
+	label: string;
+	workflowType: string | null;
+	round: { current: number; max: number } | null;
+	progress: { current: number; total: number } | null;
+	agentHealth: Array<{
+		agent: "codex" | "claude";
+		health: "healthy" | "degraded" | "dead";
+	}>;
+	stuckWhy: string | null;
+	events: WallEvent[]; // newest first, length ≤ 2
+	elapsed: string; // for compact card line 2
+	cardKind: "full" | "compact";
+};
+export type WallStateSection = {
+	group: WallGroupKey;
+	label: string;
+	cardKind: "full" | "compact";
+	panes: WallPaneState[];
 };
 export type WallState = {
+	sections: WallStateSection[];
+	// `panes` flat view across all sections in render order — kept for callers
+	// that only need a flat list (host snapshot-fetch keys, selection cursor).
 	panes: WallPaneState[];
 	page: number;
 	pageCount: number;
@@ -95,6 +116,210 @@ export function estimateTokens(chars: number): number {
 // Re-export the reused pure helpers so later tasks/tests import from one place.
 export { buildRelayViewState, deriveLogLines, fmtDur };
 export type { LogLine, PhaseRunRef, RelayViewSnapshot, RelayViewState, RelayHandoffLogRow, CollabSummary, RunCostRow };
+
+// ---- Group partition + recency sort + stuck-pin (spec: Wall grouping) ----
+
+export type WallGroupKey = "active" | "idleManual" | "halted" | "doneCanceled";
+
+export type WallGroups = {
+	active: CollabSummary[];
+	idleManual: CollabSummary[];
+	halted: CollabSummary[];
+	doneCanceled: CollabSummary[];
+};
+
+function isStuckRunning(s: CollabSummary): boolean {
+	// Wall-side static stuck signal — full liveness lives in computeLiveness,
+	// but for ordering we only need the chain-derived signal that survives a
+	// running workflowStatus.
+	return (
+		s.workflowStatus === "running" &&
+		(s.chainStatus === "escalated" ||
+			s.chainStatus === "abandoned" ||
+			(s.currentRound != null &&
+				s.maxRounds != null &&
+				s.maxRounds > 1 &&
+				s.currentRound >= s.maxRounds))
+	);
+}
+
+function recencyKey(s: CollabSummary): string {
+	return s.workflowCreatedAt ?? s.lastActivityAt ?? "";
+}
+
+function cmpDesc(a: string, b: string): number {
+	return a < b ? 1 : a > b ? -1 : 0;
+}
+
+export function partitionWallGroups(summaries: CollabSummary[]): WallGroups {
+	const active: CollabSummary[] = [];
+	const idleManual: CollabSummary[] = [];
+	const halted: CollabSummary[] = [];
+	const doneCanceled: CollabSummary[] = [];
+	for (const s of summaries) {
+		if (s.workflowStatus === null) idleManual.push(s);
+		else if (s.workflowStatus === "running") active.push(s);
+		else if (s.workflowStatus === "halted") halted.push(s);
+		else if (s.workflowStatus === "done" || s.workflowStatus === "canceled")
+			doneCanceled.push(s);
+		// paused or any unknown status is dropped — see spec Non-Goals.
+	}
+	// ACTIVE: stuck-pin (stuck block first), then recency desc within each block.
+	active.sort((a, b) => {
+		const sa = isStuckRunning(a) ? 0 : 1;
+		const sb = isStuckRunning(b) ? 0 : 1;
+		if (sa !== sb) return sa - sb;
+		return cmpDesc(recencyKey(a), recencyKey(b));
+	});
+	// Other groups: recency desc.
+	idleManual.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	halted.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	doneCanceled.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	return { active, idleManual, halted, doneCanceled };
+}
+
+// ---- Priority-fill allocation + paging across sections ----
+
+const MIN_PANE_COLS = 40;
+const CARD_HEIGHT = { full: 6, compact: 4 } as const; // border (2) + content
+const HEADER_ROWS = 1;
+
+const GROUP_ORDER: WallGroupKey[] = ["active", "idleManual", "halted", "doneCanceled"];
+const GROUP_LABEL: Record<WallGroupKey, string> = {
+	active: "ACTIVE",
+	idleManual: "IDLE / MANUAL",
+	halted: "HALTED",
+	doneCanceled: "DONE / CANCELED",
+};
+
+export type WallSection = {
+	group: WallGroupKey;
+	label: string;
+	cardKind: "full" | "compact";
+	cards: CollabSummary[];
+};
+
+export type WallSectionsResult = {
+	sections: WallSection[];
+	page: number;
+	pageCount: number;
+	totalRuns: number;
+};
+
+function cardKindFor(group: WallGroupKey): "full" | "compact" {
+	return group === "active" ? "full" : "compact";
+}
+
+function fillOnePage(input: {
+	pools: Record<WallGroupKey, CollabSummary[]>;
+	cols: number;
+	rows: number;
+}): { sections: WallSection[]; consumed: Record<WallGroupKey, number> } {
+	const colsCount = Math.max(1, Math.floor(input.cols / MIN_PANE_COLS));
+	let rowsLeft = input.rows;
+	const consumed: Record<WallGroupKey, number> = {
+		active: 0,
+		idleManual: 0,
+		halted: 0,
+		doneCanceled: 0,
+	};
+	const sections: WallSection[] = [];
+	for (const group of GROUP_ORDER) {
+		const pool = input.pools[group];
+		if (pool.length === 0) continue;
+		if (rowsLeft <= HEADER_ROWS) break;
+		const cardKind = cardKindFor(group);
+		const cardRows = CARD_HEIGHT[cardKind];
+		const availableForCards = rowsLeft - HEADER_ROWS;
+		const cardRowsFit = Math.floor(availableForCards / cardRows);
+		if (cardRowsFit === 0) break;
+		const cap = cardRowsFit * colsCount;
+		const taken = pool.slice(0, Math.min(cap, pool.length));
+		if (taken.length === 0) break;
+		const rowsTaken = HEADER_ROWS + Math.ceil(taken.length / colsCount) * cardRows;
+		rowsLeft -= rowsTaken;
+		consumed[group] = taken.length;
+		sections.push({
+			group,
+			label: `${GROUP_LABEL[group]} (${pool.length})`,
+			cardKind,
+			cards: taken,
+		});
+	}
+	return { sections, consumed };
+}
+
+export function allocateWallSections(input: {
+	groups: WallGroups;
+	cols: number;
+	rows: number;
+	page: number;
+}): WallSectionsResult {
+	const totalRuns =
+		input.groups.active.length +
+		input.groups.idleManual.length +
+		input.groups.halted.length +
+		input.groups.doneCanceled.length;
+
+	// Walk pages forward until we reach the requested page or run out of cards.
+	let pool: Record<WallGroupKey, CollabSummary[]> = {
+		active: [...input.groups.active],
+		idleManual: [...input.groups.idleManual],
+		halted: [...input.groups.halted],
+		doneCanceled: [...input.groups.doneCanceled],
+	};
+	let page = 0;
+	let result = fillOnePage({ pools: pool, cols: input.cols, rows: input.rows });
+	let lastNonEmpty = result;
+	while (page < input.page && result.sections.length > 0) {
+		const nextPool = {
+			active: pool.active.slice(result.consumed.active),
+			idleManual: pool.idleManual.slice(result.consumed.idleManual),
+			halted: pool.halted.slice(result.consumed.halted),
+			doneCanceled: pool.doneCanceled.slice(result.consumed.doneCanceled),
+		};
+		const nextResult = fillOnePage({ pools: nextPool, cols: input.cols, rows: input.rows });
+		if (nextResult.sections.length === 0) break;
+		pool = nextPool;
+		page += 1;
+		result = nextResult;
+		lastNonEmpty = result;
+	}
+	// If the caller requested a page past the last drawable page, clamp the
+	// returned `page` to the last filled page (the existing flat-paging
+	// contract) — never an empty rendering of a higher page.
+	if (page < input.page) {
+		// stayed on the last non-empty page; expose that page index, not the request.
+	}
+	result = lastNonEmpty;
+	// pageCount: simulate forward from the original groups until pool is drained.
+	let pageCount = totalRuns === 0 ? 0 : 1;
+	{
+		let p: Record<WallGroupKey, CollabSummary[]> = {
+			active: [...input.groups.active],
+			idleManual: [...input.groups.idleManual],
+			halted: [...input.groups.halted],
+			doneCanceled: [...input.groups.doneCanceled],
+		};
+		let remaining =
+			p.active.length + p.idleManual.length + p.halted.length + p.doneCanceled.length;
+		while (remaining > 0) {
+			const r = fillOnePage({ pools: p, cols: input.cols, rows: input.rows });
+			const taken =
+				r.consumed.active + r.consumed.idleManual + r.consumed.halted + r.consumed.doneCanceled;
+			if (taken === 0) break; // guard against infinite loop on impossibly small terminals.
+			p = {
+				active: p.active.slice(r.consumed.active),
+				idleManual: p.idleManual.slice(r.consumed.idleManual),
+				halted: p.halted.slice(r.consumed.halted),
+				doneCanceled: p.doneCanceled.slice(r.consumed.doneCanceled),
+			};
+			remaining -= taken;
+			if (remaining > 0) pageCount += 1;
+		}
+	}
+	return { sections: result.sections, page, pageCount, totalRuns };
+}
 
 function attentionRank(s: CollabSummary): number {
 	if (
@@ -318,11 +543,118 @@ export function buildInspectorState(input: {
 	return { live, timeline, evidence, cost, workflowHistory };
 }
 
+// deriveLogLines emits: "HH:MM:SS  P·R   sender→target  step   verdict   preview"
+// We want step / route / verdict only.
+function parseEventText(text: string): WallEvent {
+	const cols = text.split(/\s{2,}/);
+	const route = cols.find((c) => /[a-z]+→[a-z]+/i.test(c)) ?? "";
+	const tokens = cols.filter((c) => c !== route);
+	// tokens[0] = time, tokens[1] = P·R (when workflow), tokens[2] = step, tokens[3] = verdict
+	const step = tokens[2] ?? "";
+	const verdict = tokens[3] ?? "-";
+	return { step, route, verdict };
+}
+
+function projectPane(
+	s: CollabSummary,
+	now: string,
+	idleThresholdMs: number,
+	snap: { handoffs: RelayHandoffLogRow[]; phaseRuns: PhaseRunRef[]; totalPhases: number },
+): WallPaneState {
+	// Bug C / Task 8b: feed the active step into the liveness snapshot so the
+	// phase-aware budget (execute/review → larger) applies on the Wall too.
+	let wallStep: string | null = null;
+	if (s.currentPhaseRunId) {
+		for (let i = snap.handoffs.length - 1; i >= 0; i--) {
+			if (snap.handoffs[i]!.phaseRunId === s.currentPhaseRunId) {
+				wallStep = snap.handoffs[i]!.handoffStep;
+				break;
+			}
+		}
+	}
+	const rv = buildRelayViewState({
+		now,
+		idleThresholdMs,
+		workflow:
+			s.workflowId && s.workflowType
+				? {
+						workflowId: s.workflowId,
+						workflowType: s.workflowType,
+						name: s.label,
+						status: s.workflowStatus ?? "running",
+						createdAt: s.workflowCreatedAt ?? now,
+						haltReason: null,
+					}
+				: null,
+		phaseRuns: snap.phaseRuns,
+		currentPhaseRunId: s.currentPhaseRunId,
+		currentStep: wallStep, // budget input only; the pane still renders P/R
+		totalPhases: snap.totalPhases,
+		chain:
+			s.currentRound != null && s.maxRounds != null && s.chainStatus
+				? { currentRound: s.currentRound, maxRounds: s.maxRounds, status: s.chainStatus }
+				: null,
+		turn: {
+			turnOwner: s.turn.owner,
+			waitingAgent: s.turn.waiting,
+			handoffState: s.turn.handoffState,
+		},
+		sessions: s.sessions,
+		lastActivityAt: s.lastActivityAt,
+		handoffs: snap.handoffs,
+	});
+	const glyph = statusGlyph({
+		workflowStatus: s.workflowStatus,
+		stuck: rv.stuck,
+	});
+	const round =
+		s.currentRound != null && s.maxRounds != null
+			? { current: s.currentRound, max: s.maxRounds }
+			: null;
+	const progress =
+		s.phaseIndex != null && snap.totalPhases > 0
+			? { current: s.phaseIndex + 1, total: snap.totalPhases }
+			: null;
+	const events = rv.logLines
+		.filter((l) => l.kind === "event")
+		.slice(-2)
+		.reverse() // newest first
+		.map((l) => parseEventText(l.text));
+	const cardKind: "full" | "compact" = glyph.key === "running" ? "full" : "compact";
+	const nowMs = Date.parse(now);
+	const baseMs = s.workflowCreatedAt != null ? Date.parse(s.workflowCreatedAt) : NaN;
+	const elapsed =
+		Number.isFinite(nowMs) && Number.isFinite(baseMs)
+			? fmtDur(nowMs - baseMs)
+			: "—";
+
+	return {
+		collabId: s.collabId,
+		workflowId: s.workflowId,
+		statusKey: glyph.key,
+		label: s.label,
+		workflowType: s.workflowType,
+		round,
+		progress,
+		agentHealth: rv.agentHealth,
+		stuckWhy: rv.stuck ? rv.why : null,
+		events,
+		elapsed,
+		cardKind,
+	};
+}
+
 export function buildWallState(input: {
 	summaries: CollabSummary[];
 	now: string;
 	idleThresholdMs: number;
-	capacity: number;
+	// `capacity` is retained for back-compat. When set and no `cols`/`rows` are
+	// supplied, a synthetic geometry (1 col × capacity × full-card height + 1
+	// section header) is used so a single ACTIVE section emerges with capacity
+	// cards — matching the old flat behaviour for legacy callers.
+	capacity?: number;
+	cols?: number;
+	rows?: number;
 	page: number;
 	selected: number;
 	snapshots: Record<
@@ -330,96 +662,40 @@ export function buildWallState(input: {
 		{ handoffs: RelayHandoffLogRow[]; phaseRuns: PhaseRunRef[]; totalPhases: number }
 	>;
 }): WallState {
-	const sel = selectWallPage({
-		summaries: input.summaries,
-		capacity: input.capacity,
-		page: input.page,
-		selected: input.selected,
-	});
-	const panes: WallPaneState[] = sel.pageSummaries.map((s) => {
-		const snap = input.snapshots[s.collabId] ?? {
-			handoffs: [],
-			phaseRuns: [],
-			totalPhases: 0,
-		};
-		// Bug C / Task 8b: feed the active step into the liveness snapshot so the
-		// phase-aware budget (execute/review → larger) applies on the Wall too.
-		// The Wall PANE still renders P/R only (header below); this only affects
-		// the budget computeLiveness uses. Derive the step from the latest handoff
-		// of the current phase run, mirroring the Inspector host logic.
-		let wallStep: string | null = null;
-		if (s.currentPhaseRunId) {
-			for (let i = snap.handoffs.length - 1; i >= 0; i--) {
-				if (snap.handoffs[i]!.phaseRunId === s.currentPhaseRunId) {
-					wallStep = snap.handoffs[i]!.handoffStep;
-					break;
-				}
-			}
-		}
-		const rv = buildRelayViewState({
-			now: input.now,
-			idleThresholdMs: input.idleThresholdMs,
-			workflow:
-				s.workflowId && s.workflowType
-					? {
-							workflowId: s.workflowId,
-							workflowType: s.workflowType,
-							name: s.label,
-							status: s.workflowStatus ?? "running",
-							createdAt: input.now,
-							haltReason: null,
-						}
-					: null,
-			phaseRuns: snap.phaseRuns,
-			currentPhaseRunId: s.currentPhaseRunId,
-			currentStep: wallStep, // budget input only; the pane still renders P/R
-			totalPhases: snap.totalPhases,
-			chain:
-				s.currentRound != null && s.maxRounds != null && s.chainStatus
-					? { currentRound: s.currentRound, maxRounds: s.maxRounds, status: s.chainStatus }
-					: null,
-			turn: {
-				turnOwner: s.turn.owner,
-				waitingAgent: s.turn.waiting,
-				handoffState: s.turn.handoffState,
-			},
-			sessions: s.sessions,
-			lastActivityAt: s.lastActivityAt,
-			handoffs: snap.handoffs,
-		});
-		const header =
-			!s.workflowId || !s.workflowType
-				? `${s.label}  manual relay`
-				: `${s.label}  ${s.workflowType}  P${(s.phaseIndex ?? 0) + 1}/${
-						snap.totalPhases || "?"
-					}${
-						s.currentRound != null && s.maxRounds != null
-							? ` R${s.currentRound}/${s.maxRounds}`
-							: ""
-					}`;
-		const events = rv.logLines.filter((l) => l.kind === "event");
-		// Three liveness states on the Wall (Bug A/C): STUCK (⚠ why), long-running
-		// (idle past budget but mount alive — surfaced so a legitimately long step
-		// is not confused with a dead pane), else the normal health/dot line.
-		const healthLine = rv.stuck && rv.why
-			? `⚠ ${rv.why}`
-			: rv.live.startsWith("long-running")
-				? `${rv.health}  · ${rv.live}`
-				: rv.health;
-		return {
-			collabId: s.collabId,
-			workflowId: s.workflowId,
-			header,
-			healthLine,
-			stuck: rv.stuck,
-			logTail: events.slice(-2),
-		};
-	});
+	const groups = partitionWallGroups(input.summaries);
+	let cols: number;
+	let rows: number;
+	if (input.cols != null && input.rows != null) {
+		cols = input.cols;
+		rows = input.rows;
+	} else {
+		const cap = Math.max(1, Math.floor(input.capacity ?? 1));
+		// synthetic geometry: 1 col × enough rows for `cap` full cards + header
+		cols = MIN_PANE_COLS;
+		rows = HEADER_ROWS + cap * CARD_HEIGHT.full;
+	}
+	const alloc = allocateWallSections({ groups, cols, rows, page: input.page });
+	const sections: WallStateSection[] = alloc.sections.map((sec) => ({
+		group: sec.group,
+		label: sec.label,
+		cardKind: sec.cardKind,
+		panes: sec.cards.map((sum) => {
+			const snap = input.snapshots[sum.collabId] ?? {
+				handoffs: [],
+				phaseRuns: [],
+				totalPhases: 0,
+			};
+			return projectPane(sum, input.now, input.idleThresholdMs, snap);
+		}),
+	}));
+	const panes = sections.flatMap((sec) => sec.panes);
+	const selected = Math.min(Math.max(0, input.selected), Math.max(0, panes.length - 1));
 	return {
+		sections,
 		panes,
-		page: sel.page,
-		pageCount: sel.pageCount,
-		totalRuns: sel.totalRuns,
-		selected: sel.selected,
+		page: alloc.page,
+		pageCount: alloc.pageCount,
+		totalRuns: alloc.totalRuns,
+		selected,
 	};
 }

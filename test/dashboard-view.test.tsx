@@ -1,156 +1,697 @@
 import { describe, expect, it } from "vitest";
 import { render } from "ink-testing-library";
-import { Wall, gridCapacity } from "../packages/cli/src/runtime/dashboard-view.tsx";
-import type { WallState } from "../packages/cli/src/runtime/dashboard-state.ts";
-import { Inspector } from "../packages/cli/src/runtime/dashboard-view.tsx";
-import type { InspectorState } from "../packages/cli/src/runtime/dashboard-state.ts";
+import {
+	Wall,
+	gridCapacity,
+	Inspector,
+} from "../packages/cli/src/runtime/dashboard-view.tsx";
+import type {
+	InspectorState,
+	PhaseStat,
+	WallPaneState,
+	WallState,
+	WorkflowHistoryItem,
+} from "../packages/cli/src/runtime/dashboard-state.ts";
+import type { RelayViewState } from "../packages/cli/src/runtime/relay-view-state.ts";
+import type { Viewport } from "../packages/cli/src/runtime/relay-view.ts";
+import { readFileSync } from "node:fs";
 
-function wall(p: Partial<WallState>): WallState {
+// ---- Shared Wall fixture helpers (Tasks 8-12) ----
+
+type PaneOverrides = Partial<WallPaneState> & {
+	collabId: string;
+	statusKey: WallPaneState["statusKey"];
+};
+
+function mkPane(p: PaneOverrides): WallPaneState {
 	return {
-		panes: [
-			{ collabId: "c1", workflowId: "wf", header: "oauth  spec-driven-development  P2/4 R3/5", healthLine: "● codex ● claude  Chain active · ALIVE", stuck: false, logTail: [{ kind: "event", isLatest: true, text: "08:21 codex→claude review findings" }] },
-			{ collabId: "c2", workflowId: null, header: "Manual  manual relay", healthLine: "⚠ STUCK 5/5 max reached → escalated", stuck: true, logTail: [] },
+		workflowId: "wf1",
+		label: "lbl",
+		workflowType: "complex-bug-fixing",
+		round: { current: 1, max: 3 },
+		progress: { current: 2, total: 5 },
+		agentHealth: [
+			{ agent: "codex", health: "healthy" },
+			{ agent: "claude", health: "healthy" },
 		],
-		page: 0, pageCount: 2, totalRuns: 6, selected: 1, ...p,
+		stuckWhy: null,
+		events: [
+			{ step: "review", route: "codex→claude", verdict: "pass" },
+			{ step: "execute", route: "claude→codex", verdict: "-" },
+		],
+		elapsed: "1m23s",
+		cardKind: "full",
+		...p,
+	};
+}
+
+type SectionInput = {
+	group: WallState["sections"][number]["group"];
+	label?: string;
+	cardKind?: "full" | "compact";
+	panes: WallPaneState[];
+};
+
+function mkSection(input: SectionInput): WallState["sections"][number] {
+	const cardKind = input.cardKind ?? (input.group === "active" ? "full" : "compact");
+	const groupLabels: Record<WallState["sections"][number]["group"], string> = {
+		active: "ACTIVE",
+		idleManual: "IDLE / MANUAL",
+		halted: "HALTED",
+		doneCanceled: "DONE / CANCELED",
+	};
+	const label = input.label ?? `${groupLabels[input.group]} (${input.panes.length})`;
+	return { group: input.group, label, cardKind, panes: input.panes };
+}
+
+function mkWallState(input: {
+	sections?: WallState["sections"];
+	selected?: number;
+	page?: number;
+	pageCount?: number;
+	totalRuns?: number;
+}): WallState {
+	const sections = input.sections ?? [];
+	const panes = sections.flatMap((s) => s.panes);
+	const totalRuns = input.totalRuns ?? panes.length;
+	return {
+		sections,
+		panes,
+		page: input.page ?? 0,
+		pageCount: input.pageCount ?? 1,
+		totalRuns,
+		selected: input.selected ?? 0,
+	};
+}
+
+function stripAnsi(s: string): string {
+	// ESC [ ... letter — drop SGR codes so text-content assertions can match.
+	// eslint-disable-next-line no-control-regex
+	return s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+}
+
+// ---- Shared Inspector fixture helpers (Task 13) ----
+
+const defaultViewport: Viewport = { offset: 0, follow: true };
+
+function mkLive(p: Partial<RelayViewState> = {}): RelayViewState {
+	return {
+		wf: 'complex-bug-fixing  wf123…  "demo"',
+		progress: "Phase 2/5 plan-writing · Round 1/3 · Step review",
+		elapsed: "total 1m23s · phase 0m45s",
+		turn: "codex · waiting claude · handoff accepted",
+		health: "● codex  ● claude  Chain active · ALIVE",
+		agentHealth: [
+			{ agent: "codex", health: "healthy" },
+			{ agent: "claude", health: "healthy" },
+		],
+		live: "idle 5s",
+		why: null,
+		last: "approve 0.92 · capture ok",
+		stuck: false,
+		logLines: [],
+		...p,
+	};
+}
+
+function mkInspectorState(p: {
+	stuck: boolean;
+	timeline?: PhaseStat[];
+	workflowHistory?: WorkflowHistoryItem[];
+}): InspectorState {
+	return {
+		live: mkLive({
+			stuck: p.stuck,
+			why: p.stuck ? "STUCK 6m12s — round 3/3 max reached → escalated" : null,
+		}),
+		timeline: p.timeline ?? [
+			{
+				phaseIndex: 0,
+				phaseName: "plan",
+				roundsUsed: 1,
+				maxRounds: 3,
+				durationMs: 60_000,
+				outcome: "approve",
+				estInTokens: 100,
+				estOutTokens: 50,
+			},
+		],
+		workflowHistory: p.workflowHistory ?? [],
+		evidence: {
+			phase: "plan",
+			chainId: "chain-1",
+			items: [],
+			diagnostics: [],
+			likelyCause: "no blocking signal — run progressing",
+		},
+		cost: { totalMs: 60_000, estInputTokens: 100, estOutputTokens: 50, perPhase: [] },
 	};
 }
 
 describe("gridCapacity", () => {
 	it("derives cols×rows from terminal size with a min pane floor, ≥1", () => {
-		expect(gridCapacity(100, 24)).toBe(Math.max(1, Math.floor(100 / 40)) * Math.max(1, Math.floor(24 / 5)));
+		expect(gridCapacity(100, 24)).toBe(
+			Math.max(1, Math.floor(100 / 40)) * Math.max(1, Math.floor(24 / 5)),
+		);
 		expect(gridCapacity(10, 3)).toBe(1);
 	});
 });
 
-describe("Wall", () => {
-	it("renders pane headers, health, log tail, page indicator", () => {
-		const { lastFrame } = render(<Wall state={wall({})} cols={100} rows={24} />);
-		const f = lastFrame()!;
-		expect(f).toContain("oauth");
-		expect(f).toContain("Manual  manual relay");
-		expect(f).toContain("⚠ STUCK 5/5");
-		expect(f).toContain("review findings");
-		expect(f).toContain("page 1/2");
-		expect(f).toContain("6 runs");
-	});
-	it("empty wall shows the no-active state", () => {
-		const { lastFrame } = render(<Wall state={wall({ panes: [], pageCount: 0, totalRuns: 0, selected: 0 })} cols={100} rows={24} />);
-		expect(lastFrame()!).toContain("no active collabs");
-	});
-	it("selected pane shows the ▸ marker; non-selected panes get matching padding", () => {
-		// Selected-card indicator is more visually obvious than the cyan
-		// border alone (which ink-testing-library strips). Lock in: exactly
-		// one pane shows "▸ " in the header, padding stays aligned on others.
-		const { lastFrame } = render(<Wall state={wall({})} cols={100} rows={24} />);
-		const f = lastFrame()!;
-		// wall() seeds selected=1 (the c2 / "Manual" pane), so the marker
-		// should appear on its header and NOT on c1.
-		expect(f).toContain("▸ Manual  manual relay");
-		// Exactly one ▸ marker in the entire wall frame.
-		expect((f.match(/▸ /g) ?? []).length).toBe(1);
-		// Unselected pane's header retains its "oauth" label (with leading
-		// padding for alignment); just assert the substring still renders.
-		expect(f).toContain("oauth");
+describe("Wall — theme migration (Task 8)", () => {
+	it("uses no raw cyan/magenta literals in dashboard-view source", () => {
+		const src = readFileSync("packages/cli/src/runtime/dashboard-view.tsx", "utf8");
+		expect(src).not.toMatch(/"cyan"|"magenta"/);
 	});
 
-	it("agent tokens (codex / claude) are not stripped by the per-token coloring", () => {
-		// ink-testing-library drops ANSI escape codes, so this test locks in
-		// the SUBSTRING preservation through colorAgents (a regression would
-		// drop letters or split them with stripped escapes).
-		const { lastFrame } = render(<Wall state={wall({})} cols={100} rows={24} />);
-		const f = lastFrame()!;
-		expect(f).toContain("codex");
-		expect(f).toContain("claude");
-	});
-
-	it("chunks >colsCount panes into multiple rows and renders every pane", () => {
-		// cols=100 → colsCount = max(1, floor(100/40)) = 2; 5 panes → 3 rows (2,2,1)
-		const panes = Array.from({ length: 5 }, (_, i) => ({
-			collabId: `c${i}`,
-			workflowId: i === 4 ? null : "wf",
-			header: `run-${i}  spec-driven-development  P1/4 R1/5`,
-			healthLine: i === 2 ? "⚠ STUCK" : "● codex ● claude  Chain active",
-			stuck: i === 2, // pane 2 stuck → red border (not selected)
-			logTail: [],
-		}));
-		// selected = pane 3 (not stuck) → cyan border; pane 2 stuck → red border.
-		// (ink-testing-library strips ANSI; border COLOR is set via the
-		// borderColor prop and verified visually out of band — here we lock
-		// the structural facts: all panes render across multiple rows.)
-		const { lastFrame } = render(
-			<Wall state={wall({ panes, page: 0, pageCount: 1, totalRuns: 5, selected: 3 })} cols={100} rows={24} />,
-		);
-		const f = lastFrame()!;
-		for (let i = 0; i < 5; i++) expect(f).toContain(`run-${i}`);
-		expect(f).toContain("⚠ STUCK"); // the stuck pane rendered
-		expect((f.match(/╭/g) ?? []).length).toBe(5); // one rounded box per pane (multi-row)
-		expect(f).toContain("page 1/1");
-		expect(f).toContain("5 runs");
+	it("Wall pane uses single-style borders", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [mkPane({ collabId: "c1", statusKey: "running" })],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = lastFrame() ?? "";
+		expect(out).toMatch(/[┌┐└┘]/);
+		expect(out).not.toMatch(/[╭╮╰╯]/);
 	});
 });
 
-function inspState(): InspectorState {
-	return {
-		live: { wf: "spec-driven-development  wf…  \"oauth\"", progress: "Phase 2/4 plan-writing · Round 5/5 · Step review", elapsed: "total 14m · phase 11m", turn: "codex · waiting claude · handoff accepted", health: "● codex ● claude  Chain escalated", live: "", why: "STUCK 5/5 max reached → escalated", last: "findings 0.43 · capture ok", stuck: true, logLines: [] },
-		timeline: [
-			{ phaseIndex: 0, phaseName: "spec-refining", roundsUsed: 2, maxRounds: 5, durationMs: 192000, outcome: "done", estInTokens: 6000, estOutTokens: 3000 },
-			{ phaseIndex: 1, phaseName: "plan-writing", roundsUsed: 5, maxRounds: 5, durationMs: 700000, outcome: "escalated", estInTokens: 45000, estOutTokens: 29000 },
-		],
-		evidence: { phase: "plan-writing", chainId: "ch_7f3", items: [{ round: 5, step: "review", sender: "claude", target: "codex", verdict: "findings", confidence: 0.43, reasonExcerpt: "criterion 5 unmet", captureStatus: "ok" }], diagnostics: [{ kind: "evaluator", text: "verdict findings conf 0.43 · ok · criterion 5 unmet" }], likelyCause: "5/5 rounds, confidence declining → under-specified input" },
-		cost: { totalMs: 892000, estInputTokens: 51000, estOutputTokens: 32000, perPhase: [{ phaseRunId: "pr1", phaseName: "spec-refining", estInTokens: 6000, estOutTokens: 3000, durationMs: 192000 }, { phaseRunId: "pr2", phaseName: "plan-writing", estInTokens: 45000, estOutTokens: 29000, durationMs: 700000 }] },
-		workflowHistory: [
-			{ workflowId: "wf_cur", workflowType: "spec-driven-development", name: "oauth", status: "halted", currentPhaseIndex: 1, createdAt: "2026-05-20T01:00:00.000Z", selected: true },
-			{ workflowId: "wf_prev", workflowType: "spec-driven-development", name: "login", status: "done", currentPhaseIndex: 3, createdAt: "2026-05-19T09:00:00.000Z", selected: false },
-		],
-	};
-}
-
-describe("Inspector", () => {
-	const vp = { offset: 0, follow: true };
-	it("Timeline section shows rounds-vs-max, outcome, est tokens, TOTAL", () => {
-		const { lastFrame } = render(<Inspector state={inspState()} section="timeline" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
-		const f = lastFrame()!;
-		expect(f).toContain("plan-writing");
-		expect(f).toContain("5/5");
-		expect(f).toContain("escalated");
-		expect(f).toMatch(/TOTAL/);
-	});
-	it("Evidence section shows the chain + likely cause", () => {
-		const { lastFrame } = render(<Inspector state={inspState()} section="evidence" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
-		const f = lastFrame()!;
-		expect(f).toContain("ch_7f3");
-		expect(f).toContain("criterion 5 unmet");
-		expect(f).toContain("under-specified input");
-	});
-	it("Cost section labels the estimate and shows totals", () => {
-		const { lastFrame } = render(<Inspector state={inspState()} section="cost" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
-		const f = lastFrame()!;
-		expect(f).toContain("est, not metered");
-		expect(f).toContain("51000");
-	});
-	it("Live section renders the RelayView status rows", () => {
-		const { lastFrame } = render(<Inspector state={inspState()} section="live" viewport={vp} cols={100} rows={24} label="oauth" workflowType="spec-driven-development" />);
-		expect(lastFrame()!).toContain("progress │");
+describe("Wall — full ACTIVE card (Task 9)", () => {
+	it("full ACTIVE card renders chevron, glyph, label, dimmed type, round, progress bar, and agent dots", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+			selected: 0,
+		});
+		// cols=100 → colsCount=2, paneWidth=50 (>= NARROW_PANE_COLS=48) → bar renders.
+		const { lastFrame } = render(<Wall state={state} cols={100} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("▸ ● mylabel");
+		expect(out).toContain("complex-bug-fixing");
+		expect(out).toContain("R1/3");
+		expect(out).toContain("P2/5");
+		expect(out).toMatch(/[▰▱]/); // progress bar present
+		expect(out).toContain("codex");
+		expect(out).toContain("claude");
 	});
 
-	it("tab bar bracket follows the `section` prop (live/timeline/evidence/cost)", () => {
-		// Regression smoke: user reported the wall+Inspector rendered fine but
-		// pressing 2/3/4 did not visibly switch the tab. Host state was proven
-		// to mutate correctly via __section() — verify the Inspector COMPONENT
-		// also re-renders the bracketed indicator for every section, so the
-		// bug (if any) is isolated to the host/Ink rerender layer.
-		const baseProps = { state: inspState(), viewport: vp, cols: 100, rows: 24, label: "oauth", workflowType: "spec-driven-development" as const };
-		const liveFrame = render(<Inspector {...baseProps} section="live" />).lastFrame()!;
-		expect(liveFrame).toContain("[1 Live]");
-		expect(liveFrame).toContain(" 2 Timeline ");
-		expect(liveFrame).toContain(" 3 Evidence ");
-		expect(liveFrame).toContain(" 4 Cost ");
-		const timelineFrame = render(<Inspector {...baseProps} section="timeline" />).lastFrame()!;
-		expect(timelineFrame).toContain(" 1 Live ");
-		expect(timelineFrame).toContain("[2 Timeline]");
-		const evidenceFrame = render(<Inspector {...baseProps} section="evidence" />).lastFrame()!;
-		expect(evidenceFrame).toContain("[3 Evidence]");
-		const costFrame = render(<Inspector {...baseProps} section="cost" />).lastFrame()!;
-		expect(costFrame).toContain("[4 Cost]");
+	it("two-pane 80-col wall drops the bar (each pane is 40 cols, below NARROW_PANE_COLS)", () => {
+		// Spec §Full card narrow-pane fallback keys off PER-PANE width, not
+		// terminal width. At cols=80 the grid is 2 columns × 40 cols per pane;
+		// 40 < 48 → bar must collapse to plain `P<n>/<total>` text even though
+		// the terminal itself is wide.
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "alpha",
+							progress: { current: 2, total: 5 },
+						}),
+						mkPane({
+							collabId: "c2",
+							statusKey: "running",
+							label: "beta",
+							progress: { current: 1, total: 5 },
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("P2/5");
+		expect(out).toContain("P1/5");
+		expect(out).not.toMatch(/[▰▱]/);
+	});
+
+	it("narrow pane drops the bar and shows P n/total text only", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 1, max: 3 },
+							progress: { current: 2, total: 5 },
+						}),
+					],
+				}),
+			],
+			selected: 0,
+		});
+		const { lastFrame } = render(<Wall state={state} cols={45} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("P2/5");
+		expect(out).not.toMatch(/[▰▱]/);
+	});
+
+	it("renders the degraded per-agent dot as ◐ in THEME.warn (yellow SGR 33)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "healthy" },
+								{ agent: "claude", health: "degraded" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("◐");
+		// degraded dot uses THEME.warn (yellow). Allow either SGR 33 or the 256/16M variants chalk may emit.
+		expect(raw).toMatch(/\x1b\[(33|93|38;5;\d+|38;2;[\d;]+)m[^\x1b]*◐/);
+		// claude name uses AGENT_COLOR.claude (#D97757). Allow 256-color or true-color encodings.
+		expect(raw).toMatch(/\x1b\[(38;5;\d+|38;2;217;119;87)m[^\x1b]*claude/);
+	});
+
+	it("renders the dead per-agent dot as ○ in THEME.err (red SGR 31)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "dead" },
+								{ agent: "claude", health: "healthy" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("○");
+		// dead dot uses THEME.err (red). Allow SGR 31 or 256/truecolor encodings.
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m[^\x1b]*○/);
+		// codex name uses AGENT_COLOR.codex (#5FB3C9).
+		expect(raw).toMatch(/\x1b\[(38;5;\d+|38;2;95;179;201)m[^\x1b]*codex/);
+	});
+
+	it("renders a healthy per-agent dot as ● in THEME.ok (green SGR 32)", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							agentHealth: [
+								{ agent: "codex", health: "healthy" },
+								{ agent: "claude", health: "healthy" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		// healthy dot uses THEME.ok (green).
+		expect(raw).toMatch(/\x1b\[(32|92|38;5;\d+|38;2;[\d;]+)m[^\x1b]*●/);
+	});
+});
+
+describe("Wall — stuck card variant (Task 10)", () => {
+	it("stuck card uses ⚠ glyph, red border, and suppresses event rows even when events are present", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "stuck",
+							label: "mylabel",
+							workflowType: "complex-bug-fixing",
+							round: { current: 3, max: 3 },
+							stuckWhy: "STUCK 6m12s — round 3/3 max reached → escalated",
+							events: [
+								{ step: "review", route: "codex→claude", verdict: "pass" },
+								{ step: "execute", route: "claude→codex", verdict: "-" },
+							],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("⚠");
+		expect(out).toContain("STUCK 6m12s");
+		expect(out).not.toMatch(/codex→claude/);
+		expect(out).not.toMatch(/claude→codex/);
+		expect(out).not.toMatch(/\breview\b/);
+		expect(out).not.toMatch(/\bexecute\b/);
+		expect(out).not.toMatch(/\bpass\b/);
+	});
+});
+
+describe("Wall — compact card (Task 11)", () => {
+	it("compact DONE card uses ✓ glyph, status word, elapsed; no event rows", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "d1",
+							statusKey: "done",
+							label: "donelabel",
+							workflowType: "spec-driven-development",
+							round: null,
+							progress: { current: 5, total: 5 },
+							elapsed: "4m12s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("✓ donelabel");
+		expect(out).toContain("spec-driven-development");
+		expect(out).toContain("P5/5");
+		expect(out).toContain("done");
+		expect(out).toContain("4m12s");
+	});
+
+	it("compact CANCELED card uses ✖ glyph in err color", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "x1",
+							statusKey: "canceled",
+							label: "cancellabel",
+							workflowType: "complex-bug-fixing",
+							round: null,
+							progress: { current: 3, total: 5 },
+							elapsed: "2m08s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("✖");
+		// Err color guard: the raw frame must contain a red SGR (any encoding).
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m/);
+	});
+
+	it("compact HALTED card uses ⚠ glyph in err color", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "halted",
+					panes: [
+						mkPane({
+							collabId: "h1",
+							statusKey: "stuck",
+							label: "haltlabel",
+							workflowType: "spec-driven-development",
+							round: null,
+							progress: { current: 2, total: 4 },
+							elapsed: "5m00s",
+							cardKind: "compact",
+							stuckWhy: null,
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const raw = lastFrame() ?? "";
+		const out = stripAnsi(raw);
+		expect(out).toContain("⚠");
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m/);
+	});
+});
+
+describe("Wall — sectioned grid + footer (Task 12)", () => {
+	it("Wall renders a labeled section header with the group count for each non-empty section", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({ collabId: "a1", statusKey: "running", label: "alpha" }),
+						mkPane({ collabId: "a2", statusKey: "running", label: "beta" }),
+					],
+				}),
+				mkSection({
+					group: "halted",
+					panes: [
+						mkPane({
+							collabId: "h1",
+							statusKey: "stuck",
+							label: "halt1",
+							round: null,
+							progress: { current: 1, total: 4 },
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+				mkSection({
+					group: "doneCanceled",
+					panes: [
+						mkPane({
+							collabId: "d1",
+							statusKey: "done",
+							label: "donelabel",
+							round: null,
+							progress: { current: 5, total: 5 },
+							elapsed: "4m12s",
+							cardKind: "compact",
+							events: [],
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("ACTIVE (2)");
+		expect(out).toContain("HALTED (1)");
+		expect(out).toContain("DONE / CANCELED (1)");
+	});
+
+	it("Wall footer includes the keybinding row and the glyph legend", () => {
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [mkPane({ collabId: "a1", statusKey: "running", label: "alpha" })],
+				}),
+			],
+			pageCount: 2,
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/page \d+\/\d+/);
+		expect(out).toContain("● running");
+		expect(out).toContain("⚠ stuck/halted");
+		expect(out).toContain("✓ done");
+		expect(out).toContain("✖ canceled");
+		expect(out).toContain("◌ idle");
+	});
+
+	it("empty Wall keeps the existing 'no active collabs' message", () => {
+		const empty = { sections: [], panes: [], page: 0, pageCount: 1, totalRuns: 0, selected: 0 } as WallState;
+		const { lastFrame } = render(<Wall state={empty} cols={80} rows={30} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("no active collabs");
+	});
+});
+
+describe("Inspector polish (Task 13)", () => {
+	it("Inspector header shows the status glyph in THEME color before the label", () => {
+		const state = mkInspectorState({ stuck: false });
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="live"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/●\s+mylabel/);
+	});
+
+	it("Inspector tab bar marks the active tab with the accent color (SGR sequence present before [2 Timeline])", () => {
+		const state = mkInspectorState({ stuck: false });
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const raw = lastFrame() ?? "";
+		expect(raw).toMatch(/\x1b\[[0-9;]*m\[2 Timeline\]/);
+	});
+
+	it("Inspector timeline outcome colors are tied to THEME tokens (ok green, fail red)", () => {
+		const state = mkInspectorState({
+			stuck: false,
+			timeline: [
+				{
+					phaseIndex: 0,
+					phaseName: "plan",
+					roundsUsed: 1,
+					maxRounds: 3,
+					durationMs: 60_000,
+					outcome: "approve",
+					estInTokens: 100,
+					estOutTokens: 50,
+				},
+				{
+					phaseIndex: 1,
+					phaseName: "implement",
+					roundsUsed: 3,
+					maxRounds: 3,
+					durationMs: 240_000,
+					outcome: "escalate",
+					estInTokens: 400,
+					estOutTokens: 200,
+				},
+			],
+		});
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const raw = lastFrame() ?? "";
+		// Approve gets the ok (green) SGR; escalate gets err (red) SGR.
+		expect(raw).toMatch(/\x1b\[(32|92|38;5;\d+|38;2;[\d;]+)m[^\x1b]*approve/);
+		expect(raw).toMatch(/\x1b\[(31|91|38;5;\d+|38;2;[\d;]+)m[^\x1b]*escalate/);
+	});
+
+	it("Inspector workflow history colors statuses via the in-scope glyph map (no paused)", () => {
+		const state = mkInspectorState({
+			stuck: false,
+			workflowHistory: [
+				{
+					workflowId: "wf-run",
+					workflowType: "complex-bug-fixing",
+					name: null,
+					status: "running",
+					currentPhaseIndex: 1,
+					createdAt: "2026-05-28T00:00:00Z",
+					selected: true,
+				},
+				{
+					workflowId: "wf-done",
+					workflowType: "spec-driven-development",
+					name: null,
+					status: "done",
+					currentPhaseIndex: 4,
+					createdAt: "2026-05-27T00:00:00Z",
+					selected: false,
+				},
+				{
+					workflowId: "wf-halt",
+					workflowType: "complex-bug-fixing",
+					name: null,
+					status: "halted",
+					currentPhaseIndex: 2,
+					createdAt: "2026-05-26T00:00:00Z",
+					selected: false,
+				},
+				{
+					workflowId: "wf-canx",
+					workflowType: "ralph-loop",
+					name: null,
+					status: "canceled",
+					currentPhaseIndex: 0,
+					createdAt: "2026-05-25T00:00:00Z",
+					selected: false,
+				},
+			],
+		});
+		const { lastFrame } = render(
+			<Inspector
+				state={state}
+				section="timeline"
+				viewport={defaultViewport}
+				cols={120}
+				rows={40}
+				label="mylabel"
+				workflowType="complex-bug-fixing"
+				workflowStatus="running"
+			/>,
+		);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toMatch(/●/); // running
+		expect(out).toMatch(/✓/); // done
+		expect(out).toMatch(/⚠/); // halted
+		expect(out).toMatch(/✖/); // canceled
+		expect(out).not.toContain("⏸"); // paused deferred
 	});
 });

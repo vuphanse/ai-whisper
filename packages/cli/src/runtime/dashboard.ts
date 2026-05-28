@@ -4,7 +4,6 @@ import type { ReactElement } from "react";
 import type { BrokerRuntime } from "@ai-whisper/broker";
 import { getWorkflowDefinition } from "@ai-whisper/broker";
 import {
-	gridCapacity,
 	Wall,
 	Inspector,
 	DashboardApp,
@@ -13,9 +12,10 @@ import {
 import type { Viewport } from "./relay-view.js";
 import { logViewportHeight } from "./relay-view.js";
 import {
+	allocateWallSections,
 	buildWallState,
 	buildInspectorState,
-	selectWallPage,
+	partitionWallGroups,
 	type InspectorState,
 	type PhaseRunRef,
 	type RelayViewSnapshot,
@@ -89,6 +89,7 @@ export function createDashboardRuntime(input: {
 	let inspectorWorkflowId: string | null = null;
 	let inspectorType: string | null = null;
 	let inspectorLabel = "";
+	let inspectorWorkflowStatus: "running" | "done" | "halted" | "canceled" | null = null;
 	let inspectorSection: InspectorSection = "live";
 	let wallPage = 0;
 	let wallSelected = 0;
@@ -307,19 +308,23 @@ export function createDashboardRuntime(input: {
 					cols,
 					rows,
 					label: inspectorLabel,
+					workflowStatus: inspectorWorkflowStatus,
 					workflowType: inspectorType,
 				});
 			}
 		}
 
 		const summaries = c.listActiveCollabSummaries(windowMs, isoNow);
-		const capacity = gridCapacity(cols, rows);
-		const sel = selectWallPage({
-			summaries,
-			capacity,
+		// Use the sectioned allocator to pre-decide which summaries are visible
+		// on this page so per-collab snapshot fetches stay bounded to that set.
+		const groups = partitionWallGroups(summaries);
+		const allocPreview = allocateWallSections({
+			groups,
+			cols,
+			rows,
 			page: wallPage,
-			selected: wallSelected,
 		});
+		const visibleSummaries = allocPreview.sections.flatMap((sec) => sec.cards);
 		const snapshots: Record<
 			string,
 			{
@@ -328,7 +333,7 @@ export function createDashboardRuntime(input: {
 				totalPhases: number;
 			}
 		> = {};
-		for (const s of sel.pageSummaries) {
+		for (const s of visibleSummaries) {
 			// Each pane represents ONE run on this collab — either a workflow
 			// instance (`s.workflowId`) or the manual relay slice. Scope the
 			// tail so we don't tail-mix sibling runs on the same collab.
@@ -362,7 +367,8 @@ export function createDashboardRuntime(input: {
 			summaries,
 			now: isoNow,
 			idleThresholdMs: 30_000,
-			capacity,
+			cols,
+			rows,
 			page: wallPage,
 			selected: wallSelected,
 			snapshots,
@@ -444,6 +450,7 @@ export function createDashboardRuntime(input: {
 					inspectorWorkflowId = s?.workflowId ?? null;
 					inspectorType = s?.workflowType ?? null;
 					inspectorLabel = s?.label ?? collabId;
+					inspectorWorkflowStatus = s?.workflowStatus ?? null;
 					inspectorSection = "live";
 					viewport.offset = 0;
 					viewport.follow = true;

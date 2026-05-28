@@ -188,6 +188,46 @@ describe("listActiveCollabSummaries", () => {
 		expect(rows[0]?.workflowId).toBe(null);
 		expect(rows[0]?.lastActivityAt).toBe("2026-05-20T00:50:00.000Z");
 	});
+
+	it("projects workflowCreatedAt from the joined workflow row", () => {
+		const db = freshDb();
+		insCollab(db, "c1");
+		insWorkflow(db, {
+			id: "wf1",
+			collab: "c1",
+			type: "spec-driven-development",
+			name: "demo",
+			status: "running",
+			createdAt: "2026-05-28T01:02:03.000Z",
+		});
+		insHandoff(db, {
+			id: "h1",
+			collab: "c1",
+			wf: "wf1",
+			createdAt: "2026-05-20T00:55:00.000Z",
+			lastAct: "2026-05-20T00:59:30.000Z",
+		});
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		const row = rows.find((r) => r.collabId === "c1");
+		expect(row?.workflowCreatedAt).toBe("2026-05-28T01:02:03.000Z");
+	});
+
+	it("workflowCreatedAt is null for a manual-relay collab (no workflow)", () => {
+		const db = freshDb();
+		insCollab(db, "c2");
+		insHandoff(db, {
+			id: "h2",
+			collab: "c2",
+			createdAt: "2026-05-20T00:50:00.000Z",
+			lastAct: "2026-05-20T00:50:00.000Z",
+		});
+
+		const rows = listActiveCollabSummaries(db, { sinceMs, now: NOW });
+		const row = rows.find((r) => r.collabId === "c2");
+		expect(row?.workflowId).toBeNull();
+		expect(row?.workflowCreatedAt).toBeNull();
+	});
 });
 
 function insCostHandoff(db: ReturnType<typeof freshDb>, h: { id: string; collab: string; wf?: string | null; phase?: string | null; createdAt: string; resolvedAt?: string | null; lastAct?: string; req?: string; root?: string | null; back?: string | null }) {
