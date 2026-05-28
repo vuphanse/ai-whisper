@@ -58,9 +58,14 @@ export function listActiveCollabSummaries(
 	input: { sinceMs: number; now?: string; minResults?: number },
 ): CollabSummary[] {
 	const nowMs = Date.parse(input.now ?? new Date().toISOString());
-	const cutoff = new Date(
-		Number.isFinite(nowMs) ? nowMs - input.sinceMs : Date.now() - input.sinceMs,
-	).toISOString();
+	const base = Number.isFinite(nowMs) ? nowMs : Date.now();
+	// `--window all` (and other very large sinceMs values) would underflow
+	// `base - sinceMs` below epoch, and `new Date(negative).toISOString()`
+	// throws RangeError. Clamp to 0 so the cutoff becomes 1970-01-01 — every
+	// real `last_activity_at` is lexicographically ≥ that, so the eligibility
+	// filter degenerates to "any collab with activity ever", which is what
+	// the operator asked for.
+	const cutoff = new Date(Math.max(0, base - input.sinceMs)).toISOString();
 
 	const eligible = db
 		.prepare(

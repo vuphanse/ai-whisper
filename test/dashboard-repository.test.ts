@@ -273,3 +273,33 @@ describe("listRunCostRows", () => {
 		expect(after?.resolvedAt).toBe("2026-05-20T00:05:00.000Z");
 	});
 });
+
+describe("listActiveCollabSummaries — huge sinceMs (no-window mode)", () => {
+	it("does not throw RangeError when sinceMs is Number.MAX_SAFE_INTEGER (`--window all`)", () => {
+		const db = freshDb();
+		insCollab(db, "c1");
+		insWorkflow(db, { id: "wf1", collab: "c1", status: "done" });
+		insHandoff(db, {
+			id: "h1",
+			collab: "c1",
+			wf: "wf1",
+			createdAt: "2026-05-20T00:00:00.000Z",
+		});
+		// Pre-fix, `new Date(Date.now() - MAX_SAFE_INTEGER).toISOString()` threw
+		// `RangeError: Invalid time value` because the resulting ms is far below
+		// epoch. The clamp to 0 means the cutoff degenerates to 1970-01-01.
+		expect(() =>
+			listActiveCollabSummaries(db, {
+				sinceMs: Number.MAX_SAFE_INTEGER,
+				now: "2026-05-21T00:00:00.000Z",
+			}),
+		).not.toThrow();
+
+		const out = listActiveCollabSummaries(db, {
+			sinceMs: Number.MAX_SAFE_INTEGER,
+			now: "2026-05-21T00:00:00.000Z",
+		});
+		// All-time mode: every collab with any activity ever is eligible.
+		expect(out.map((s) => s.collabId)).toContain("c1");
+	});
+});
