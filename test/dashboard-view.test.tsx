@@ -199,7 +199,8 @@ describe("Wall — full ACTIVE card (Task 9)", () => {
 			],
 			selected: 0,
 		});
-		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		// cols=100 → colsCount=2, paneWidth=50 (>= NARROW_PANE_COLS=48) → bar renders.
+		const { lastFrame } = render(<Wall state={state} cols={100} rows={20} />);
 		const out = stripAnsi(lastFrame() ?? "");
 		expect(out).toContain("▸ ● mylabel");
 		expect(out).toContain("complex-bug-fixing");
@@ -208,6 +209,39 @@ describe("Wall — full ACTIVE card (Task 9)", () => {
 		expect(out).toMatch(/[▰▱]/); // progress bar present
 		expect(out).toContain("codex");
 		expect(out).toContain("claude");
+	});
+
+	it("two-pane 80-col wall drops the bar (each pane is 40 cols, below NARROW_PANE_COLS)", () => {
+		// Spec §Full card narrow-pane fallback keys off PER-PANE width, not
+		// terminal width. At cols=80 the grid is 2 columns × 40 cols per pane;
+		// 40 < 48 → bar must collapse to plain `P<n>/<total>` text even though
+		// the terminal itself is wide.
+		const state = mkWallState({
+			sections: [
+				mkSection({
+					group: "active",
+					panes: [
+						mkPane({
+							collabId: "c1",
+							statusKey: "running",
+							label: "alpha",
+							progress: { current: 2, total: 5 },
+						}),
+						mkPane({
+							collabId: "c2",
+							statusKey: "running",
+							label: "beta",
+							progress: { current: 1, total: 5 },
+						}),
+					],
+				}),
+			],
+		});
+		const { lastFrame } = render(<Wall state={state} cols={80} rows={20} />);
+		const out = stripAnsi(lastFrame() ?? "");
+		expect(out).toContain("P2/5");
+		expect(out).toContain("P1/5");
+		expect(out).not.toMatch(/[▰▱]/);
 	});
 
 	it("narrow pane drops the bar and shows P n/total text only", () => {

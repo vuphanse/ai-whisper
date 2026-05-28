@@ -22,6 +22,10 @@ const state: RelayViewState = {
 	elapsed: "total 7m12s · phase 2m08s",
 	turn: "codex · waiting claude · handoff accepted",
 	health: "● codex  ● claude  Chain active · ALIVE",
+	agentHealth: [
+		{ agent: "codex", health: "healthy" },
+		{ agent: "claude", health: "healthy" },
+	],
 	live: "idle 8s · auto-handback in 22s",
 	why: null,
 	last: "delivered 0.95 · capture ok",

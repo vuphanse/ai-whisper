@@ -52,7 +52,6 @@ function FullCard(props: {
 	pane: WallPaneState;
 	selected: boolean;
 	width: number;
-	totalCols?: number;
 }): ReactElement {
 	const { pane } = props;
 	const chevron = props.selected ? "▸ " : "  ";
@@ -95,12 +94,12 @@ function FullCard(props: {
 	const progressText = pane.progress
 		? `P${pane.progress.current}/${pane.progress.total}`
 		: "—";
-	// Narrow-pane fallback uses the TERMINAL width (not the per-pane column
-	// width) so a 2-column 80-col terminal still gets the bar — a paneWidth of
-	// 40 is below NARROW_PANE_COLS by construction at 80 cols, but the spec's
-	// narrow-pane budget is about the whole TUI panel, not a single pane.
-	const narrowRef = props.totalCols ?? props.width;
-	const showBar = pane.progress != null && narrowRef >= NARROW_PANE_COLS;
+	// Narrow-pane fallback keys off the PER-PANE width (spec §Full card and
+	// edge cases): when the rendered card itself is < NARROW_PANE_COLS the
+	// progress bar collapses to plain `P<n>/<total>` text. Terminal-total
+	// width is irrelevant — a 2-col 80-col terminal renders 40-col panes,
+	// which are narrow, so the bar drops.
+	const showBar = pane.progress != null && props.width >= NARROW_PANE_COLS;
 	const roundText =
 		pane.round != null ? `  R${pane.round.current}/${pane.round.max}` : "";
 
@@ -246,7 +245,6 @@ export function Wall(props: {
 											pane={pane}
 											selected={selected}
 											width={paneWidth}
-											totalCols={props.cols}
 										/>
 									) : (
 										<CompactCard
@@ -363,7 +361,7 @@ export function Inspector(props: {
 										key={w.workflowId}
 										wrap="truncate"
 										bold={w.selected}
-										color={w.selected ? undefined : THEME.muted}
+										{...(w.selected ? {} : { color: THEME.muted })}
 									>
 										{`${w.selected ? "▸" : " "} `}
 										<Text color={g.color}>{g.glyph}</Text>
@@ -388,7 +386,14 @@ export function Inspector(props: {
 								p.durationMs == null ? "–" : fmtDur(p.durationMs),
 								6,
 							)}  ${padRight(`≈${p.estInTokens + p.estOutTokens}`, 9)}  `}
-							<Text color={outcomeColor(p.outcome)}>{p.outcome ?? "⋯"}</Text>
+							{(() => {
+								const oc = outcomeColor(p.outcome);
+								return oc ? (
+									<Text color={oc}>{p.outcome ?? "⋯"}</Text>
+								) : (
+									<Text>{p.outcome ?? "⋯"}</Text>
+								);
+							})()}
 						</Text>
 					))}
 					<Text wrap="truncate" bold>
@@ -405,7 +410,14 @@ export function Inspector(props: {
 					{s.evidence.items.map((it, i) => (
 						<Text key={i} wrap="truncate">
 							{`R${it.round ?? "-"} ${it.step ?? "-"} ${it.sender}→${it.target} `}
-							<Text color={outcomeColor(it.verdict)}>{it.verdict ?? "-"}</Text>
+							{(() => {
+								const vc = outcomeColor(it.verdict);
+								return vc ? (
+									<Text color={vc}>{it.verdict ?? "-"}</Text>
+								) : (
+									<Text>{it.verdict ?? "-"}</Text>
+								);
+							})()}
 							{` ${it.confidence ?? "-"} ${it.reasonExcerpt}`}
 						</Text>
 					))}
