@@ -5,6 +5,42 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-28
+
+### Added
+
+- **Operator pause / resume for running workflows.** A healthy, running workflow
+  can now be frozen in place and continued later — without the escalation
+  semantics of `halt`. This closes a concrete dogfooding failure mode: when a
+  glitch in an artifact (spec/plan/source) steered both agents wrong, the
+  operator's only options were to let the autonomous loop keep burning rounds on
+  the bad artifact or `halt` it (which pollutes the review trail as "the system
+  gave up"). New commands:
+  - `whisper workflow pause <id>` — freeze a running workflow.
+  - `whisper workflow resume <id> [--message "<note>"]` — continue it, optionally
+    telling the agents what changed.
+
+  `paused` is a first-class workflow status that **occupies the active-workflow
+  slot** (the one-workflow-per-collab invariant and its partial unique index now
+  count `running` **and** `paused`), so a second workflow cannot start during a
+  pause. Pause freezes **all** delivery/orchestration drivers through a single
+  broker chokepoint — a shared `isWorkflowDeliverySuspended` predicate gates the
+  pending-orchestration list, claim, auto-accept, and the mount-side request
+  injection — so a paused workflow delivers no new turn while a future driver
+  inherits the gate by construction. The in-flight turn is never killed: its
+  handback is still recorded so the loop can quiesce at a clean boundary, and the
+  workspace snapshot baseline is captured **at that boundary** (via
+  `git stash create`, scoped to tracked files excluding `.ai-whisper/`), not at
+  the pause-command instant — so an in-flight agent's final writes are never
+  misattributed to the operator. On resume, the agents receive a one-time notice
+  listing the files the operator changed since the workflow quiesced plus the
+  optional operator note, prepended exactly once to the next outgoing request
+  (whether a handoff already pending accept or the next orchestrator-created
+  loop handoff), requiring them to re-read and re-evaluate before continuing.
+  Mid-workflow "pause the workflow" guidance — including the Codex-CLI Ctrl+C
+  caveat — rides the canonical workflow handoff prompt and the bundled kickoff
+  skills. The existing `halted → running` resume path is unchanged.
+
 ## [0.2.1] - 2026-05-25
 
 ### Fixed
@@ -133,6 +169,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.3.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.0
 [0.1.4]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.1.4
