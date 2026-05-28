@@ -108,6 +108,67 @@ export function estimateTokens(chars: number): number {
 export { buildRelayViewState, deriveLogLines, fmtDur };
 export type { LogLine, PhaseRunRef, RelayViewSnapshot, RelayViewState, RelayHandoffLogRow, CollabSummary, RunCostRow };
 
+// ---- Group partition + recency sort + stuck-pin (spec: Wall grouping) ----
+
+export type WallGroupKey = "active" | "idleManual" | "halted" | "doneCanceled";
+
+export type WallGroups = {
+	active: CollabSummary[];
+	idleManual: CollabSummary[];
+	halted: CollabSummary[];
+	doneCanceled: CollabSummary[];
+};
+
+function isStuckRunning(s: CollabSummary): boolean {
+	// Wall-side static stuck signal — full liveness lives in computeLiveness,
+	// but for ordering we only need the chain-derived signal that survives a
+	// running workflowStatus.
+	return (
+		s.workflowStatus === "running" &&
+		(s.chainStatus === "escalated" ||
+			s.chainStatus === "abandoned" ||
+			(s.currentRound != null &&
+				s.maxRounds != null &&
+				s.maxRounds > 1 &&
+				s.currentRound >= s.maxRounds))
+	);
+}
+
+function recencyKey(s: CollabSummary): string {
+	return s.workflowCreatedAt ?? s.lastActivityAt ?? "";
+}
+
+function cmpDesc(a: string, b: string): number {
+	return a < b ? 1 : a > b ? -1 : 0;
+}
+
+export function partitionWallGroups(summaries: CollabSummary[]): WallGroups {
+	const active: CollabSummary[] = [];
+	const idleManual: CollabSummary[] = [];
+	const halted: CollabSummary[] = [];
+	const doneCanceled: CollabSummary[] = [];
+	for (const s of summaries) {
+		if (s.workflowStatus === null) idleManual.push(s);
+		else if (s.workflowStatus === "running") active.push(s);
+		else if (s.workflowStatus === "halted") halted.push(s);
+		else if (s.workflowStatus === "done" || s.workflowStatus === "canceled")
+			doneCanceled.push(s);
+		// paused or any unknown status is dropped — see spec Non-Goals.
+	}
+	// ACTIVE: stuck-pin (stuck block first), then recency desc within each block.
+	active.sort((a, b) => {
+		const sa = isStuckRunning(a) ? 0 : 1;
+		const sb = isStuckRunning(b) ? 0 : 1;
+		if (sa !== sb) return sa - sb;
+		return cmpDesc(recencyKey(a), recencyKey(b));
+	});
+	// Other groups: recency desc.
+	idleManual.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	halted.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	doneCanceled.sort((a, b) => cmpDesc(recencyKey(a), recencyKey(b)));
+	return { active, idleManual, halted, doneCanceled };
+}
+
 function attentionRank(s: CollabSummary): number {
 	if (
 		s.chainStatus === "escalated" ||
