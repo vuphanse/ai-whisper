@@ -1,7 +1,10 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createLiveSessionRuntime } from "../packages/cli/src/runtime/live-session.ts";
-import { createMountedTurnOwnedRelay } from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
+import {
+	classifyCapture,
+	createMountedTurnOwnedRelay,
+} from "../packages/cli/src/runtime/mounted-turn-owned-relay.ts";
 
 describe("mounted turn-owned relay", () => {
 	it("renders a pending handoff card for the owner and injects/submits the accepted request immediately", async () => {
@@ -1406,5 +1409,36 @@ describe("mounted turn-owned relay", () => {
 
 			expect(applyOrchestratorVerdict).not.toHaveBeenCalled();
 		});
+	});
+});
+
+// Bug 2026-05-29 — Mode A: short claude reply rejected as low-confidence.
+// See docs/superpowers/bugs/2026-05-29-handback-capture-failures.md (Mode A).
+// captureClipboardHandback only returns on a clipboard-content change AFTER
+// /copy, so a non-empty short clipText is freshly-captured by construction.
+// Under Claude Code's full-screen TUI, normalizeCapturedOutput strips cursor-
+// positioned redraws to empty/junk, so turnResult.text === "" and confidence
+// is "low" even when the assistant produced a valid short reply. Today the
+// classifier short-circuits to no_response_captured_confidently in that case
+// and the workflow halts on a single handback. The fix path (Option B in
+// docs/superpowers/specs/2026-05-14-capture-reliability-hardening-design.md)
+// trusts a freshly-changed short clipboard on its own merits without
+// removing the stale-clipboard gate that the >=100-char / similarity check
+// provides for non-fresh content.
+describe("classifyCapture — short freshly-captured clipboard (Mode A repro)", () => {
+	it("accepts a short claude reply when PTY turn text is empty/low-confidence (TUI normalization)", () => {
+		const result = classifyCapture(
+			{ confidence: "low", text: "" },
+			"Task 1 verifies clean. Commit and move on.",
+		);
+		expect(result.status).toBe("ok");
+	});
+
+	it("accepts the other observed real reply pattern (terse 'Not relevant — ...' verdict)", () => {
+		const result = classifyCapture(
+			{ confidence: "low", text: "" },
+			"Not relevant — same merge-at-finish-time memory.",
+		);
+		expect(result.status).toBe("ok");
 	});
 });
