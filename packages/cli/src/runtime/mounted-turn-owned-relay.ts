@@ -609,6 +609,14 @@ export function createMountedTurnOwnedRelay(input: {
 			const turnResult: { confidence: "high" | "low"; text: string | null } =
 				input.turnCapture?.extractLatestAssistantTurn() ?? { confidence: "low", text: null };
 
+			// Diagnostic: trace every auto-handback entry so the operator can see in the
+			// mount pane WHEN the capture pipeline fires, on which handoff, and what
+			// turn state it has to work with. Pairs with the lease-degrade / swallowed-
+			// exception warns below to expose the silent-exit bug observed 2026-05-29.
+			console.warn(
+				`[ai-whisper] auto-handback fire: target=${input.currentAgent} handoff=${accepted.handoffId} turnLen=${(turnResult.text ?? "").length} turnConf=${turnResult.confidence}`,
+			);
+
 			let clipboardText: string | null = null;
 			let leaseDegraded = false;
 			let interferenceDetected = false;
@@ -623,10 +631,27 @@ export function createMountedTurnOwnedRelay(input: {
 						clipboardText = captureResult.text;
 					} else {
 						leaseDegraded = true; // degraded_pty_only (timeout or persistent interference)
+						console.warn(
+							`[ai-whisper] capture lease degraded: target=${input.currentAgent} handoff=${accepted.handoffId} interference=${interferenceDetected} — /copy was NOT executed; PTY fallback only`,
+						);
 					}
+				} else {
+					// captureHandbackText returned null (e.g. mount-session-main's
+					// !resolvedClaim early-return). Surface it explicitly — otherwise
+					// looks identical to "no clipboard change" downstream.
+					console.warn(
+						`[ai-whisper] capture pipeline returned null: target=${input.currentAgent} handoff=${accepted.handoffId} — captureHandbackText short-circuited (likely no session claim)`,
+					);
 				}
-			} catch {
+			} catch (err) {
+				// Surface the swallowed error — silent-swallow here was the root cause
+				// of the 2026-05-29 halts where codex produced a real review but the
+				// orchestrator received an empty handback with no diagnostic clue why.
 				clipboardText = null;
+				const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+				console.warn(
+					`[ai-whisper] capture pipeline threw (swallowed): target=${input.currentAgent} handoff=${accepted.handoffId}\n${msg}`,
+				);
 			}
 
 			const classification = classifyCapture(turnResult, clipboardText);

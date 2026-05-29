@@ -382,6 +382,14 @@ export function createMountSessionRuntime(input: {
 								pid: process.pid,
 								turnText,
 								readChangeCount,
+								// TEMP 2026-05-29: bump lease poll-acquire from default 4s to 30s
+								// to absorb concurrent-collab contention while we land the proper
+								// fix (per-provider capture strategies, design doc Phase 2). The
+								// auto-handback already waits ≥30s grace + however long the
+								// provider takes to idle, so an extra 0–30s of lease wait is
+								// invisible. Revert once mount restart / per-provider strategy
+								// removes the host-global single-lease bottleneck.
+								acquireMaxWaitMs: 30_000,
 								runCapture: () =>
 									captureClipboardHandback({
 										triggerCopy: () => submitInjectedInput("/copy"),
