@@ -80,7 +80,15 @@ export function acquireCaptureLease(
 		).run(LEASE_ID, collabId, pid, acquiredAt);
 		return true;
 	});
-	return tx();
+	// IMMEDIATE (not the default DEFERRED): take the write lock up front so
+	// busy_timeout is honored. A DEFERRED transaction reads first (SELECT) then
+	// promotes to a write lock (INSERT); in WAL mode that promotion fails with an
+	// *immediate* SQLITE_BUSY ("database is locked") — busy_timeout does NOT cover
+	// lock promotions — the moment any other connection commits after the read
+	// snapshot. With multiple mount processes sharing state.db that race is
+	// constant, and the throw was swallowed into an empty handback that halted the
+	// workflow. IMMEDIATE eliminates the read→write promotion entirely.
+	return tx.immediate();
 }
 
 /** Release the lease iff `collabId` is the current holder. No-op otherwise. */

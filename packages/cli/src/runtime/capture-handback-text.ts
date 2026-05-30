@@ -75,12 +75,20 @@ export async function captureHandbackText(
 	let acquired = false;
 	const deadline = Date.now() + acquireMaxWaitMs;
 	for (;;) {
-		acquired = acquireCaptureLease(
-			input.db,
-			input.collabId,
-			input.pid,
-			input.leaseOptions,
-		);
+		try {
+			acquired = acquireCaptureLease(
+				input.db,
+				input.collabId,
+				input.pid,
+				input.leaseOptions,
+			);
+		} catch {
+			// Defense in depth: a residual SQLITE_BUSY ("database is locked") past
+			// busy_timeout must not propagate — an uncaught throw here is swallowed
+			// upstream into an empty handback that halts the workflow. Treat it as
+			// "not acquired" and retry within the deadline, then degrade to PTY-only.
+			acquired = false;
+		}
 		if (acquired) break;
 		if (Date.now() >= deadline) break;
 		await sleep(acquireBackoffMs);

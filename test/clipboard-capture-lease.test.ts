@@ -163,3 +163,85 @@ describe("clipboard_capture_lease — startup sweep", () => {
 		expect(row.holder_collab_id).toBe("collabA");
 	});
 });
+
+describe("clipboard_capture_lease — concurrent-writer safety (halted-workflow repro)", () => {
+	it("does not throw 'database is locked' when another connection commits mid-acquire", () => {
+		// Root cause of the halted-workflow capture failures. acquireCaptureLease
+		// ran as a DEFERRED transaction (SELECT, then write the lease row). In WAL
+		// mode the read→write promotion fails with an *immediate* SQLITE_BUSY —
+		// busy_timeout is NOT honored for lock promotions — the instant any other
+		// connection commits after the read snapshot. With multiple mount processes
+		// sharing state.db that is constant, so the auto-handback capture threw
+		// "database is locked", the throw was swallowed, and the workflow halted
+		// with "No handbackText provided". The fix is BEGIN IMMEDIATE (take the
+		// write lock up front), which makes busy_timeout apply again.
+		const path = join(mkdtempSync(join(tmpdir(), "lease-race-")), "broker.sqlite");
+		const dbA = openDatabase(path);
+		applyMigrations(dbA);
+		const connB = openDatabase(path);
+		connB.pragma("busy_timeout = 1"); // fail fast once the fix holds the write lock
+
+		let injected = false;
+		const injectExternalCommit = () => {
+			if (injected) return;
+			injected = true;
+			try {
+				// A real competing writer commits between A's read snapshot and A's
+				// write. Under DEFERRED this succeeds (A holds only a read lock) and
+				// makes A's snapshot stale so A's promotion throws. Under IMMEDIATE
+				// this throws (A already holds the write lock) and is swallowed — we
+				// only assert on acquireCaptureLease itself.
+				connB
+					.prepare(
+						"INSERT INTO clipboard_capture_lease (id, holder_collab_id, holder_pid, acquired_at) VALUES (1, 'connB', 1, '2026-05-25T00:00:00Z') ON CONFLICT(id) DO UPDATE SET holder_collab_id = 'connB'",
+					)
+					.run();
+			} catch {
+				/* expected once the fix takes the write lock first */
+			}
+		};
+
+		// Proxy dbA so the lease upsert fires connB's commit immediately before A's
+		// own write/promotion — deterministically forcing the production race.
+		const proxyDb = new Proxy(dbA, {
+			get(target, prop) {
+				if (prop === "prepare") {
+					return (sql: string) => {
+						const stmt = target.prepare(sql);
+						if (!sql.includes("INSERT INTO clipboard_capture_lease")) return stmt;
+						return new Proxy(stmt, {
+							get(s, p) {
+								if (p === "run") {
+									const realRun = (s.run as (...a: unknown[]) => unknown).bind(s);
+									return (...args: unknown[]) => {
+										injectExternalCommit();
+										return realRun(...args);
+									};
+								}
+								const v = (s as Record<PropertyKey, unknown>)[p];
+								return typeof v === "function"
+									? (v as (...a: unknown[]) => unknown).bind(s)
+									: v;
+							},
+						});
+					};
+				}
+				const value = (target as Record<PropertyKey, unknown>)[prop];
+				return typeof value === "function"
+					? (value as (...a: unknown[]) => unknown).bind(target)
+					: value;
+			},
+		});
+
+		expect(() =>
+			acquireCaptureLease(proxyDb as unknown as typeof dbA, "collabA", 100, {
+				isPidAlive: () => true,
+				ttlMs: TTL_MS,
+				now: () => T0,
+			}),
+		).not.toThrow();
+
+		dbA.close();
+		connB.close();
+	});
+});

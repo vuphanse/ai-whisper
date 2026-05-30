@@ -186,3 +186,37 @@ describe("captureHandbackText — changeCount helper absent", () => {
 		expect(result.interferenceDetected).toBe(false);
 	});
 });
+
+describe("captureHandbackText — lock resilience (defense in depth)", () => {
+	it("degrades to PTY-only (no throw) when lease acquire hits 'database is locked'", async () => {
+		// Even after the IMMEDIATE-transaction fix, an extreme/sustained lock can
+		// still surface SQLITE_BUSY past busy_timeout. The poll loop must treat a
+		// throwing acquire as "not acquired" and degrade — never let it propagate
+		// to a swallowed exception that empties the handback and halts the workflow.
+		const throwLocked = () => {
+			throw new Error("database is locked");
+		};
+		(throwLocked as unknown as { immediate: () => never }).immediate =
+			throwLocked as () => never;
+		const lockedDb = {
+			transaction: () => throwLocked,
+		} as unknown as Parameters<typeof captureHandbackText>[0]["db"];
+
+		let captureCalled = false;
+		const result = await captureHandbackText({
+			db: lockedDb,
+			...baseDeps,
+			acquireMaxWaitMs: 30,
+			acquireBackoffMs: 10,
+			sleep: async () => {},
+			runCapture: async () => {
+				captureCalled = true;
+				return "should never run";
+			},
+			readChangeCount: async () => 1,
+		});
+		expect(result.status).toBe("degraded_pty_only");
+		expect(result.text).toBeNull();
+		expect(captureCalled).toBe(false);
+	});
+});
