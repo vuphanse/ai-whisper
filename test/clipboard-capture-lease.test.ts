@@ -218,7 +218,7 @@ describe("clipboard_capture_lease — concurrent-writer safety (halted-workflow 
 										return realRun(...args);
 									};
 								}
-								const v = (s as Record<PropertyKey, unknown>)[p];
+								const v = (s as unknown as Record<PropertyKey, unknown>)[p];
 								return typeof v === "function"
 									? (v as (...a: unknown[]) => unknown).bind(s)
 									: v;
@@ -226,7 +226,7 @@ describe("clipboard_capture_lease — concurrent-writer safety (halted-workflow 
 						});
 					};
 				}
-				const value = (target as Record<PropertyKey, unknown>)[prop];
+				const value = (target as unknown as Record<PropertyKey, unknown>)[prop];
 				return typeof value === "function"
 					? (value as (...a: unknown[]) => unknown).bind(target)
 					: value;

@@ -10,9 +10,9 @@ export async function submitInjectedProviderInput(input: {
 	sleep?: (ms: number) => Promise<void>;
 	/** From the bracketed-paste detector: does codex currently have paste mode on?
 	 *  Doubles as a readiness signal (composer focused). Defaults to false. */
-	bracketedPasteEnabled?: boolean;
+	bracketedPasteEnabled?: boolean | undefined;
 	/** Operator pin (AI_WHISPER_CODEX_SUBMIT_STRATEGY). Overrides auto-detection. */
-	strategyOverride?: CodexSubmitStrategy;
+	strategyOverride?: CodexSubmitStrategy | undefined;
 }): Promise<void> {
 	const sleep =
 		input.sleep ??
