@@ -5,6 +5,28 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-05-30
+
+### Fixed
+
+- **Capture lease no longer throws `database is locked` and halts the
+  workflow.** Root cause of the handback-capture failures: `acquireCaptureLease`
+  ran as a `DEFERRED` transaction (SELECT, then write the lease row). In WAL
+  mode that read→write lock promotion fails with an *immediate* `SQLITE_BUSY`
+  ("database is locked") — `busy_timeout` does **not** cover lock promotions —
+  the moment any other connection commits after the read snapshot. With multiple
+  mount processes sharing `state.db` that race is constant, so the auto-handback
+  capture threw, the throw was swallowed into an empty handback, and the workflow
+  halted with `"No handbackText provided"`. The lease now acquires with `BEGIN
+  IMMEDIATE`, taking the write lock up front so there is no promotion and
+  `busy_timeout` applies again. Defense in depth: the capture poll-acquire loop
+  now treats a residual lock error as "not acquired" and degrades to PTY-only
+  instead of letting it propagate into a swallowed empty handback. The 0.4.1
+  diagnostics are what surfaced this — they are retained.
+- **Reverted the TEMP 30 s lease poll-acquire window** from 0.4.1 back to the
+  4 s default. It never addressed this failure (the poll loop never saw a retry
+  signal — the call *threw*); the `IMMEDIATE` transaction is the actual fix.
+
 ## [0.4.1] - 2026-05-30
 
 ### Fixed
@@ -264,6 +286,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.4.2]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.2
 [0.4.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.3.0
