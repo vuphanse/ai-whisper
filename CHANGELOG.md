@@ -5,6 +5,30 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-05-30
+
+### Changed
+
+- **Codex prompt injection now uses bracketed paste instead of a per-character
+  drip.** The relay typed the inter-agent handoff prompt into codex one
+  character at a time with a 5 ms gap (≈ `len × 5 ms` — ~30 s for a 6 KB prompt,
+  the observed sluggishness). It now writes the whole payload in a single
+  bracketed-paste sequence (`ESC[200~ … ESC[201~`) and submits with one `\r` on
+  a separate beat. Spike- and live-verified against codex v0.135.0, including a
+  10 KB multi-line payload: codex ingests it as one pasted block and submits it
+  cleanly. Large prompts now inject near-instantly.
+
+### Added
+
+- **Resilient submit-strategy selection.** A detector watches codex's PTY output
+  for the bracketed-paste mode toggle (`ESC[?2004h` / `ESC[?2004l`); the codex
+  submit strategy resolves to `override ?? (enabled ? bracketed : keystream)`.
+  The legacy per-character keystream is retained as the automatic fallback — if
+  codex ever stops advertising bracketed paste, selection falls back with no
+  code change. `AI_WHISPER_CODEX_SUBMIT_STRATEGY` (`bracketed` | `keystream` |
+  `chunk`) pins the strategy manually. Embedded paste end-markers in the payload
+  are sanitized so they cannot close the paste early.
+
 ## [0.4.2] - 2026-05-30
 
 ### Fixed
@@ -286,6 +310,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.4.3]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.3
 [0.4.2]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.2
 [0.4.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.0
