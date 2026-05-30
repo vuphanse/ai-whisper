@@ -5,6 +5,37 @@ All notable changes to the `ai-whisper` package are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-30
+
+### Fixed
+
+- **Auto-handback no longer halts under lease contention.** When multiple
+  mount processes share the host-global clipboard-capture lease (typical
+  during cross-project autonomous work), the 4 s acquire window was too
+  short to outlast a competing holder — `runLeasedCapture` would degrade
+  to PTY-only without ever typing `/copy`, and the orchestrator received
+  an empty handback and halted with `"No handbackText provided"` even
+  though the reviewer had produced a substantive response. Raises the
+  poll-acquire window to 30 s (TEMP marker in `mount-session-main.ts`),
+  which absorbs typical contention while remaining invisible end-to-end
+  (auto-handback already waits ≥30 s grace + provider idle). Proper fix
+  per the capture-reliability hardening design is per-provider capture
+  strategies (Phase 2); this is the operator-unblock bridge.
+
+### Added
+
+- **Capture-pipeline diagnostics in the mount stderr.** The auto-handback
+  path in `mounted-turn-owned-relay.ts` was silently swallowing every
+  failure (lease degrade, null short-circuit, unexpected exception),
+  leaving operators with no signal beyond an empty `relay_capture_diagnostics`
+  row. Adds `console.warn`s at every silent exit point — entry trace
+  (`auto-handback fire: target=… handoff=… turnLen=… turnConf=…`), lease
+  degrade (`/copy was NOT executed; PTY fallback only`), `captureHandbackText`
+  null return (`likely no session claim`), and previously-swallowed
+  exceptions (full error + stack). The first three lines now appear in
+  the codex/claude mount terminal so the next halt is immediately
+  diagnosable.
+
 ## [0.4.0] - 2026-05-28
 
 ### Added
@@ -233,6 +264,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Claude + Codex) driven by structured workflows, with npm metadata
   (description, repository, homepage).
 
+[0.4.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.3.0
 [0.2.1]: https://github.com/ai-creed/ai-whisper/releases/tag/v0.2.1
