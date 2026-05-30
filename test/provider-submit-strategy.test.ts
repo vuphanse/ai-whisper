@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { submitInjectedProviderInput } from "../packages/cli/src/runtime/provider-submit-strategy.ts";
 
 describe("provider submit strategy", () => {
-	it("types Codex input as a short keystream before submitting", async () => {
+	it("types Codex input as a short keystream before submitting (default fallback)", async () => {
 		const writes: string[] = [];
 		const sleep = vi.fn(() => Promise.resolve());
 
@@ -36,22 +36,30 @@ describe("provider submit strategy", () => {
 		expect(sleep).toHaveBeenCalledWith(75);
 	});
 
-	// Bug 2026-05-29 — Mode B: multi-line codex prompts never submit.
-	// See docs/superpowers/bugs/2026-05-29-handback-capture-failures.md (Mode B).
-	// When the typed payload contains any embedded LF, codex's TUI auto-enters
-	// multi-line mode. In multi-line mode, a bare \r inserts another newline
-	// instead of submitting — the prompt sits in the box forever, codex never
-	// produces an assistant turn, and /copy returns clip_len=0. Surrounding
-	// codex handoffs with identical prompt shape succeed when typed sequentially;
-	// the failure is timing-sensitive (concurrent collabs slip the per-char
-	// cadence into multi-line mode mid-stream). The fix path is bracketed paste
-	// (\e[200~ … \e[201~) + an explicit submit sequence codex executes even in
-	// multi-line mode (Esc-Enter \r or Ctrl+J "\n"), not bare \r.
-	// TODO(2026-05-29): RED regression guard — skipped until a verified codex
-	// submit sequence is established (its assumption is still unproven; see
-	// docs/superpowers/bugs/2026-05-29-handback-capture-failures.md).
-	describe.skip("Mode B repro — multi-line codex prompts", () => {
-		it("delivers the full multi-line payload AND a submit byte sequence codex executes (not bare \\r absorbed by multi-line mode)", async () => {
+	// Bracketed paste (codex). Spike-validated against codex v0.135.0
+	// (docs/superpowers/specs/2026-05-30-codex-bracketed-paste-injection-design.md):
+	// a single atomic write of ESC[200~ <text> ESC[201~ delivers the whole
+	// (possibly multi-line) prompt as one pasted block — newlines stay literal,
+	// no premature submit — and a single \r on a separate beat submits it.
+	describe("codex — bracketed paste (when enabled)", () => {
+		it("writes the payload wrapped in paste markers in ONE write, then submits with \\r", async () => {
+			const writes: string[] = [];
+			const sleep = vi.fn(() => Promise.resolve());
+
+			await submitInjectedProviderInput({
+				target: "codex",
+				text: "hi",
+				bracketedPasteEnabled: true,
+				writeUserInput: (chunk) => { writes.push(chunk); },
+				sleep,
+			});
+
+			expect(writes).toEqual(["\x1b[200~hi\x1b[201~", "\r"]);
+			expect(sleep).toHaveBeenCalledTimes(1);
+			expect(sleep).toHaveBeenCalledWith(100);
+		});
+
+		it("delivers a multi-line payload literally in one write and submits with \\r (corrected Mode B)", async () => {
 			const writes: string[] = [];
 			const sleep = vi.fn(() => Promise.resolve());
 			const text = ["line 1: do the work", "line 2: verify it", "line 3: report back"].join("\n");
@@ -59,18 +67,75 @@ describe("provider submit strategy", () => {
 			await submitInjectedProviderInput({
 				target: "codex",
 				text,
+				bracketedPasteEnabled: true,
 				writeUserInput: (chunk) => { writes.push(chunk); },
 				sleep,
 			});
 
-			const fullPayload = writes.join("");
-			expect(fullPayload).toContain(text);
+			// One atomic write carries the full multi-line payload, newlines intact.
+			expect(writes[0]).toBe(`\x1b[200~${text}\x1b[201~`);
+			// Unlike the original (disproven) Mode B assumption, a single \r DOES
+			// submit a bracketed paste — the tail IS \r and it works.
+			expect(writes).toHaveLength(2);
+			expect(writes[1]).toBe("\r");
+		});
 
-			// The terminating byte sequence must be one codex executes even when
-			// embedded LFs in the prompt have flipped its input box into multi-line
-			// mode. A bare "\r" is absorbed as a newline in that mode — the bug.
-			const tail = writes[writes.length - 1];
-			expect(tail).not.toBe("\r");
+		it("strips any embedded end-marker so the paste cannot be closed early", async () => {
+			const writes: string[] = [];
+			const sleep = vi.fn(() => Promise.resolve());
+
+			await submitInjectedProviderInput({
+				target: "codex",
+				text: "a\x1b[201~b",
+				bracketedPasteEnabled: true,
+				writeUserInput: (chunk) => { writes.push(chunk); },
+				sleep,
+			});
+
+			expect(writes[0]).toBe("\x1b[200~ab\x1b[201~");
+		});
+
+		it("falls back to the keystream drip when bracketed paste is NOT enabled", async () => {
+			const writes: string[] = [];
+			const sleep = vi.fn(() => Promise.resolve());
+
+			await submitInjectedProviderInput({
+				target: "codex",
+				text: "hi",
+				bracketedPasteEnabled: false,
+				writeUserInput: (chunk) => { writes.push(chunk); },
+				sleep,
+			});
+
+			expect(writes).toEqual(["h", "i", "\r"]);
+		});
+	});
+
+	describe("codex — strategy override", () => {
+		it("strategyOverride=keystream wins over an enabled detector", async () => {
+			const writes: string[] = [];
+			await submitInjectedProviderInput({
+				target: "codex",
+				text: "hi",
+				bracketedPasteEnabled: true,
+				strategyOverride: "keystream",
+				writeUserInput: (chunk) => { writes.push(chunk); },
+				sleep: () => Promise.resolve(),
+			});
+			expect(writes).toEqual(["h", "i", "\r"]);
+		});
+
+		it("strategyOverride=bracketed wins even when the detector is disabled", async () => {
+			const writes: string[] = [];
+			await submitInjectedProviderInput({
+				target: "codex",
+				text: "hi",
+				bracketedPasteEnabled: false,
+				strategyOverride: "bracketed",
+				writeUserInput: (chunk) => { writes.push(chunk); },
+				sleep: () => Promise.resolve(),
+			});
+			expect(writes).toEqual(["\x1b[200~hi\x1b[201~", "\r"]);
 		});
 	});
 });

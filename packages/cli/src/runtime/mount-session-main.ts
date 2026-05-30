@@ -29,8 +29,19 @@ import { createAssistantTurnCapture } from "./assistant-turn-capture.js";
 import { captureClipboardHandback } from "./clipboard-handback-capture.js";
 import { captureHandbackText as runLeasedCapture } from "./capture-handback-text.js";
 import { makeChangeCountReader } from "./clipboard-change-count.js";
-import { submitInjectedProviderInput } from "./provider-submit-strategy.js";
+import {
+	submitInjectedProviderInput,
+	type CodexSubmitStrategy,
+} from "./provider-submit-strategy.js";
+import { createBracketedPasteDetector } from "./bracketed-paste-detector.js";
 import { createRuntimeDebugLogger } from "./runtime-debug-log.js";
+
+/** Operator override for the codex submit strategy (AI_WHISPER_CODEX_SUBMIT_STRATEGY). */
+function resolveCodexSubmitStrategyOverride(): CodexSubmitStrategy | undefined {
+	const raw = process.env.AI_WHISPER_CODEX_SUBMIT_STRATEGY;
+	if (raw === "bracketed" || raw === "keystream" || raw === "chunk") return raw;
+	return undefined;
+}
 
 // changeCount reader for the clipboard capture lease (component 6). Degrades to
 // null off-darwin or when the native helper is missing, so the ownership check
@@ -209,6 +220,8 @@ export function createMountSessionRuntime(input: {
 
 			try {
 				const turnCapture = createAssistantTurnCapture();
+				const bracketedPaste = createBracketedPasteDetector();
+				const codexStrategyOverride = resolveCodexSubmitStrategyOverride();
 				const debugLog = createRuntimeDebugLogger({
 					logPath: process.env.AI_WHISPER_DEBUG_INPUT_LOG ?? null,
 					sessionId: process.env.AI_WHISPER_SESSION_ID ?? null,
@@ -232,11 +245,14 @@ export function createMountSessionRuntime(input: {
 						text,
 						writeUserInput: (value) =>
 							writeInjectedInput("mounted-submit", value),
+						bracketedPasteEnabled: bracketedPaste.enabled,
+						strategyOverride: codexStrategyOverride,
 					});
 				};
 				interactiveSession.onProviderOutput?.((data: string) => {
 					lastActivityAt = Date.now();
 					turnCapture.recordProviderOutput(data);
+					bracketedPaste.observe(data);
 				});
 
 				const onRelay = (
